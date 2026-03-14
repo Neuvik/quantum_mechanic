@@ -37,7 +37,14 @@ dependencies = [
     "sse-starlette>=3.3.2",
     "itsdangerous>=2.2.0",
     "msgpack>=1.1.2",
+    "sqlalchemy>=2.0",
 ]
+
+[project.optional-dependencies]
+postgres = [
+    "psycopg2-binary>=2.9",
+]
+
 
 [project.scripts]
 qm  = "quantum_mechanic.__main__:main"
