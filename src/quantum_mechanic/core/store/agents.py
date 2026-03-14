@@ -3,11 +3,14 @@
 # ----------------------------------------------------------------
 # PURPOSE:   Neutrino C2 agent management and task queue operations
 #            for a workspace. Extracted from workspace.py (RC-2).
+#
+# AR-3: Dual-path — sqlite3 (default) or SQLAlchemy (QM_DATABASE_URL).
 # ================================================================
 
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Callable
@@ -28,6 +31,16 @@ class AgentStore:
         self._db = db
         self._workspace_id = workspace_id
         self._callbacks: list[Callable[[Agent], None]] = []
+        self._use_orm = bool(os.environ.get("QM_DATABASE_URL"))
+        if self._use_orm:
+            self._init_orm(db)
+
+    def _init_orm(self, db: Database) -> None:
+        from quantum_mechanic.core.orm.engine import get_engine
+        from quantum_mechanic.core.orm.session import make_session_factory
+
+        self._engine = get_engine(sqlite_path=db.db_path)
+        self._SessionLocal = make_session_factory(self._engine)
 
     # ----------------------------------------------------------------
     # SSE callback registration (used by qmd dashboard)
@@ -52,6 +65,13 @@ class AgentStore:
 
     def register(self, agent: Agent) -> None:
         """Register or update a Neutrino agent (upsert by agent.id)."""
+        if self._use_orm:
+            self._register_orm(agent)
+        else:
+            self._register_sqlite(agent)
+        self._notify(agent.id)
+
+    def _register_sqlite(self, agent: Agent) -> None:
         self._db.execute(
             """
             INSERT INTO agents
@@ -81,36 +101,101 @@ class AgentStore:
             ),
         )
         self._db.commit()
-        self._notify(agent.id)
+
+    def _register_orm(self, agent: Agent) -> None:
+        from quantum_mechanic.core.orm.tables import AgentRow
+
+        with self._SessionLocal() as session:
+            existing = session.get(AgentRow, agent.id)
+            if existing:
+                existing.hostname = agent.hostname
+                existing.username = agent.username
+                existing.internal_ip = agent.internal_ip
+                existing.platform = agent.platform
+                existing.arch = agent.arch
+                existing.os_version = agent.os_version
+                existing.agent_version = agent.agent_version
+                existing.profile = agent.profile
+                existing.status = agent.status
+                existing.latency_ms = agent.latency_ms
+                existing.last_seen = agent.last_seen
+            else:
+                session.add(
+                    AgentRow(
+                        id=agent.id,
+                        workspace_id=self._workspace_id,
+                        hostname=agent.hostname,
+                        username=agent.username,
+                        internal_ip=agent.internal_ip,
+                        platform=agent.platform,
+                        arch=agent.arch,
+                        os_version=agent.os_version,
+                        agent_version=agent.agent_version,
+                        profile=agent.profile,
+                        status=agent.status,
+                        latency_ms=agent.latency_ms,
+                        registered_at=agent.registered_at,
+                        last_seen=agent.last_seen,
+                    )
+                )
+            session.commit()
 
     def heartbeat(self, agent_id: str, latency_ms: int) -> None:
         """Record an agent heartbeat — refreshes last_seen + resets to active."""
         now = datetime.now(UTC).isoformat()
-        self._db.execute(
-            "UPDATE agents SET last_seen = ?, latency_ms = ?, status = 'active' WHERE id = ?",
-            (now, latency_ms, agent_id),
-        )
-        self._db.commit()
+        if self._use_orm:
+            from quantum_mechanic.core.orm.tables import AgentRow
+
+            with self._SessionLocal() as session:
+                row = session.get(AgentRow, agent_id)
+                if row:
+                    row.last_seen = now
+                    row.latency_ms = latency_ms
+                    row.status = "active"
+                    session.commit()
+        else:
+            self._db.execute(
+                "UPDATE agents SET last_seen = ?, latency_ms = ?, status = 'active' WHERE id = ?",
+                (now, latency_ms, agent_id),
+            )
+            self._db.commit()
         self._notify(agent_id)
 
     def deregister(self, agent_id: str) -> None:
         """Mark an agent inactive (graceful shutdown)."""
-        self._db.execute(
-            "UPDATE agents SET status = 'inactive' WHERE id = ?", (agent_id,)
-        )
-        self._db.commit()
+        self._set_status(agent_id, "inactive")
         self._notify(agent_id)
 
     def revoke(self, agent_id: str) -> None:
         """Revoke an agent — future connections will be refused."""
-        self._db.execute(
-            "UPDATE agents SET status = 'revoked' WHERE id = ?", (agent_id,)
-        )
-        self._db.commit()
+        self._set_status(agent_id, "revoked")
         self._notify(agent_id)
+
+    def _set_status(self, agent_id: str, status: str) -> None:
+        if self._use_orm:
+            from quantum_mechanic.core.orm.tables import AgentRow
+
+            with self._SessionLocal() as session:
+                row = session.get(AgentRow, agent_id)
+                if row:
+                    row.status = status
+                    session.commit()
+        else:
+            self._db.execute(
+                "UPDATE agents SET status = ? WHERE id = ?", (status, agent_id)
+            )
+            self._db.commit()
 
     def get(self, agent_id: str) -> Agent | None:
         """Retrieve an agent by ID."""
+        if self._use_orm:
+            from quantum_mechanic.core.orm.tables import AgentRow
+
+            with self._SessionLocal() as session:
+                row = session.get(AgentRow, agent_id)
+                if row is None:
+                    return None
+                return self._orm_to_agent(row)
         row = self._db.fetchone("SELECT * FROM agents WHERE id = ?", (agent_id,))
         if row is None:
             return None
@@ -124,19 +209,41 @@ class AgentStore:
         """Enqueue a task for an agent. Returns the new task UUID."""
         task_id = str(uuid.uuid4())
         now = datetime.now(UTC).isoformat()
-        self._db.execute(
-            """
-            INSERT INTO tasks
-                (id, workspace_id, agent_id, command, args, status, created_at)
-            VALUES (?, ?, ?, ?, ?, 'pending', ?)
-            """,
-            (task_id, self._workspace_id, agent_id, command, args, now),
-        )
-        self._db.commit()
+        if self._use_orm:
+            from quantum_mechanic.core.orm.tables import TaskRow
+
+            with self._SessionLocal() as session:
+                session.add(
+                    TaskRow(
+                        id=task_id,
+                        workspace_id=self._workspace_id,
+                        agent_id=agent_id,
+                        command=command,
+                        args=args,
+                        status="pending",
+                        created_at=now,
+                    )
+                )
+                session.commit()
+        else:
+            self._db.execute(
+                """
+                INSERT INTO tasks
+                    (id, workspace_id, agent_id, command, args, status, created_at)
+                VALUES (?, ?, ?, ?, ?, 'pending', ?)
+                """,
+                (task_id, self._workspace_id, agent_id, command, args, now),
+            )
+            self._db.commit()
         return task_id
 
     def pop_tasks(self, agent_id: str) -> list[Task]:
         """Fetch all pending tasks and atomically mark them running."""
+        if self._use_orm:
+            return self._pop_tasks_orm(agent_id)
+        return self._pop_tasks_sqlite(agent_id)
+
+    def _pop_tasks_sqlite(self, agent_id: str) -> list[Task]:
         rows = self._db.fetchall(
             """
             SELECT id, agent_id, command, args, status, output, error,
@@ -168,6 +275,40 @@ class AgentStore:
             self._db.commit()
         return tasks
 
+    def _pop_tasks_orm(self, agent_id: str) -> list[Task]:
+        from sqlalchemy import select
+
+        from quantum_mechanic.core.orm.tables import TaskRow
+
+        with self._SessionLocal() as session:
+            rows = session.scalars(
+                select(TaskRow).where(
+                    TaskRow.workspace_id == self._workspace_id,
+                    TaskRow.agent_id == agent_id,
+                    TaskRow.status == "pending",
+                )
+            ).all()
+
+            tasks = []
+            for r in rows:
+                r.status = "running"
+                tasks.append(
+                    Task(
+                        id=r.id,
+                        agent_id=r.agent_id,
+                        command=r.command,
+                        args=r.args,
+                        status="running",
+                        output=r.output,
+                        error=r.error,
+                        created_at=r.created_at,
+                        completed_at=r.completed_at,
+                    )
+                )
+            if tasks:
+                session.commit()
+        return tasks
+
     def process_task_response(
         self,
         task_id: str,
@@ -178,15 +319,27 @@ class AgentStore:
         """Update a task with its final result from the agent."""
         now = datetime.now(UTC).isoformat()
         status = "completed" if success else "failed"
-        self._db.execute(
-            """
-            UPDATE tasks
-            SET status = ?, output = ?, error = ?, completed_at = ?
-            WHERE id = ? AND workspace_id = ?
-            """,
-            (status, output, error, now, task_id, self._workspace_id),
-        )
-        self._db.commit()
+        if self._use_orm:
+            from quantum_mechanic.core.orm.tables import TaskRow
+
+            with self._SessionLocal() as session:
+                row = session.get(TaskRow, task_id)
+                if row and row.workspace_id == self._workspace_id:
+                    row.status = status
+                    row.output = output
+                    row.error = error
+                    row.completed_at = now
+                    session.commit()
+        else:
+            self._db.execute(
+                """
+                UPDATE tasks
+                SET status = ?, output = ?, error = ?, completed_at = ?
+                WHERE id = ? AND workspace_id = ?
+                """,
+                (status, output, error, now, task_id, self._workspace_id),
+            )
+            self._db.commit()
 
     # ================================================================
     # Internal helpers
@@ -207,4 +360,21 @@ class AgentStore:
             latency_ms=row["latency_ms"],
             registered_at=row["registered_at"],
             last_seen=row["last_seen"],
+        )
+
+    def _orm_to_agent(self, row) -> Agent:
+        return Agent(
+            id=row.id,
+            hostname=row.hostname,
+            username=row.username,
+            internal_ip=row.internal_ip,
+            platform=row.platform,
+            arch=row.arch,
+            os_version=row.os_version,
+            agent_version=row.agent_version,
+            profile=row.profile,
+            status=row.status,
+            latency_ms=row.latency_ms,
+            registered_at=row.registered_at,
+            last_seen=row.last_seen,
         )

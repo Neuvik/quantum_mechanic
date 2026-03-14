@@ -3,11 +3,14 @@
 # ----------------------------------------------------------------
 # PURPOSE:   Compute instance and network asset upsert/list for a
 #            workspace. Extracted from workspace.py (RC-2).
+#
+# AR-3: Dual-path — sqlite3 (default) or SQLAlchemy (QM_DATABASE_URL).
 # ================================================================
 
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -22,6 +25,20 @@ class AssetStore:
     def __init__(self, db: Database, workspace_id: str) -> None:
         self._db = db
         self._workspace_id = workspace_id
+        self._use_orm = bool(os.environ.get("QM_DATABASE_URL"))
+        if self._use_orm:
+            self._init_orm(db)
+
+    def _init_orm(self, db: Database) -> None:
+        from quantum_mechanic.core.orm.engine import get_engine
+        from quantum_mechanic.core.orm.session import make_session_factory
+
+        self._engine = get_engine(sqlite_path=db.db_path)
+        self._SessionLocal = make_session_factory(self._engine)
+
+    # ================================================================
+    # Compute instances
+    # ================================================================
 
     def upsert_compute_instance(
         self,
@@ -40,11 +57,15 @@ class AssetStore:
         security_group_ids: str = "[]",
         metadata: str = "{}",
     ) -> None:
-        """Insert or update a compute instance record.
-
-        Uses ON CONFLICT … DO UPDATE so repeated enum_compute runs
-        update in place rather than stacking duplicate rows.
-        """
+        """Insert or update a compute instance record."""
+        if self._use_orm:
+            return self._upsert_compute_orm(
+                provider=provider, instance_id=instance_id, name=name,
+                state=state, instance_type=instance_type, private_ip=private_ip,
+                public_ip=public_ip, subnet_id=subnet_id, image_id=image_id,
+                identity_arn=identity_arn, identity_name=identity_name,
+                security_group_ids=security_group_ids, metadata=metadata,
+            )
         now = datetime.now(UTC).isoformat()
         self._db.execute(
             """
@@ -77,6 +98,93 @@ class AssetStore:
         )
         self._db.commit()
 
+    def _upsert_compute_orm(self, **kwargs) -> None:
+        from sqlalchemy import select
+
+        from quantum_mechanic.core.orm.tables import ComputeInstanceRow
+
+        now = datetime.now(UTC).isoformat()
+        with self._SessionLocal() as session:
+            existing = session.scalars(
+                select(ComputeInstanceRow).where(
+                    ComputeInstanceRow.workspace_id == self._workspace_id,
+                    ComputeInstanceRow.provider == kwargs["provider"],
+                    ComputeInstanceRow.instance_id == kwargs["instance_id"],
+                )
+            ).first()
+
+            if existing:
+                existing.name = kwargs.get("name")
+                existing.state = kwargs.get("state")
+                existing.instance_type = kwargs.get("instance_type")
+                existing.private_ip = kwargs.get("private_ip")
+                existing.public_ip = kwargs.get("public_ip")
+                existing.subnet_id = kwargs.get("subnet_id")
+                existing.image_id = kwargs.get("image_id")
+                existing.identity_arn = kwargs.get("identity_arn")
+                existing.identity_name = kwargs.get("identity_name")
+                existing.security_group_ids = kwargs.get("security_group_ids", "[]")
+                existing.metadata = kwargs.get("metadata", "{}")
+                existing.last_seen = now
+            else:
+                session.add(
+                    ComputeInstanceRow(
+                        workspace_id=self._workspace_id,
+                        provider=kwargs["provider"],
+                        instance_id=kwargs["instance_id"],
+                        name=kwargs.get("name"),
+                        state=kwargs.get("state"),
+                        instance_type=kwargs.get("instance_type"),
+                        private_ip=kwargs.get("private_ip"),
+                        public_ip=kwargs.get("public_ip"),
+                        subnet_id=kwargs.get("subnet_id"),
+                        image_id=kwargs.get("image_id"),
+                        identity_arn=kwargs.get("identity_arn"),
+                        identity_name=kwargs.get("identity_name"),
+                        security_group_ids=kwargs.get("security_group_ids", "[]"),
+                        metadata=kwargs.get("metadata", "{}"),
+                        first_seen=now,
+                        last_seen=now,
+                    )
+                )
+            session.commit()
+
+    def list_compute_instances(self, *, provider: str | None = None) -> list[dict]:
+        """Return all known compute instances, optionally filtered by provider."""
+        if self._use_orm:
+            return self._list_compute_orm(provider=provider)
+        sql = "SELECT * FROM compute_instances WHERE workspace_id = ?"
+        params: list[Any] = [self._workspace_id]
+        if provider:
+            sql += " AND provider = ?"
+            params.append(provider)
+        sql += " ORDER BY provider, instance_id"
+        rows = self._db.fetchall(sql, tuple(params))
+        return [dict(r) for r in rows]
+
+    def _list_compute_orm(self, *, provider: str | None) -> list[dict]:
+        from sqlalchemy import select
+
+        from quantum_mechanic.core.orm.tables import ComputeInstanceRow
+
+        with self._SessionLocal() as session:
+            stmt = (
+                select(ComputeInstanceRow)
+                .where(ComputeInstanceRow.workspace_id == self._workspace_id)
+                .order_by(ComputeInstanceRow.provider, ComputeInstanceRow.instance_id)
+            )
+            if provider:
+                stmt = stmt.where(ComputeInstanceRow.provider == provider)
+            rows = session.scalars(stmt).all()
+            return [
+                {c.key: getattr(r, c.key) for c in ComputeInstanceRow.__table__.columns}
+                for r in rows
+            ]
+
+    # ================================================================
+    # Network assets
+    # ================================================================
+
     def upsert_network_asset(
         self,
         *,
@@ -88,6 +196,11 @@ class AssetStore:
         metadata: str = "{}",
     ) -> None:
         """Insert or update a network asset (subnet, SG, VPC, etc.)."""
+        if self._use_orm:
+            return self._upsert_network_orm(
+                provider=provider, asset_type=asset_type, asset_id=asset_id,
+                name=name, region=region, metadata=metadata,
+            )
         now = datetime.now(UTC).isoformat()
         self._db.execute(
             """
@@ -108,13 +221,39 @@ class AssetStore:
         )
         self._db.commit()
 
-    def list_compute_instances(self, *, provider: str | None = None) -> list[dict]:
-        """Return all known compute instances, optionally filtered by provider."""
-        sql = "SELECT * FROM compute_instances WHERE workspace_id = ?"
-        params: list[Any] = [self._workspace_id]
-        if provider:
-            sql += " AND provider = ?"
-            params.append(provider)
-        sql += " ORDER BY provider, instance_id"
-        rows = self._db.fetchall(sql, tuple(params))
-        return [dict(r) for r in rows]
+    def _upsert_network_orm(self, **kwargs) -> None:
+        from sqlalchemy import select
+
+        from quantum_mechanic.core.orm.tables import NetworkAssetRow
+
+        now = datetime.now(UTC).isoformat()
+        with self._SessionLocal() as session:
+            existing = session.scalars(
+                select(NetworkAssetRow).where(
+                    NetworkAssetRow.workspace_id == self._workspace_id,
+                    NetworkAssetRow.provider == kwargs["provider"],
+                    NetworkAssetRow.asset_type == kwargs["asset_type"],
+                    NetworkAssetRow.asset_id == kwargs["asset_id"],
+                )
+            ).first()
+
+            if existing:
+                existing.name = kwargs.get("name")
+                existing.region = kwargs.get("region")
+                existing.metadata = kwargs.get("metadata", "{}")
+                existing.last_seen = now
+            else:
+                session.add(
+                    NetworkAssetRow(
+                        workspace_id=self._workspace_id,
+                        provider=kwargs["provider"],
+                        asset_type=kwargs["asset_type"],
+                        asset_id=kwargs["asset_id"],
+                        name=kwargs.get("name"),
+                        region=kwargs.get("region"),
+                        metadata=kwargs.get("metadata", "{}"),
+                        first_seen=now,
+                        last_seen=now,
+                    )
+                )
+            session.commit()
