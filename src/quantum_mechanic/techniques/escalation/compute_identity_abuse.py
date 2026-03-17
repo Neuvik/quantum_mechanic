@@ -104,7 +104,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from typing import Any
@@ -176,9 +175,8 @@ def _abuse_aws(ctx: ExecutionContext) -> dict[str, Any]:
       subnet_id                   (optional)
       keep_instance               (optional — default: false)
     """
-    try:
-        from botocore.exceptions import BotoCoreError, ClientError
-    except ImportError:
+    import importlib.util
+    if importlib.util.find_spec("botocore") is None:
         return {"error": "boto3 is required for this technique."}
 
     # ----------------------------------------------------------
@@ -198,7 +196,7 @@ def _abuse_aws(ctx: ExecutionContext) -> dict[str, Any]:
 
     region = params.get("region", "us-east-1")
     source_instance_id = params.get("source_instance_id", "").strip() or None
-    keep_instance = params.get("keep_instance", "").lower() in ("true", "1", "yes")
+    params.get("keep_instance", "").lower() in ("true", "1", "yes")
 
     try:
         # Re-use the authenticated session; set region if the user specified one
@@ -250,13 +248,11 @@ def _abuse_aws(ctx: ExecutionContext) -> dict[str, Any]:
         # ----------------------------------------------------------
         key_name = params.get("key_name", "").strip() or None
         key_material = None
-        key_created = False
         student_tag = params.get("student_tag", "qm-operator")
         if not key_name:
             key_name = f"{student_tag}-qm-{int(time.time())}"
             key_resp = ec2.create_key_pair(KeyName=key_name)
             key_material = key_resp["KeyMaterial"]
-            key_created = True
             ctx.log(f"Created temporary EC2 key pair: {key_name}")
 
         # ----------------------------------------------------------
@@ -371,8 +367,10 @@ def _abuse_azure(ctx: ExecutionContext) -> dict[str, Any]:
     try:
         from azure.mgmt.compute import ComputeManagementClient
         from azure.mgmt.compute.models import (
-            HardwareProfile, NetworkProfile, OSDisk,
-            OSProfile, StorageProfile, VirtualMachine,
+            HardwareProfile,
+            OSProfile,
+            StorageProfile,
+            VirtualMachine,
             VirtualMachineIdentity,
         )
     except ImportError:

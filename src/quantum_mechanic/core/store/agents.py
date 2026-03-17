@@ -12,8 +12,9 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from quantum_mechanic.core.database import Database
 from quantum_mechanic.core.store.models import Agent, Task
@@ -200,6 +201,28 @@ class AgentStore:
         if row is None:
             return None
         return self._row_to_agent(row)
+
+    def list_ids(self) -> list[str]:
+        """Return all agent IDs ordered by last_seen descending."""
+        if self._use_orm:
+            from quantum_mechanic.core.orm.tables import AgentRow
+
+            with self._SessionLocal() as session:
+                rows = session.query(AgentRow.id).order_by(AgentRow.last_seen.desc()).all()
+                return [r[0] for r in rows]
+        rows = self._db.fetchall("SELECT id FROM agents ORDER BY last_seen DESC")
+        return [r["id"] for r in rows]
+
+    def list_stale(self, before_iso: str) -> list[dict]:
+        """Return active agents whose last_seen is before the given ISO timestamp.
+
+        Used by the receiver lifecycle monitor to detect missed heartbeats.
+        """
+        rows = self._db.fetchall(
+            "SELECT id, last_seen FROM agents WHERE status = 'active' AND last_seen < ?",
+            (before_iso,),
+        )
+        return [dict(r) for r in rows]
 
     # ================================================================
     # Task queue

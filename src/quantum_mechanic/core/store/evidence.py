@@ -103,6 +103,23 @@ class EvidenceStore:
         )
         return [dict(r) for r in rows]
 
+    def list_for_credential(self, credential_id: int, *, limit: int = 5) -> list[dict]:
+        """Return recent evidence rows for a specific credential.
+
+        Used by the RAG orchestrator to gather context for agent advice.
+        """
+        rows = self._db.fetchall(
+            """
+            SELECT technique_id, output_json
+            FROM evidence
+            WHERE credential_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (credential_id, limit),
+        )
+        return [dict(r) for r in rows]
+
     def _list_orm(self) -> list[dict]:
         from sqlalchemy import select
 

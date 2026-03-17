@@ -42,6 +42,8 @@ class ShellState:
         self.loader = loader or TechniqueLoader()
         self.registry = registry or ProviderRegistry()
         self._transport = transport  # explicit transport override (e.g. RemoteTransport)
+        self.active_credential_id: int | None = None
+        self.active_credential_label: str | None = None
 
     @property
     def transport(self) -> Transport | None:
@@ -72,28 +74,30 @@ class ShellState:
     def prompt_context(self) -> str:
         """Build the prompt context string.
 
-        Remote mode:  qm[remote:alice@qmd.example.com:8443]
-        Local mode:   qm[workspace][provider:identity]
+        Remote mode:  qm[remote:alice@qmd.example.com:8443][cred:1]
+        Local mode:   qm[workspace][cred:1]
         """
         parts = ["qm"]
 
-        # Remote (thin-client) mode — transport is set, shows server context.
         if self._transport is not None:
             op   = getattr(self._transport, "operator", None)
             host = getattr(self._transport, "host", None)
             if op and host:
                 parts.append(f"[remote:{op}@{host}]")
-            return "".join(parts)
-
-        # Local/unified mode — show workspace and active credential.
-        if self.workspace:
+        elif self.workspace:
             parts.append(f"[{self.workspace.name}]")
-            cred_id = self.workspace.active_credential_id
-            if cred_id is not None:
-                cred = self.workspace.get_credential(cred_id)
-                if cred:
-                    identity = cred.friendly_name or cred.provider
-                    parts.append(f"[{cred.provider}:{identity}]")
+
+        if self.active_credential_label is not None:
+            parts.append(f"[{self.active_credential_label}]")
+        elif self.active_credential_id is not None:
+            parts.append(f"[cred:{self.active_credential_id}]")
+        elif self.workspace and self.workspace.active_credential_id:
+            # Fallback for when state wasn't updated via `use` but workspace has one
+            cred = self.workspace.get_credential(self.workspace.active_credential_id)
+            if cred:
+                identity = cred.friendly_name or cred.provider
+                parts.append(f"[{cred.provider}:{identity}]")
+
         return "".join(parts)
 
 
@@ -146,8 +150,8 @@ def cmd_workspace(state: ShellState, args: list[str]) -> None:
 
 def cmd_import(state: ShellState, args: list[str]) -> None:
     """Import credentials: import <provider> [options]."""
-    if state.workspace is None:
-        console.print("  [red]✗[/red] No active workspace. Run 'workspace create <name>' first.")
+    if state.transport is None:
+        console.print("  [red]✗[/red] No active workspace/connection. Run 'workspace create <name>' first.")
         return
 
     if not args:
@@ -211,12 +215,11 @@ def _validate_and_import(
     # --------------------------------------------------------
     # Credentials are valid — store them.
     # --------------------------------------------------------
-    cred_id = state.workspace.add_credential(  # type: ignore[union-attr]
+    cred_id = state.transport.add_credential(  # type: ignore[union-attr]
         provider=provider,
         credential_type=credential_type,
         secret_data=json.dumps(secret),
         friendly_name=friendly,
-        obtained_via="manual import",
     )
     console.print(
         f"  [green]✓[/green] Imported {provider.upper()} credential #{cred_id}: {friendly}"
@@ -310,7 +313,7 @@ def _import_oci(state: ShellState, opts: dict[str, str]) -> None:
 
 def cmd_creds(state: ShellState, args: list[str]) -> None:
     """List or delete credentials: creds, creds delete <id>."""
-    if state.workspace is None:
+    if state.transport is None:
         console.print("  [red]✗[/red] No active workspace.")
         return
 
@@ -324,8 +327,10 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
         except ValueError:
             console.print(f"  [red]✗[/red] Invalid credential ID: {args[1]}")
             return
-        if state.workspace.delete_credential(cred_id):
+        if state.transport.delete_credential(cred_id):
             console.print(f"  [green]✓[/green] Deleted credential #{cred_id}")
+            if state.active_credential_id == cred_id:
+                state.active_credential_id = None
         else:
             console.print(f"  [red]✗[/red] Credential #{cred_id} not found")
         return
@@ -338,14 +343,17 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
         elif arg == "--active":
             status = "active"
 
-    creds = state.workspace.list_credentials(provider=provider, status=status)
+    # NOTE: Transport natively doesn't filter by status, but we can filter it locally
+    creds = state.transport.list_credentials(provider=provider)
+    if status:
+        creds = [c for c in creds if c.get("status") == status]
     formatters.format_credentials(creds)
 
 
 def cmd_use(state: ShellState, args: list[str]) -> None:
     """Set the active credential: use <id>."""
-    if state.workspace is None:
-        console.print("  [red]✗[/red] No active workspace.")
+    if state.transport is None:
+        console.print("  [red]✗[/red] No active workspace/connection.")
         return
 
     if not args:
@@ -354,13 +362,22 @@ def cmd_use(state: ShellState, args: list[str]) -> None:
 
     try:
         cred_id = int(args[0])
-        state.workspace.active_credential_id = cred_id
-        cred = state.workspace.get_credential(cred_id)
+        creds = state.transport.list_credentials()
+        cred = next((c for c in creds if c.get("id") == cred_id), None)
         if cred:
-            identity = cred.friendly_name or cred.credential_type
+            state.active_credential_id = cred_id
+            if state.workspace:
+                state.workspace.active_credential_id = cred_id
+
+            provider = cred.get('provider', 'unknown')
+            identity = cred.get("friendly_name") or cred.get("credential_type", "unknown")
+            state.active_credential_label = f"{provider}:{identity}"
+
             console.print(
-                f"  [green]✓[/green] Active: {cred.provider.upper()} {identity} (#{cred_id})"
+                f"  [green]✓[/green] Active: {provider.upper()} {identity} (#{cred_id})"
             )
+        else:
+            console.print(f"  [red]✗[/red] Credential #{cred_id} not found")
     except ValueError:
         console.print(f"  [red]✗[/red] Invalid credential ID: {args[0]}")
 
@@ -393,7 +410,11 @@ def cmd_run(state: ShellState, args: list[str]) -> None:
         else:
             i += 1
 
-    result = state.transport.run_technique(technique_id, params=params if params else None)
+    result = state.transport.run_technique(
+        technique_id,
+        params=params if params else None,
+        credential_id=state.active_credential_id
+    )
     formatters.format_technique_result(result)
 
 
@@ -403,10 +424,11 @@ def cmd_techniques(state: ShellState, args: list[str]) -> None:
     # Determine active provider for filtered listing.
     # --------------------------------------------------------
     active_provider = None
-    if state.workspace and state.workspace.active_credential_id:
-        cred = state.workspace.get_credential(state.workspace.active_credential_id)
+    if state.transport and state.active_credential_id:
+        creds = state.transport.list_credentials()
+        cred = next((c for c in creds if c.get("id") == state.active_credential_id), None)
         if cred:
-            active_provider = cred.provider
+            active_provider = cred.get("provider")
 
     if state.transport is not None:
         # Go through transport — works in both local and remote mode.
@@ -432,6 +454,7 @@ def cmd_techniques(state: ShellState, args: list[str]) -> None:
 
 def cmd_raw(state: ShellState, args: list[str]) -> None:
     """Show raw JSON data for an entity: raw <credential_id>."""
+    # Only available in local mode for now since RemoteTransport doesn't expose raw data yet.
     if state.workspace is None:
         console.print("  [red]✗[/red] No active workspace.")
         return
@@ -505,8 +528,6 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
     import importlib
     import inspect
 
-    from rich import box
-    from rich.table import Table
 
     if args:
         tech_id = args[0].strip("/")
@@ -579,19 +600,21 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
     from rich.table import Table
     from rich.tree import Tree
 
-    if state.workspace is None:
-        console.print("  [red]✗[/red] No active workspace. Load one first.")
+    if state.transport is None:
+        console.print("  [red]✗[/red] No active workspace/connection. Load one first.")
         return
 
-    ws = state.workspace
+    transport = state.transport
+    info = transport.workspace_info()
+    ws_name = info.get("name", "Unknown Workspace")
 
     # ── Header ──────────────────────────────────────────────────────
     from datetime import UTC, datetime
     now_str = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
-    creds_all = ws.list_credentials()
-    providers = ", ".join(sorted({c.provider.upper() for c in creds_all})) or "none"
+    creds_all = transport.list_credentials()
+    providers = ", ".join(sorted({c.get("provider", "unknown").upper() for c in creds_all})) or "none"
     console.print(Panel(
-        f"[bold white]Attack Path — {ws.name}[/bold white]\n"
+        f"[bold white]Attack Path — {ws_name}[/bold white]\n"
         f"[dim]Updated: {now_str}   Providers: {providers}[/dim]",
         style="blue",
     ))
@@ -604,21 +627,23 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
     else:
         children: dict[int | None, list] = {}
         for c in creds_all:
-            children.setdefault(c.derived_from_id, []).append(c)
+            children.setdefault(c.get("derived_from_id"), []).append(c)
 
         def _render_tree(tree_node, cred_id: int | None) -> None:
             for c in children.get(cred_id, []):
-                name = c.friendly_name or c.credential_type
-                obtained = f" ← {c.obtained_via}" if c.obtained_via else ""
-                status_style = "red" if c.status == "expired" else (
-                    "yellow" if c.status == "expiring" else "green"
+                name = c.get("friendly_name") or c.get("credential_type", "unknown")
+                obtained_via = c.get("obtained_via")
+                obtained = f" ← {obtained_via}" if obtained_via else ""
+                status = c.get("status", "unknown")
+                status_style = "red" if status == "expired" else (
+                    "yellow" if status == "expiring" else "green"
                 )
                 label = (
-                    f"[bold]#{c.id}[/bold] [{status_style}]{c.provider.upper()}[/{status_style}] "
+                    f"[bold]#{c.get('id')}[/bold] [{status_style}]{c.get('provider', 'unknown').upper()}[/{status_style}] "
                     f"`{name}`[dim]{obtained}[/dim]"
                 )
                 branch = tree_node.add(label)
-                _render_tree(branch, c.id)
+                _render_tree(branch, c.get("id"))
 
         root_tree = Tree("[bold]Credentials[/bold]")
         _render_tree(root_tree, None)
@@ -626,7 +651,7 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
 
     # ── Technique Timeline ───────────────────────────────────────────
     console.print("\n[bold cyan]Technique Timeline[/bold cyan]")
-    evidence_rows = ws.list_evidence()
+    evidence_rows = transport.list_evidence()
     if not evidence_rows:
         console.print("  [dim]No techniques have been run yet.[/dim]")
     else:
@@ -659,7 +684,7 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
 
     # ── Findings ─────────────────────────────────────────────────────
     console.print("\n[bold cyan]Findings[/bold cyan]")
-    findings = ws.list_findings()
+    findings = transport.list_findings()
     if not findings:
         console.print("  [dim]No findings recorded yet.[/dim]")
     else:

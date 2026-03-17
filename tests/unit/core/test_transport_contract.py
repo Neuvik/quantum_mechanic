@@ -115,6 +115,58 @@ def local_transport(workspace, loader, mock_aws_registry):
     return LocalTransport(workspace, loader, mock_aws_registry)
 
 
+class _TimeoutStrippingClient:
+    """Wraps Starlette TestClient, stripping ``timeout`` kwargs.
+
+    RemoteTransport passes ``timeout=`` to every HTTP call.  Starlette's
+    TestClient fires a DeprecationWarning when it receives that kwarg.
+    This adapter silently drops it so that the transport code doesn't
+    need to know it's running in tests.
+    """
+
+    def __init__(self, client):
+        self._client = client
+
+    def __getattr__(self, name):
+        attr = getattr(self._client, name)
+        if not callable(attr):
+            return attr
+
+        def _wrapper(*args, **kwargs):
+            kwargs.pop("timeout", None)
+            return attr(*args, **kwargs)
+
+        return _wrapper
+
+
+class _TestClientAdapter:
+    def __init__(self, client):
+        self.client = _TimeoutStrippingClient(client)
+    def __enter__(self): return self.client
+    def __exit__(self, *args): pass
+
+
+@pytest.fixture
+def remote_transport(workspace, loader, mock_aws_registry):
+    """RemoteTransport backed by a real TestClient — no TLS, full route coverage."""
+    from fastapi.testclient import TestClient
+    from quantum_mechanic.daemon.server import build_app, get_operator
+    from quantum_mechanic.core.transport import RemoteTransport
+
+    app = build_app(workspace, loader, mock_aws_registry)
+    app.dependency_overrides[get_operator] = lambda: "alice"
+    client = TestClient(app)
+
+    rt = RemoteTransport.__new__(RemoteTransport)
+    class DummyToken:
+        operator = "alice"
+        host = "http://testserver"
+    rt._token = DummyToken()
+    rt._timeout = 30.0
+    rt._make_client = lambda: _TestClientAdapter(client)
+    return rt
+
+
 # ================================================================
 # MODULE STRUCTURE: Transport is an ABC
 # ================================================================
@@ -148,7 +200,7 @@ class TestRunTechniqueContract:
               that ran, with a deterministic status field.
     """
 
-    @pytest.mark.parametrize("transport_fixture", ["local_transport"])
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
     def test_known_technique_returns_technique_result(self, request, transport_fixture):
         """
         OUTCOME: run_technique returns TechniqueResult, not an exception.
@@ -162,7 +214,7 @@ class TestRunTechniqueContract:
 
         assert isinstance(result, TechniqueResult)
 
-    @pytest.mark.parametrize("transport_fixture", ["local_transport"])
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
     def test_result_technique_id_matches_what_was_requested(self, request, transport_fixture):
         """
         OUTCOME: The result names the technique that ran.
@@ -176,7 +228,7 @@ class TestRunTechniqueContract:
 
         assert result.technique_id == "discovery/whoami"
 
-    @pytest.mark.parametrize("transport_fixture", ["local_transport"])
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
     def test_result_status_is_one_of_the_valid_states(self, request, transport_fixture):
         """
         OUTCOME: Status is a known value — never free-form noise.
@@ -191,7 +243,7 @@ class TestRunTechniqueContract:
             f"Unknown status '{result.status}' — add it to the contract if intentional."
         )
 
-    @pytest.mark.parametrize("transport_fixture", ["local_transport"])
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
     def test_unknown_technique_returns_error_result_not_exception(self, request, transport_fixture):
         """
         SCENARIO: Operator mistypes a technique ID.
@@ -206,7 +258,7 @@ class TestRunTechniqueContract:
         assert result.error is not None
         assert len(result.error) > 0
 
-    @pytest.mark.parametrize("transport_fixture", ["local_transport"])
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
     def test_missing_credential_returns_error_result_not_exception(
         self, tmp_path, request, transport_fixture, loader, mock_aws_registry
     ):
@@ -224,7 +276,7 @@ class TestRunTechniqueContract:
         assert result.error is not None
         ws.close()
 
-    @pytest.mark.parametrize("transport_fixture", ["local_transport"])
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
     def test_no_active_credential_returns_error_result_not_exception(
         self, tmp_path, request, transport_fixture, loader, mock_aws_registry
     ):
@@ -243,7 +295,7 @@ class TestRunTechniqueContract:
         assert "credential" in result.error.lower()
         ws.close()
 
-    @pytest.mark.parametrize("transport_fixture", ["local_transport"])
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
     def test_successful_result_includes_provider(self, request, transport_fixture):
         """
         OUTCOME: A successful result names the provider it ran against.
@@ -258,7 +310,7 @@ class TestRunTechniqueContract:
             f"Result provider '{result.provider}' is not a known cloud provider."
         )
 
-    @pytest.mark.parametrize("transport_fixture", ["local_transport"])
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
     def test_error_result_never_has_status_success(self, request, transport_fixture):
         """
         OUTCOME: Error results are never mislabelled as success.
@@ -282,14 +334,14 @@ class TestListTechniquesContract:
     OUTCOME:  A list of technique metadata with at least one entry.
     """
 
-    @pytest.mark.parametrize("transport_fixture", ["local_transport"])
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
     def test_list_techniques_returns_a_sequence(self, request, transport_fixture):
         transport = request.getfixturevalue(transport_fixture)
         result = transport.list_techniques()
 
         assert hasattr(result, "__iter__"), "list_techniques must return an iterable"
 
-    @pytest.mark.parametrize("transport_fixture", ["local_transport"])
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
     def test_list_techniques_is_not_empty(self, request, transport_fixture):
         """
         OUTCOME: At least one technique is always available.
@@ -302,7 +354,7 @@ class TestListTechniquesContract:
 
         assert len(result) > 0, "Transport returned zero techniques — loader is broken."
 
-    @pytest.mark.parametrize("transport_fixture", ["local_transport"])
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
     def test_list_techniques_each_has_id_and_provider(self, request, transport_fixture):
         """
         OUTCOME: Every technique entry has at minimum an id and provider list.
@@ -320,7 +372,7 @@ class TestListTechniquesContract:
                 f"Technique entry lacks 'providers': {t}"
             )
 
-    @pytest.mark.parametrize("transport_fixture", ["local_transport"])
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
     def test_filter_by_provider_returns_only_matching(self, request, transport_fixture):
         """
         SCENARIO: Agent filters techniques for the active provider.
@@ -512,3 +564,65 @@ class TestTransportChaosContract:
             assert result.technique_id == "discovery/whoami", (
                 f"Run {i} returned wrong technique_id '{result.technique_id}'"
             )
+
+# ================================================================
+# CONTRACT: Workspace Data Methods
+# ================================================================
+
+class TestWorkspaceDataContract:
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
+    def test_workspace_info(self, request, transport_fixture):
+        transport = request.getfixturevalue(transport_fixture)
+        info = transport.workspace_info()
+        assert "name" in info
+        assert "id" in info
+
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
+    def test_credentials_crud(self, request, transport_fixture):
+        transport = request.getfixturevalue(transport_fixture)
+        
+        # Add
+        cid = transport.add_credential(
+            provider="aws",
+            credential_type="access_key",
+            secret_data='{"test": "data"}',
+            friendly_name="test-crud",
+        )
+        assert cid > 0
+        
+        # List
+        creds = transport.list_credentials()
+        assert isinstance(creds, list)
+        assert len(creds) >= 1
+        assert any(c["id"] == cid for c in creds)
+        
+        # List by provider
+        aws_creds = transport.list_credentials(provider="aws")
+        assert any(c["id"] == cid for c in aws_creds)
+        
+        # Delete
+        deleted = transport.delete_credential(cid)
+        assert deleted is True
+        
+        # Verify deletion
+        creds_after = transport.list_credentials()
+        assert not any(c["id"] == cid for c in creds_after)
+
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
+    def test_list_findings(self, request, transport_fixture):
+        transport = request.getfixturevalue(transport_fixture)
+        findings = transport.list_findings()
+        assert isinstance(findings, list)
+
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
+    def test_list_evidence(self, request, transport_fixture):
+        transport = request.getfixturevalue(transport_fixture)
+        evidence = transport.list_evidence()
+        assert isinstance(evidence, list)
+
+    @pytest.mark.parametrize("transport_fixture", ["local_transport", "remote_transport"])
+    def test_list_agents(self, request, transport_fixture):
+        transport = request.getfixturevalue(transport_fixture)
+        agents = transport.list_agents()
+        assert isinstance(agents, list)
+

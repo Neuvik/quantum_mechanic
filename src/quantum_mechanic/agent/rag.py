@@ -15,7 +15,6 @@ RAG — Retrieval-Augmented Generation engine for QM Agent.
 
 import logging
 from pathlib import Path
-from typing import List
 
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -33,18 +32,18 @@ VECTORSTORE_DIR = DEFAULT_WORKSPACE_DIR.parent / "vectorstore"
 
 def build_or_load_vectorstore(docs_dir: Path | str, rebuild: bool = False) -> Chroma:
     """Load the technique documentation, chunk it, and store in Chroma.
-    
+
     If rebuild=False and the vectorstore exists, it will simply be loaded.
-    
+
     Args:
         docs_dir: Path to the docs/ directory containing Markdown files.
         rebuild: Whether to force rebuild the vector database.
-        
+
     Returns:
         The instantiated Chroma vector store.
     """
     embed_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    
+
     if VECTORSTORE_DIR.exists() and not rebuild:
         logger.debug("Loading existing Chroma vector store from %s", VECTORSTORE_DIR)
         return Chroma(persist_directory=str(VECTORSTORE_DIR), embedding_function=embed_model)
@@ -55,9 +54,9 @@ def build_or_load_vectorstore(docs_dir: Path | str, rebuild: bool = False) -> Ch
         shutil.rmtree(VECTORSTORE_DIR, ignore_errors=True)
 
     VECTORSTORE_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     logger.info("Initializing Markdown document crawler on %s", docs_dir)
-    
+
     # Base loader to just read text of all .md files
     loader = DirectoryLoader(
         str(docs_dir),
@@ -66,7 +65,7 @@ def build_or_load_vectorstore(docs_dir: Path | str, rebuild: bool = False) -> Ch
     )
     raw_docs = loader.load()
     logger.info("Loaded %d markdown documents from techniques library", len(raw_docs))
-    
+
     # We want to split out by headers to isolate "Attack Paths (Next Steps)"
     headers_to_split_on = [
         ("#", "Header 1"),
@@ -74,8 +73,8 @@ def build_or_load_vectorstore(docs_dir: Path | str, rebuild: bool = False) -> Ch
         ("###", "Header 3"),
     ]
     markdown_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
-    
-    md_header_splits: List[Document] = []
+
+    md_header_splits: list[Document] = []
     for doc in raw_docs:
         # Split the document
         splits = markdown_splitter.split_text(doc.page_content)
@@ -83,23 +82,23 @@ def build_or_load_vectorstore(docs_dir: Path | str, rebuild: bool = False) -> Ch
         for split in splits:
             split.metadata["source"] = doc.metadata.get("source", "unknown")
         md_header_splits.extend(splits)
-        
+
     # Standard chunking inside those headers
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=200,
         length_function=len
     )
-    
+
     final_splits = text_splitter.split_documents(md_header_splits)
     logger.info("Created %d semantic chunks for RAG context", len(final_splits))
-    
+
     logger.info("Embedding technique documentation into Chroma DB (this may take a minute...)")
     db = Chroma.from_documents(
         final_splits,
         embed_model,
         persist_directory=str(VECTORSTORE_DIR)
     )
-    
+
     logger.info("Vector database successfully initialized.")
     return db

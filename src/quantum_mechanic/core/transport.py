@@ -25,7 +25,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Iterator
+from collections.abc import Iterator
 
 from quantum_mechanic.core.loader import TechniqueLoader
 from quantum_mechanic.core.runner import TechniqueResult, TechniqueRunner
@@ -86,6 +86,48 @@ class Transport(ABC):
         Returns:
             Iterator of TechniqueMetadata. Never empty if techniques loaded.
         """
+
+    @abstractmethod
+    def workspace_info(self) -> dict:
+        """Returns basic workspace metadata."""
+
+    @abstractmethod
+    def list_credentials(
+        self, provider: str | None = None, status: str | None = None
+    ) -> list[dict]:
+        """List stored credentials."""
+
+    @abstractmethod
+    def add_credential(
+        self,
+        *,
+        provider: str,
+        credential_type: str,
+        secret_data: str,
+        friendly_name: str,
+        principal_id: str | None = None,
+        derived_from_id: int | None = None,
+        obtained_via: str = "manual import",
+        expires_at: str | None = None,
+        auto_refresh: bool = False,
+    ) -> int:
+        """Add a credential."""
+
+    @abstractmethod
+    def delete_credential(self, cred_id: int) -> bool:
+        """Delete a credential."""
+
+    @abstractmethod
+    def list_findings(self) -> list[dict]:
+        """List all findings."""
+
+    @abstractmethod
+    def list_evidence(self) -> list[dict]:
+        """List all evidence records."""
+
+    @abstractmethod
+    def list_agents(self) -> list[dict]:
+        """List all agents."""
 
 
 class LocalTransport(Transport):
@@ -172,6 +214,71 @@ class LocalTransport(Transport):
             for registered in self._loader.list_all():
                 yield registered.metadata
 
+    def workspace_info(self) -> dict:
+        """Returns basic workspace metadata."""
+        return {
+            "name": self._workspace.name,
+            "id": self._workspace.name,
+            "active_credential_id": self._workspace.active_credential_id,
+        }
+
+    def list_credentials(
+        self, provider: str | None = None, status: str | None = None
+    ) -> list[dict]:
+        """List stored credentials from the local workspace."""
+        creds = self._workspace.list_credentials(provider=provider, status=status)
+        return [c.__dict__ for c in creds]
+
+    def add_credential(
+        self,
+        *,
+        provider: str,
+        credential_type: str,
+        secret_data: str,
+        friendly_name: str,
+        principal_id: str | None = None,
+        derived_from_id: int | None = None,
+        obtained_via: str = "manual import",
+        expires_at: str | None = None,
+        auto_refresh: bool = False,
+    ) -> int:
+        """Add a credential to the local workspace."""
+        from datetime import datetime
+        expires = datetime.fromisoformat(expires_at) if expires_at else None
+        return self._workspace.add_credential(
+            provider=provider,
+            credential_type=credential_type,
+            secret_data=secret_data,
+            friendly_name=friendly_name,
+            principal_id=principal_id,
+            derived_from_id=derived_from_id,
+            obtained_via=obtained_via,
+            expires_at=expires,
+            auto_refresh=auto_refresh,
+        )
+
+    def delete_credential(self, cred_id: int) -> bool:
+        """Delete a credential from the local workspace."""
+        return self._workspace.delete_credential(cred_id)
+
+    def list_findings(self) -> list[dict]:
+        """List all findings from the local workspace."""
+        return self._workspace.list_findings()
+
+    def list_evidence(self) -> list[dict]:
+        """List all evidence records from the local workspace."""
+        return self._workspace.list_evidence()
+
+    def list_agents(self) -> list[dict]:
+        """List all agents from the local workspace."""
+        from dataclasses import asdict
+        agents = []
+        for agent_id in self._workspace.list_agent_ids():
+            a = self._workspace.get_agent(agent_id)
+            if a:
+                agents.append(asdict(a))
+        return agents
+
 
 class RemoteTransport(Transport):
     """mTLS transport — sends technique requests to a qmd server over HTTPS.
@@ -190,7 +297,7 @@ class RemoteTransport(Transport):
 
     def __init__(
         self,
-        token: "OperatorToken | str",
+        token: OperatorToken | str,
         *,
         timeout: float = 30.0,
     ) -> None:
@@ -322,12 +429,115 @@ class RemoteTransport(Transport):
         except Exception:
             return  # Yield nothing — caller handles empty gracefully.
 
+    def workspace_info(self) -> dict:
+        """Fetch workspace info from qmd."""
+        try:
+            with self._make_client() as client:
+                r = client.get(f"{self.base_url}/workspace", timeout=self._timeout)
+                r.raise_for_status()
+                return r.json()
+        except Exception:
+            return {}
+
+    def list_credentials(
+        self, provider: str | None = None, status: str | None = None
+    ) -> list[dict]:
+        """List stored credentials from qmd."""
+        try:
+            params = {}
+            if provider:
+                params["provider"] = provider
+            if status:
+                params["status"] = status
+            with self._make_client() as client:
+                r = client.get(f"{self.base_url}/credentials", params=params, timeout=self._timeout)
+                r.raise_for_status()
+                return r.json()
+        except Exception:
+            return []
+
+    def add_credential(
+        self,
+        *,
+        provider: str,
+        credential_type: str,
+        secret_data: str,
+        friendly_name: str,
+        principal_id: str | None = None,
+        derived_from_id: int | None = None,
+        obtained_via: str = "manual import",
+        expires_at: str | None = None,
+        auto_refresh: bool = False,
+    ) -> int:
+        """Add a credential to qmd."""
+        try:
+            with self._make_client() as client:
+                r = client.post(
+                    f"{self.base_url}/credentials",
+                    json={
+                        "provider": provider,
+                        "credential_type": credential_type,
+                        "secret_data": secret_data,
+                        "friendly_name": friendly_name,
+                        "principal_id": principal_id,
+                        "derived_from_id": derived_from_id,
+                        "obtained_via": obtained_via,
+                        "expires_at": expires_at,
+                        "auto_refresh": auto_refresh,
+                    },
+                    timeout=self._timeout,
+                )
+                r.raise_for_status()
+                return r.json()["id"]
+        except Exception:
+            return 0
+
+    def delete_credential(self, cred_id: int) -> bool:
+        """Delete a credential on qmd."""
+        try:
+            with self._make_client() as client:
+                r = client.delete(f"{self.base_url}/credentials/{cred_id}", timeout=self._timeout)
+                r.raise_for_status()
+                return r.json()["deleted"]
+        except Exception:
+            return False
+
+    def list_findings(self) -> list[dict]:
+        """List all findings from qmd."""
+        try:
+            with self._make_client() as client:
+                r = client.get(f"{self.base_url}/findings", timeout=self._timeout)
+                r.raise_for_status()
+                return r.json()
+        except Exception:
+            return []
+
+    def list_evidence(self) -> list[dict]:
+        """List all evidence records from qmd."""
+        try:
+            with self._make_client() as client:
+                r = client.get(f"{self.base_url}/evidence", timeout=self._timeout)
+                r.raise_for_status()
+                return r.json()
+        except Exception:
+            return []
+
+    def list_agents(self) -> list[dict]:
+        """List all agents from qmd."""
+        try:
+            with self._make_client() as client:
+                r = client.get(f"{self.base_url}/agents", timeout=self._timeout)
+                r.raise_for_status()
+                return r.json()
+        except Exception:
+            return []
+
     # ----------------------------------------------------------------
     # Internal: mTLS client factory.
     # Broken out so tests can patch it without reaching into httpx internals.
     # ----------------------------------------------------------------
 
-    def _make_client(self) -> "httpx.Client":
+    def _make_client(self) -> httpx.Client:
         """Build an httpx.Client configured for mTLS with the engagement CA.
 
         The CA cert is pinned: system trust store is intentionally ignored.

@@ -21,7 +21,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 # ================================================================
 # Summary result — what agent mode outputs instead of raw data.
 # ================================================================
@@ -292,8 +291,8 @@ _SUMMARIZERS: dict[str, Any] = {
 # ================================================================
 
 def _generic_summary(data: dict, technique_id: str) -> tuple[str, list[str], dict]:
-    total = data.get("total", None)
-    provider = data.get("provider", "")
+    total = data.get("total")
+    data.get("provider", "")
     if total is not None:
         summary = f"{technique_id} found {total} item(s)."
     else:

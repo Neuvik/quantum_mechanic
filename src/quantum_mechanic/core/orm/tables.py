@@ -28,7 +28,6 @@
 from __future__ import annotations
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
     ForeignKey,
     Index,

@@ -156,10 +156,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         # Determine the command ID for the RunCommand API.
         # Windows VMs use "RunPowerShellScript"; Linux uses "RunShellScript".
         # ----------------------------------------------------------
-        if shell == "powershell":
-            command_id = "RunPowerShellScript"
-        else:
-            command_id = "RunShellScript"
+        command_id = "RunPowerShellScript" if shell == "powershell" else "RunShellScript"
 
         run_input = RunCommandInput(
             command_id=command_id,

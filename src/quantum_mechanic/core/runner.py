@@ -323,11 +323,12 @@ class TechniqueRunner:
 
         # 3. Markdown note + 4. findings rows
         from pathlib import Path as _Path
+
         from quantum_mechanic.agent.summarizer import summarize as _sum
         from quantum_mechanic.evidence import attack_path as _ap
         from quantum_mechanic.evidence import writer as _wr
 
-        workspace_dir = _Path(self.workspace.db.db_path).parent
+        workspace_dir = _Path(self.workspace.workspace_dir)
         tactic = registered.metadata.tactic
         agent_summary = _sum(
             technique_id=technique_id,

@@ -21,7 +21,6 @@ from rich.text import Text
 
 from quantum_mechanic.core.loader import RegisteredTechnique
 from quantum_mechanic.core.runner import TechniqueResult
-from quantum_mechanic.core.workspace import Credential
 from quantum_mechanic.providers.base import WhoAmIResult
 
 console = Console()
@@ -40,7 +39,7 @@ def format_banner() -> None:
     console.print(Panel(banner, border_style="cyan", expand=False))
 
 
-def format_credentials(creds: list[Credential]) -> None:
+def format_credentials(creds: list[dict]) -> None:
     """Display credentials as a rich table."""
     if not creds:
         console.print("  No credentials loaded. Run 'import' to add one.", style="dim")
@@ -57,21 +56,22 @@ def format_credentials(creds: list[Credential]) -> None:
         # --------------------------------------------------------
         # Color the status based on credential health.
         # --------------------------------------------------------
+        status = cred.get("status", "unknown")
         status_style = {
             "active": "bold green",
             "expiring": "bold yellow",
             "expired": "bold red",
             "revoked": "bold red",
-        }.get(cred.status, "dim")
+        }.get(status, "dim")
 
-        identity = cred.friendly_name or cred.principal_id or "unknown"
+        identity = cred.get("friendly_name") or cred.get("principal_id") or "unknown"
 
         table.add_row(
-            str(cred.id),
-            cred.provider.upper(),
-            cred.credential_type,
+            str(cred.get("id", "?")),
+            cred.get("provider", "unknown").upper(),
+            cred.get("credential_type", "unknown"),
             identity,
-            Text(cred.status, style=status_style),
+            Text(status, style=status_style),
         )
 
     console.print(table)
@@ -266,7 +266,7 @@ def format_enum_iam_result(result: TechniqueResult) -> None:
     if provider == "aws":
         attached_policies = data.get("attached_policies", [])
         inline_policies = data.get("inline_policies", [])
-        
+
         if not attached_policies and not inline_policies:
             console.print("  [dim]No attached or inline IAM policies found.[/dim]")
             return
@@ -278,7 +278,7 @@ def format_enum_iam_result(result: TechniqueResult) -> None:
             for p in attached_policies:
                 table.add_row(p.get("PolicyName", ""), p.get("PolicyArn", ""))
             console.print(table)
-            
+
         if inline_policies:
             table = Table(box=box.ROUNDED, border_style="dim", title="Inline Policies", title_style="bold yellow")
             table.add_column("Policy Name", style="white")
@@ -291,7 +291,7 @@ def format_enum_iam_result(result: TechniqueResult) -> None:
         if not assignments:
             console.print("  [dim]No Azure role assignments found.[/dim]")
             return
-            
+
         table = Table(box=box.ROUNDED, border_style="dim", title="Azure Role Assignments", title_style="bold cyan")
         table.add_column("Role Name", style="bold white")
         table.add_column("Scope", style="dim")
@@ -305,7 +305,7 @@ def format_enum_iam_result(result: TechniqueResult) -> None:
         if not roles:
             console.print("  [dim]No GCP IAM roles found.[/dim]")
             return
-            
+
         table = Table(box=box.ROUNDED, border_style="dim", title="GCP Project Roles", title_style="bold cyan")
         table.add_column("Project", style="bold white")
         table.add_column("Role", style="green")
@@ -318,7 +318,7 @@ def format_enum_iam_result(result: TechniqueResult) -> None:
     elif provider == "oci":
         groups = data.get("groups", [])
         policies = data.get("tenancy_policies", [])
-        
+
         if not groups and not policies:
             console.print("  [dim]No OCI groups or tenancy policies found.[/dim]")
             return
@@ -330,7 +330,7 @@ def format_enum_iam_result(result: TechniqueResult) -> None:
             for g in groups:
                 table.add_row(g.get("name", ""), g.get("id", ""))
             console.print(table)
-            
+
         if policies:
             table = Table(box=box.ROUNDED, border_style="dim", title="OCI Tenancy Policies", title_style="bold yellow")
             table.add_column("Policy Name", style="bold white")

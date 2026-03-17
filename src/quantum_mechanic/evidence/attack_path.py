@@ -24,7 +24,6 @@ import logging
 import textwrap
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from quantum_mechanic.core.workspace import Workspace
 
@@ -88,7 +87,7 @@ def _build_technique_timeline(workspace: Workspace) -> str:
     for i, row in enumerate(evidence_rows, 1):
         ts = str(row.get("timestamp", ""))[:16]
         tech = row.get("technique_id", "unknown")
-        cred_id = row.get("credential_id", "?")
+        row.get("credential_id", "?")
 
         # Attempt to get provider from output_json
         import json

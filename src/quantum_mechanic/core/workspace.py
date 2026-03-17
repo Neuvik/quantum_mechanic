@@ -17,12 +17,13 @@ from pathlib import Path
 from typing import Any
 
 from quantum_mechanic.core.database import Database
+from quantum_mechanic.core.store.accounts import AccountStore
 from quantum_mechanic.core.store.agents import AgentStore
 from quantum_mechanic.core.store.assets import AssetStore
 from quantum_mechanic.core.store.credentials import CredentialStore
 from quantum_mechanic.core.store.evidence import EvidenceStore
 from quantum_mechanic.core.store.findings import FindingStore
-
+from quantum_mechanic.core.store.principals import PrincipalStore
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ from quantum_mechanic.core.store.models import (  # noqa: F401 — re-exported f
     Principal,
     Task,
 )
+
 
 class Workspace:
     """High-level workspace operations.
@@ -58,11 +60,13 @@ class Workspace:
         # Workspace delegates every domain method here, keeping
         # the ORM migration (AR-3) domain-by-domain.
         # --------------------------------------------------------
+        self._accounts    = AccountStore(db, self.id)
+        self._agents      = AgentStore(db, self.id)
+        self._assets      = AssetStore(db, self.id)
         self._credentials = CredentialStore(db, self.id)
-        self._evidence     = EvidenceStore(db, self.id)
-        self._findings     = FindingStore(db, self.id)
-        self._assets       = AssetStore(db, self.id)
-        self._agents       = AgentStore(db, self.id)
+        self._evidence    = EvidenceStore(db, self.id)
+        self._findings    = FindingStore(db, self.id)
+        self._principals  = PrincipalStore(db, self.id)
 
     def on_agent_update(self, cb) -> None:
         """Register a callback for agent updates (used by SSE)."""
@@ -144,71 +148,28 @@ class Workspace:
 
 
     # ================================================================
-    # Account operations (not yet extracted — remain inline)
+    # Account operations — delegates to AccountStore
     # ================================================================
 
     def add_account(self, account: Account) -> None:
         """Add or update a cloud account."""
-        self.db.execute(
-            """
-            INSERT OR REPLACE INTO accounts
-                (id, provider, name, account_type, parent_id, metadata)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                account.id, account.provider, account.name,
-                account.account_type, account.parent_id, account.metadata,
-            ),
-        )
-        self.db.commit()
+        return self._accounts.add(account)
 
     def get_account(self, account_id: str) -> Account | None:
         """Retrieve an account by ID."""
-        row = self.db.fetchone("SELECT * FROM accounts WHERE id = ?", (account_id,))
-        if row is None:
-            return None
-        return Account(
-            id=row["id"], provider=row["provider"], name=row["name"],
-            account_type=row["account_type"], parent_id=row["parent_id"],
-            metadata=row["metadata"],
-        )
+        return self._accounts.get(account_id)
 
     # ================================================================
-    # Principal operations (not yet extracted — remain inline)
+    # Principal operations — delegates to PrincipalStore
     # ================================================================
 
     def add_principal(self, principal: Principal) -> None:
         """Add or update a principal."""
-        self.db.execute(
-            """
-            INSERT OR REPLACE INTO principals
-                (id, provider, account_id, principal_type, friendly_name,
-                 is_admin_equivalent, raw_data)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                principal.id, principal.provider, principal.account_id,
-                principal.principal_type, principal.friendly_name,
-                int(principal.is_admin_equivalent), principal.raw_data,
-            ),
-        )
-        self.db.commit()
+        return self._principals.add(principal)
 
     def get_principal(self, provider: str, principal_id: str) -> Principal | None:
         """Retrieve a principal by provider and ID."""
-        row = self.db.fetchone(
-            "SELECT * FROM principals WHERE provider = ? AND id = ?",
-            (provider, principal_id),
-        )
-        if row is None:
-            return None
-        return Principal(
-            id=row["id"], provider=row["provider"],
-            account_id=row["account_id"], principal_type=row["principal_type"],
-            friendly_name=row["friendly_name"],
-            is_admin_equivalent=bool(row["is_admin_equivalent"]),
-            raw_data=row["raw_data"],
-        )
+        return self._principals.get(provider, principal_id)
 
     def add_credential(
         self,
@@ -265,48 +226,7 @@ class Workspace:
         """Link a credential to a discovered principal."""
         return self._credentials.update_principal(cred_id, principal_id, friendly_name)
 
-    # ================================================================
-    # Principal operations
-    # ================================================================
 
-    def add_principal(self, principal: Principal) -> None:
-        """Add or update a principal."""
-        self.db.execute(
-            """
-            INSERT OR REPLACE INTO principals
-                (id, provider, account_id, principal_type, friendly_name,
-                 is_admin_equivalent, raw_data)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                principal.id,
-                principal.provider,
-                principal.account_id,
-                principal.principal_type,
-                principal.friendly_name,
-                int(principal.is_admin_equivalent),
-                principal.raw_data,
-            ),
-        )
-        self.db.commit()
-
-    def get_principal(self, provider: str, principal_id: str) -> Principal | None:
-        """Retrieve a principal by provider and ID."""
-        row = self.db.fetchone(
-            "SELECT * FROM principals WHERE provider = ? AND id = ?",
-            (provider, principal_id),
-        )
-        if row is None:
-            return None
-        return Principal(
-            id=row["id"],
-            provider=row["provider"],
-            account_id=row["account_id"],
-            principal_type=row["principal_type"],
-            friendly_name=row["friendly_name"],
-            is_admin_equivalent=bool(row["is_admin_equivalent"]),
-            raw_data=row["raw_data"],
-        )
 
     # ================================================================
     # API log — delegates to EvidenceStore
@@ -397,6 +317,32 @@ class Workspace:
     def list_compute_instances(self, *, provider: str | None = None) -> list[dict]:
         """Return all known compute instances, optionally filtered by provider."""
         return self._assets.list_compute_instances(provider=provider)
+
+    # ================================================================
+    # Convenience accessors (Phase 2 — eliminate .db reach-through)
+    # ================================================================
+
+    @property
+    def db_path(self) -> Path:
+        """Path to the SQLite database file."""
+        return self.db.db_path
+
+    @property
+    def workspace_dir(self) -> Path:
+        """Parent directory of the workspace database."""
+        return self.db.db_path.parent
+
+    def list_agent_ids(self) -> list[str]:
+        """Return all agent IDs (used by transport/server for listing)."""
+        return self._agents.list_ids()
+
+    def list_stale_agents(self, before_iso: str) -> list[dict]:
+        """Return active agents whose last_seen is before the given timestamp."""
+        return self._agents.list_stale(before_iso)
+
+    def list_evidence_for_credential(self, credential_id: int, *, limit: int = 5) -> list[dict]:
+        """Return recent evidence rows for a specific credential."""
+        return self._evidence.list_for_credential(credential_id, limit=limit)
 
     # ================================================================
     # Lifecycle

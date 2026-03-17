@@ -84,7 +84,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         result = {
             "error": f"Provider {ctx.provider_name} not yet implemented.",
         }
-        
+
     # Analyze discovered permissions to generate actionable guidance
     if "allowed_actions" in result and getattr(result, "get", lambda x: None)("status") == "success":
         steps = _generate_next_steps(ctx.provider_name, result.get("allowed_actions", []))
@@ -96,7 +96,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
 def _enum_aws(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
     """Enumerate AWS permissions using IAM Policy Simulator and DryRuns."""
-    
+
     # High-value targets for QM v1
     ACTIONS_TO_TEST = [
         "iam:PassRole",
@@ -109,15 +109,15 @@ def _enum_aws(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         "iam:CreateUser",
         "iam:CreateAccessKey"
     ]
-    
+
     allowed = []
     denied = []
     errors = []
-    
+
     arn = whoami_res.principal_id
-    
+
     iamv2 = ctx.session.client("iam")
-    
+
     # Approach 1: Try IAM Policy Simulator natively
     try:
         paginator = iamv2.get_paginator("simulate_principal_policy")
@@ -125,7 +125,7 @@ def _enum_aws(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
             for result in page.get("EvaluationResults", []):
                 action = result.get("EvalActionName")
                 decision = result.get("EvalDecision")
-                
+
                 if decision == "allowed":
                     allowed.append(action)
                 elif decision in ("implicitDeny", "explicitDeny"):
@@ -148,11 +148,11 @@ def _enum_aws(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
     # Approach 2: Active API Call Probing / DryRun Fallback
     # If we lack permission to use the simulator, we must actively check the endpoints.
     # Note: Not all AWS actions support DryRun. For simplicity in the MVP, we will only DryRun what we can.
-    
+
     active_allowed = []
     active_denied = []
     active_errors = []
-    
+
     ec2_client = ctx.session.client("ec2")
     try:
         # Check ec2:DescribeInstances
@@ -165,7 +165,7 @@ def _enum_aws(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
             active_denied.append("ec2:DescribeInstances")
         else:
             active_errors.append(f"ec2:DescribeInstances unknown error: {str(e)}")
-            
+
     try:
         # Check ec2:RunInstances (basic check, no parameters means it might fail on MissingParameter, but we can check UnauthorizedOperation first)
         ec2_client.run_instances(DryRun=True, MaxCount=1, MinCount=1)
@@ -227,10 +227,10 @@ def _enum_azure(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         sub_id = sub["id"]
         try:
             auth_client = AuthorizationManagementClient(ctx.session, sub_id)
-            
+
             # This API calculates the caller's effective permissions for the given subscription.
             sub_permissions = auth_client.permissions.list_for_subscription()
-            
+
             for perm in sub_permissions:
                 if perm.actions:
                     allowed_actions.update(perm.actions)
@@ -240,7 +240,7 @@ def _enum_azure(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
                     data_actions.update(perm.data_actions)
                 if perm.not_data_actions:
                     not_data_actions.update(perm.not_data_actions)
-                    
+
         except Exception as e:
             msg = getattr(e, "message", str(e))
             logger.warning(f"Could not list permissions for subscription {sub_id}: {msg}")
@@ -316,7 +316,7 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
                 "permissions": ACTIONS_TO_TEST
             }
             response = client.test_iam_permissions(request=req)
-            
+
             perms = response.permissions if hasattr(response, "permissions") else response.get("permissions", [])
             for action in ACTIONS_TO_TEST:
                 if action in perms:
@@ -354,7 +354,7 @@ def _enum_oci(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
 def _generate_next_steps(provider: str, allowed: list[str]) -> list[str]:
     """Correlate allowed permissions with actionable Quantum Mechanic techniques."""
     steps = []
-    
+
     if provider == "aws":
         if "iam:PassRole" in allowed and "ec2:RunInstances" in allowed:
             steps.append("You have ec2:RunInstances and iam:PassRole. Use 'escalation/compute_identity_abuse' to launch an EC2 instance and steal target IAM roles via IMDS.")
@@ -362,19 +362,19 @@ def _generate_next_steps(provider: str, allowed: list[str]) -> list[str]:
             steps.append("You can assume other roles. Use 'escalation/assume_role_chain' to scan for accessible roles.")
         if "ssm:SendCommand" in allowed:
             steps.append("You can execute commands on EC2 instances. Check for managed instances and use SSM to gain RCE.")
-            
+
     elif provider == "azure":
-        # Note: action strings from ARM are usually exact or wildcard matched. 
+        # Note: action strings from ARM are usually exact or wildcard matched.
         # We check substring to be safe with Azure's permission string casing.
         allowed_lower = [a.lower() for a in allowed]
-        
+
         if any("runcommand/action" in a for a in allowed_lower):
             steps.append("You can execute code on Virtual Machines. Use 'lateral_movement/azure_run_command' to gain RCE on targets.")
         if any("roleassignments/write" in a for a in allowed_lower):
             steps.append("You have RBAC write access. You can assign yourself or others Highly Privileged roles (e.g., Owner/Contributor).")
         if any("managedidentities/assign/action" in a for a in allowed_lower) and any("virtualmachines/write" in a for a in allowed_lower):
             steps.append("You can attach Managed Identities to VMs. Use 'escalation/compute_identity_abuse' to steal their access tokens.")
-            
+
     elif provider == "gcp":
         if "iam.serviceAccounts.actAs" in allowed and "compute.instances.create" in allowed:
             steps.append("You can launch Compute Engine instances with Service Accounts. Use 'escalation/compute_identity_abuse' to harvest their tokens.")

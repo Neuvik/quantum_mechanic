@@ -73,11 +73,6 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         Dictionary of assumed roles and their derived credential IDs.
     """
     try:
-        from botocore.exceptions import BotoCoreError, ClientError
-    except ImportError:
-        return {"error": "boto3 not installed.", "chains": []}
-
-    try:
         # Identify the caller so we know what to match in trust policies
         sts = ctx.session.client("sts")
         caller = sts.get_caller_identity()

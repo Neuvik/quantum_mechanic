@@ -77,19 +77,19 @@ class GCPAuthProvider(AuthProvider):
             # --------------------------------------------------------
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                
+
                 # Silence google.auth logger to avoid stderr spam about missing project IDs
                 google_logger = logging.getLogger("google.auth")
                 old_level = google_logger.level
                 google_logger.setLevel(logging.ERROR)
-                
+
                 try:
                     credentials, project = google.auth.default(
                         scopes=["https://www.googleapis.com/auth/cloud-platform"]
                     )
                 finally:
                     google_logger.setLevel(old_level)
-                    
+
             return credentials
 
         if method == "service_account_file":
