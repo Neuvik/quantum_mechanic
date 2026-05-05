@@ -16,11 +16,13 @@ import contextlib
 import json
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from quantum_mechanic.core.context import ExecutionContext
+from quantum_mechanic.core.context import EventCallback, ExecutionContext
 from quantum_mechanic.core.loader import TechniqueLoader
+from quantum_mechanic.core.telemetry import TelemetryEvent, TelemetryLevel, TelemetryType
 from quantum_mechanic.core.workspace import Workspace
 from quantum_mechanic.providers.base import ProviderRegistry
 
@@ -39,6 +41,11 @@ class TechniqueResult:
     error: str | None = None
     api_calls: int = 0
     duration_ms: int = 0
+    loot_path: str | None = None  # Path to loot dir; set after successful run
+    formatter_func: Callable | None = None  # Function to render rich output
+    loot_schema: list[tuple[str, str | None, str | None]] | None = None
+    loot_items_key: str | None = None
+    params: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dict for JSON serialization."""
@@ -97,86 +104,114 @@ class TechniqueRunner:
         safe_mode: bool = False,
         params: dict | None = None,
         operator: str | None = None,
+        on_event: EventCallback | None = None,
+        extra_providers: list[str] | None = None,
     ) -> TechniqueResult:
-        """Execute a technique.
-
-        Args:
-            technique_id: ID of the technique to run.
-            credential_id: Override active credential. Uses
-                workspace's active credential if not specified.
-            safe_mode: If True, run in check-only mode.
-            params: Arbitrary key/value parameters passed to ctx.params.
-            operator: Authenticated operator name for audit attribution.
-
-        Returns:
-            TechniqueResult with status and data.
-        """
+        """Execute a technique."""
         start = time.monotonic()
 
-        # --- Resolve technique ------------------------------------------
-        registered = self._resolve_technique(technique_id)
-        if registered is None:
+        # 1. Resolve & Validate
+        registered, cred, error_res, effective_provider = self._resolve_all(
+            technique_id, credential_id, extra_providers=extra_providers
+        )
+        if error_res:
+            return error_res
+
+        # 1.1 Parameter Validation
+        valid_params, param_err = self._validate_params(registered, params or {})
+        if param_err:
             return TechniqueResult(
                 technique_id=technique_id,
-                provider="unknown",
+                provider=cred.provider if cred else "unknown",
                 status="error",
-                error=f"Technique '{technique_id}' not found. Run 'techniques' to see available.",
+                error=param_err
             )
 
-        # --- Resolve credential -----------------------------------------
-        cred_id = credential_id or self.workspace.active_credential_id
-        cred, err = self._resolve_credential(technique_id, cred_id, registered)
-        if err is not None:
-            return err
+        # 2. Authenticate & Build Context
+        if cred is not None:
+            session, err = self._build_session(
+                technique_id, cred.id, cred, effective_provider=effective_provider
+            )
+            if err is not None:
+                return err
+            ctx_provider = (
+                self.registry.get(effective_provider)
+                if effective_provider and effective_provider != cred.provider
+                else self.registry.get(cred.provider)
+            )
+            cred_id_for_ctx = cred.id
+            provider_name_for_event = cred.provider
+        else:
+            # providers=[] technique — no credential, no session
+            session = None
+            ctx_provider = None
+            cred_id_for_ctx = None
+            provider_name_for_event = "none"
 
-        # --- Authenticate -----------------------------------------------
-        session, err = self._build_session(technique_id, cred_id, cred)
-        if err is not None:
-            return err
-
-        # --- Build execution context ------------------------------------
         ctx = ExecutionContext(
             workspace=self.workspace,
-            credential_id=cred_id,
-            provider=self.registry.get(cred.provider),
+            credential_id=cred_id_for_ctx,
+            provider=ctx_provider,
             session=session,
             technique_id=technique_id,
             safe_mode=safe_mode,
-            params=params,
+            params=valid_params,
+            on_event=on_event,
         )
 
-        # --- Execute technique ------------------------------------------
+        # Emit Start Event
+        ctx._emit(TelemetryEvent(
+            technique_id=technique_id,
+            event_type=TelemetryType.TASK_START,
+            message=f"Starting technique: {technique_id}",
+            data={"provider": provider_name_for_event, "safe_mode": safe_mode}
+        ))
+
+        # 3. Execute
         try:
             result_data = registered.function(ctx)
             duration_ms = int((time.monotonic() - start) * 1000)
 
-            if result_data is not None:
-                try:
-                    self._persist_evidence(
-                        registered=registered,
-                        technique_id=technique_id,
-                        cred=cred,
-                        cred_id=cred_id,
-                        result_data=result_data,
-                        duration_ms=duration_ms,
-                        ctx=ctx,
-                    )
-                except Exception as ev_err:
-                    logger.warning("Evidence write failed for %s: %s", technique_id, ev_err)
+            loot_dir = self._handle_post_execution(
+                registered, technique_id, cred, result_data, duration_ms, ctx
+            )
+
+            # Emit End Event
+            ctx._emit(TelemetryEvent(
+                technique_id=technique_id,
+                event_type=TelemetryType.TASK_END,
+                level=TelemetryLevel.SUCCESS,
+                message=f"Technique {technique_id} completed successfully.",
+                data={"duration_ms": duration_ms, "api_calls": ctx.api_call_count}
+            ))
 
             return TechniqueResult(
                 technique_id=technique_id,
-                provider=cred.provider,
+                provider=effective_provider or (cred.provider if cred else "none"),
                 operator=operator,
                 status="success",
                 data=result_data,
                 api_calls=ctx.api_call_count,
                 duration_ms=duration_ms,
+                loot_path=loot_dir,
+                formatter_func=registered.metadata.formatter_func,
+                loot_schema=registered.metadata.loot_schema,
+                loot_items_key=registered.metadata.loot_items_key,
             )
         except Exception as e:
             duration_ms = int((time.monotonic() - start) * 1000)
-            friendly = _friendly_error(e, cred.provider)
+            friendly = _friendly_error(e, cred.provider if cred else "none")
             logger.debug("Technique %s failed: %s", technique_id, e)
+
+            # Emit Error Event
+            ctx._emit(TelemetryEvent(
+                technique_id=technique_id,
+                event_type=TelemetryType.TASK_END,
+                level=TelemetryLevel.ERROR,
+                message=f"Technique {technique_id} failed: {friendly}",
+                data={"error": str(e), "duration_ms": duration_ms}
+            ))
+
             return TechniqueResult(
                 technique_id=technique_id,
                 provider=cred.provider,
@@ -185,7 +220,114 @@ class TechniqueRunner:
                 error=friendly,
                 api_calls=ctx.api_call_count,
                 duration_ms=duration_ms,
+                formatter_func=registered.metadata.formatter_func,
+                loot_schema=registered.metadata.loot_schema,
+                loot_items_key=registered.metadata.loot_items_key,
             )
+
+    def _resolve_all(
+        self,
+        technique_id: str,
+        credential_id: int | None,
+        extra_providers: list[str] | None = None,
+    ) -> tuple:
+        """Resolve technique and credential.
+
+        Returns (registered, cred, error_result, effective_provider).
+        effective_provider is the provider the technique should run as —
+        may differ from cred.provider when extra_providers are unlocked.
+        """
+        registered = self._resolve_technique(technique_id)
+        if registered is None:
+            return None, None, TechniqueResult(
+                technique_id=technique_id,
+                provider="unknown",
+                status="error",
+                error=f"Technique '{technique_id}' not found. Run 'techniques' to see available.",
+            ), None
+
+        # Techniques with providers=[] are credential-free but will use an
+        # active credential opportunistically if one is present — the technique
+        # checks ctx.session to decide whether to run authenticated or not.
+        if not registered.metadata.providers:
+            cred_id = credential_id or self.workspace.active_credential_id
+            if cred_id:
+                cred = self.workspace.get_credential(cred_id)
+                if cred:
+                    return registered, cred, None, cred.provider
+            return registered, None, None, None
+
+        cred_id = credential_id or self.workspace.active_credential_id
+        cred, err = self._resolve_credential(
+            technique_id, cred_id, registered, extra_providers=extra_providers
+        )
+        if err is not None:
+            return registered, None, err, None
+
+        # Determine effective provider: prefer the technique's provider that
+        # matches the credential, fall back to one from extra_providers.
+        allowed = set(registered.metadata.providers)
+        effective_provider = cred.provider
+        if cred.provider not in allowed and extra_providers:
+            for ep in extra_providers:
+                if ep in allowed:
+                    effective_provider = ep
+                    break
+
+        return registered, cred, None, effective_provider
+
+    def _handle_post_execution(
+        self, registered, technique_id, cred, result_data, duration_ms, ctx
+    ) -> str | None:
+        """Handle evidence persistence and loot writing."""
+        if result_data is None:
+            return None
+
+        # --------------------------------------------------------
+        # Inject global note from params if present
+        # --------------------------------------------------------
+        run_note = ctx.get_param("_run_note")
+        if run_note and isinstance(result_data, dict):
+            # 1. Check if this technique returns a list of items
+            items_key = registered.metadata.loot_items_key
+            if items_key and items_key in result_data:
+                for item in result_data[items_key]:
+                    if isinstance(item, dict):
+                        item.setdefault("notes", run_note)
+            else:
+                # 2. Single-row result
+                result_data.setdefault("notes", run_note)
+            # Dataclasses are handled by asdict in LootWriter, but let's keep it simple here.
+
+        try:
+            self._persist_evidence(
+                registered=registered,
+                technique_id=technique_id,
+                cred=cred,
+                cred_id=cred.id,
+                result_data=result_data,
+                duration_ms=duration_ms,
+                ctx=ctx,
+            )
+        except Exception as ev_err:
+            logger.warning("Evidence write failed for %s: %s", technique_id, ev_err)
+
+        try:
+            from quantum_mechanic.core.loot import loot_writer
+            loot_path = loot_writer.write(
+                TechniqueResult(
+                    technique_id=technique_id,
+                    provider=cred.provider,
+                    status="success",
+                    data=result_data,
+                    params=ctx.params,
+                ),
+                workspace_db_path=self.workspace.db.db_path,
+            )
+            return str(loot_path) if loot_path else None
+        except Exception as loot_err:
+            logger.warning("Loot write failed for %s: %s", technique_id, loot_err)
+            return None
 
     # ================================================================
     # Private helpers — each has a single responsibility
@@ -198,11 +340,59 @@ class TechniqueRunner:
         """
         return self.loader.get(technique_id)
 
+    def _validate_params(self, registered, params: dict) -> tuple[dict, str | None]:
+        """Validate input parameters against the technique's schema.
+
+        Returns (processed_params, error_message).
+        """
+        from quantum_mechanic.core.technique import ParameterType
+
+        schema = registered.metadata.parameters
+        if not schema:
+            return params, None
+
+        processed = {}
+
+        # 1. Check for missing required params
+        for p_def in schema:
+            val = params.get(p_def.name)
+
+            if val is None:
+                if p_def.required:
+                    return {}, f"Missing required parameter: '{p_def.name}' ({p_def.description})"
+                val = p_def.default
+
+            # 2. Basic Type Conversion/Validation
+            if val is not None:
+                try:
+                    if p_def.type == ParameterType.INTEGER:
+                        val = int(val)
+                    elif p_def.type == ParameterType.BOOLEAN:
+                        if isinstance(val, str):
+                            val = val.lower() in ("true", "yes", "1")
+                        else:
+                            val = bool(val)
+                    elif p_def.type == ParameterType.LIST:
+                        if isinstance(val, str):
+                            val = [v.strip() for v in val.split(",")]
+                except (ValueError, TypeError):
+                    return {}, f"Invalid type for parameter '{p_def.name}': expected {p_def.type}"
+
+            # 3. Choice Validation
+            if p_def.choices and val is not None and val not in p_def.choices:
+                choices_str = ", ".join(map(str, p_def.choices))
+                return {}, f"Invalid value for '{p_def.name}': must be one of [{choices_str}]"
+
+            processed[p_def.name] = val
+
+        return processed, None
+
     def _resolve_credential(
         self,
         technique_id: str,
         cred_id: int | None,
         registered,
+        extra_providers: list[str] | None = None,
     ) -> tuple:
         """Validate that we have an active, compatible credential.
 
@@ -226,8 +416,10 @@ class TechniqueRunner:
                 error=f"Credential #{cred_id} not found.",
             )
 
-        if cred.provider not in registered.metadata.providers:
-            supported = ", ".join(registered.metadata.providers)
+        allowed = set(registered.metadata.providers)
+        active_providers = {cred.provider} | set(extra_providers or [])
+        if not (active_providers & allowed):
+            supported = ", ".join(sorted(allowed))
             return None, TechniqueResult(
                 technique_id=technique_id,
                 provider=cred.provider,
@@ -245,11 +437,16 @@ class TechniqueRunner:
         technique_id: str,
         cred_id: int,
         cred,
+        effective_provider: str | None = None,
     ) -> tuple:
         """Retrieve credential secrets and authenticate with the provider.
 
         Returns (session, None) on success, or (None, TechniqueResult)
         when an error must be returned to the caller.
+
+        When effective_provider differs from cred.provider (e.g. running an
+        azure technique with an entra credential), the session is wrapped in
+        a compatibility shim so azure SDK calls work against entra tokens.
         """
         provider = self.registry.get(cred.provider)
         if provider is None:
@@ -271,6 +468,15 @@ class TechniqueRunner:
                 )
             secret_data = json.loads(secret_data_raw)
             session = provider.authenticate(secret_data)
+
+            # When an entra credential is running an azure technique, wrap the
+            # EntraTokenStore in an Azure SDK-compatible TokenCredential shim.
+            if cred.provider == "entra" and effective_provider == "azure":
+                from quantum_mechanic.providers.entra.arm_credential import (
+                    EntraTokenCredential,
+                )
+                session = EntraTokenCredential(session)
+
             return session, None
         except Exception as e:
             return None, TechniqueResult(
@@ -560,9 +766,11 @@ def _friendly_error(exc: Exception, provider: str) -> str:
         )
 
     # --------------------------------------------------------
-    # AWS: botocore.exceptions.ProfileNotFound
+    # AWS & OCI: ProfileNotFound exception overlaps
     # --------------------------------------------------------
     if exc_type == "ProfileNotFound":
+        if provider == "oci":
+            return f"OCI profile not found: {exc}. Check ~/.oci/config for available profiles."
         return f"AWS profile not found: {exc}. Check ~/.aws/credentials for available profiles."
 
     # --------------------------------------------------------

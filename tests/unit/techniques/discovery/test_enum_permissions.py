@@ -204,16 +204,93 @@ class TestEnumPermissionsGCP:
 # ================================================================
 
 class TestEnumPermissionsOCI:
-    def test_oci_placeholder(self, mock_ctx):
+    def test_oci_active_probing(self, mock_ctx):
         mock_ctx.provider_name = "oci"
+        mock_ctx.session = {"config": {"tenancy": "ocid1.tenancy.oc1..123"}}
         
-        import importlib
-        import quantum_mechanic.techniques.discovery.enum_permissions as mod
-        importlib.reload(mod)
-        result = mod.execute(mock_ctx)
+        import sys
         
+        # Mock OCI exceptions and SDK
+        class ServiceError(Exception):
+            def __init__(self, status, message):
+                self.status = status
+                self.message = message
+        
+        mock_exceptions = MagicMock()
+        mock_exceptions.ServiceError = ServiceError
+        
+        mock_identity = MagicMock()
+        mock_identity_client = MagicMock()
+        mock_identity.IdentityClient.return_value = mock_identity_client
+        
+        mock_compute = MagicMock()
+        mock_compute_client = MagicMock()
+        mock_compute.ComputeClient.return_value = mock_compute_client
+        
+        mock_vcn = MagicMock()
+        mock_vcn_client = MagicMock()
+        mock_vcn.VirtualNetworkClient.return_value = mock_vcn_client
+        
+        mock_os = MagicMock()
+        mock_os_client = MagicMock()
+        mock_os.ObjectStorageClient.return_value = mock_os_client
+        mock_os_client.get_namespace.return_value.data = "my-namespace"
+        
+        # Define behaviors:
+        # list_users: success (ALLOWED)
+        # list_instances: ServiceError 404 NotAuthorizedOrNotFound (DENIED)
+        # list_vcns: ServiceError 401 (DENIED)
+        # list_groups: other error (ERROR)
+        
+        def compute_list_instances(**kwargs):
+            raise ServiceError(404, "NotAuthorizedOrNotFound")
+            
+        def vcn_list_vcns(**kwargs):
+            raise ServiceError(401, "Unauthorized")
+            
+        def identity_list_groups(**kwargs):
+            raise Exception("Some other error")
+        
+        mock_compute_client.list_instances.side_effect = compute_list_instances
+        mock_vcn_client.list_vcns.side_effect = vcn_list_vcns
+        mock_identity_client.list_groups.side_effect = identity_list_groups
+        
+        mock_oci = MagicMock()
+        mock_oci.exceptions = mock_exceptions
+        mock_oci.identity = mock_identity
+        mock_oci.core = MagicMock()
+        mock_oci.core.ComputeClient = mock_compute.ComputeClient
+        mock_oci.core.VirtualNetworkClient = mock_vcn.VirtualNetworkClient
+        mock_oci.object_storage = mock_os
+        
+        oci_mocks = {
+            "oci": mock_oci,
+            "oci.exceptions": mock_exceptions,
+            "oci.identity": mock_identity,
+            "oci.core": mock_oci.core,
+            "oci.object_storage": mock_os
+        }
+        
+        with patch.dict(sys.modules, oci_mocks):
+            import importlib
+            import quantum_mechanic.techniques.discovery.enum_permissions as mod
+            importlib.reload(mod)
+            result = mod.execute(mock_ctx)
+            
         assert result["status"] == "success"
-        assert "OCI does not provide" in result["note"]
+        assert result["method"] == "active_probing_list_apis"
+        
+        allowed = result["allowed_actions"]
+        denied = result["denied_actions"]
+        errors = result["errors"]
+        
+        assert "identity:list_users" in allowed
+        assert "object_storage:list_buckets" in allowed
+        
+        assert "compute:list_instances" in denied
+        assert "virtual_network:list_vcns" in denied
+        
+        assert any("identity:list_groups: Some other error" in e for e in errors)
 
 
 # ================================================================

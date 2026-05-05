@@ -312,3 +312,19 @@ class TestWorkspaceLifecycle:
         names = [w["name"] for w in all_ws]
         assert "alpha" in names
         assert "beta" in names
+
+    def test_close_idempotency(self, tmp_path):
+        """close() can be called multiple times without error."""
+        ws = Workspace.create("idempotency-test", tmp_path)
+        ws.close()
+        ws.close()  # second call should be no-op
+
+    def test_close_prevents_operations(self, tmp_path):
+        """Operations on a closed workspace should fail."""
+        import sqlite3
+        ws = Workspace.create("closed-test", tmp_path)
+        ws.close()
+
+        with pytest.raises((sqlite3.ProgrammingError, AttributeError)):
+            # Should fail because connection is closed or set to None
+            ws.list_credentials()

@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from quantum_mechanic.core.runner import TechniqueResult
 from quantum_mechanic.shell.formatters import format_technique_result
+from quantum_mechanic.techniques.discovery.enum_iam import format_iam_result
 
 
 @patch("quantum_mechanic.shell.formatters.console")
@@ -20,6 +21,7 @@ def test_format_technique_result_enum_iam_aws(mock_console):
         data=data,
         api_calls=1,
         duration_ms=50,
+        formatter_func=format_iam_result
     )
 
     format_technique_result(result)
@@ -45,6 +47,7 @@ def test_format_technique_result_enum_iam_azure(mock_console):
         data=data,
         api_calls=1,
         duration_ms=50,
+        formatter_func=format_iam_result
     )
 
     format_technique_result(result)
@@ -67,6 +70,7 @@ def test_format_technique_result_enum_iam_gcp(mock_console):
         data=data,
         api_calls=1,
         duration_ms=50,
+        formatter_func=format_iam_result
     )
 
     format_technique_result(result)
@@ -90,6 +94,7 @@ def test_format_technique_result_enum_iam_oci(mock_console):
         data=data,
         api_calls=1,
         duration_ms=50,
+        formatter_func=format_iam_result
     )
 
     format_technique_result(result)

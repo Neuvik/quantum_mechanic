@@ -68,12 +68,14 @@ class FindingStore:
         )
 
     def _add_sqlite(self, **kwargs) -> int:
-        cursor = self._db.execute(
+        row = self._db.fetchone(
             """
-            INSERT OR IGNORE INTO findings
+            INSERT INTO findings
                 (workspace_id, technique_id, tactic, mitre_id, title,
                  severity, provider, description, evidence)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(workspace_id, technique_id, title) DO NOTHING
+            RETURNING id
             """,
             (
                 self._workspace_id,
@@ -88,7 +90,7 @@ class FindingStore:
             ),
         )
         self._db.commit()
-        return cursor.lastrowid  # type: ignore[return-value]
+        return row[0] if row else 0
 
     def _add_orm(self, **kwargs) -> int:
         from sqlalchemy import select
@@ -179,3 +181,10 @@ class FindingStore:
             }
             for r in rows
         ]
+
+    def close(self) -> None:
+        """Dispose of the ORM engine and nullify the session factory."""
+        if hasattr(self, "_engine"):
+            self._engine.dispose()
+        if hasattr(self, "_SessionLocal"):
+            self._SessionLocal = None  # type: ignore[assignment]

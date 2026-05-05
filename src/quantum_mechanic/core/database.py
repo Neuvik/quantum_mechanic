@@ -16,7 +16,9 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,8 +27,24 @@ from typing import Any
 # ----------------------------------------------------------------
 # Default workspace storage directory. Each workspace gets its
 # own .db file under this directory.
+#
+# Override with QM_WORKSPACE_DIR to redirect workspaces (e.g.
+# for isolated E2E tests).  Evaluated at call-time so that
+# os.environ changes made before subprocess.spawn take effect.
 # ----------------------------------------------------------------
-DEFAULT_WORKSPACE_DIR = Path.home() / ".quantum_mechanic" / "workspaces"
+
+
+def _default_workspace_dir() -> Path:
+    """Return the workspace directory, respecting QM_WORKSPACE_DIR."""
+    env = os.environ.get("QM_WORKSPACE_DIR")
+    if env:
+        return Path(env)
+    return Path.home() / ".quantum_mechanic" / "workspaces"
+
+
+# Module-level alias kept for backwards-compat — do NOT use inside
+# create() / load(); call _default_workspace_dir() there instead.
+DEFAULT_WORKSPACE_DIR = _default_workspace_dir()
 
 
 class Database:
@@ -38,14 +56,21 @@ class Database:
 
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
-        self.conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        # --------------------------------------------------------
+        # check_same_thread=False allows sharing across FastAPI threads.
+        # timeout=30.0 gives enough headroom for concurrent writes in WAL mode.
+        # --------------------------------------------------------
+        self.conn = sqlite3.connect(str(db_path), check_same_thread=False, timeout=30.0)
+        self._lock = threading.Lock()
+
         # --------------------------------------------------------
         # Enable WAL mode for better concurrent read performance
         # and return rows as sqlite3.Row for dict-like access.
         # --------------------------------------------------------
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA foreign_keys=ON")
-        self.conn.row_factory = sqlite3.Row
+        with self._lock:
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA foreign_keys=ON")
+            self.conn.row_factory = sqlite3.Row
 
     @classmethod
     def create(cls, name: str, workspace_dir: Path | None = None) -> Database:
@@ -54,6 +79,8 @@ class Database:
         Args:
             name: Human-readable workspace name.
             workspace_dir: Override default storage directory.
+                           Falls back to QM_WORKSPACE_DIR env var, then
+                           ~/.quantum_mechanic/workspaces.
 
         Returns:
             Database instance with schema applied.
@@ -61,7 +88,7 @@ class Database:
         Raises:
             FileExistsError: If workspace already exists.
         """
-        base_dir = workspace_dir or DEFAULT_WORKSPACE_DIR
+        base_dir = workspace_dir or _default_workspace_dir()
         base_dir.mkdir(parents=True, exist_ok=True)
         db_path = base_dir / f"{name}.db"
 
@@ -80,6 +107,8 @@ class Database:
         Args:
             name: Workspace name to load.
             workspace_dir: Override default storage directory.
+                           Falls back to QM_WORKSPACE_DIR env var, then
+                           ~/.quantum_mechanic/workspaces.
 
         Returns:
             Database instance.
@@ -87,7 +116,7 @@ class Database:
         Raises:
             FileNotFoundError: If workspace does not exist.
         """
-        base_dir = workspace_dir or DEFAULT_WORKSPACE_DIR
+        base_dir = workspace_dir or _default_workspace_dir()
         db_path = base_dir / f"{name}.db"
 
         if not db_path.exists():
@@ -129,41 +158,43 @@ class Database:
         Returns:
             Cursor with results.
         """
-        return self.conn.execute(sql, params)
+        with self._lock:
+            return self.conn.execute(sql, params)
 
     def execute_many(self, sql: str, params_list: list[tuple[Any, ...]]) -> None:
         """Execute a statement with multiple parameter sets."""
-        self.conn.executemany(sql, params_list)
+        with self._lock:
+            self.conn.executemany(sql, params_list)
 
     def fetchone(
         self, sql: str, params: tuple[Any, ...] | dict[str, Any] = ()
     ) -> sqlite3.Row | None:
         """Execute and fetch a single row."""
-        return self.conn.execute(sql, params).fetchone()
+        with self._lock:
+            return self.conn.execute(sql, params).fetchone()
 
     def fetchall(
         self, sql: str, params: tuple[Any, ...] | dict[str, Any] = ()
     ) -> list[sqlite3.Row]:
         """Execute and fetch all rows."""
-        return self.conn.execute(sql, params).fetchall()
+        with self._lock:
+            return self.conn.execute(sql, params).fetchall()
 
     def commit(self) -> None:
         """Commit the current transaction."""
-        self.conn.commit()
+        with self._lock:
+            self.conn.commit()
 
     def close(self) -> None:
         """Close the database connection.
 
-        AR-1: Idempotent — safe to call multiple times. If Close() is
-        called on an already-closed database it is a no-op. This is
-        important because the shell holds a long-lived workspace
-        reference and close() may be triggered both by 'workspace load'
-        (switching engagement) and by shell exit.
+        AR-1: Idempotent — safe to call multiple times.
         """
-        if self.conn is None:
-            return
-        self.conn.close()
-        self.conn = None  # type: ignore[assignment]  # sentinel for idempotency
+        with self._lock:
+            if self.conn is None:
+                return
+            self.conn.close()
+            self.conn = None  # type: ignore[assignment]
 
     def _apply_migrations(self) -> None:
         """Apply any pending schema migrations.
@@ -176,14 +207,15 @@ class Database:
         # --------------------------------------------------------
         # Create the migrations tracking table if it doesn't exist.
         # --------------------------------------------------------
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS _migrations (
-                id INTEGER PRIMARY KEY,
-                filename TEXT NOT NULL UNIQUE,
-                applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS _migrations (
+                    id INTEGER PRIMARY KEY,
+                    filename TEXT NOT NULL UNIQUE,
+                    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            self.conn.commit()
 
         migrations_dir = Path(__file__).parent / "migrations"
         if not migrations_dir.exists():
@@ -194,12 +226,13 @@ class Database:
         for migration_file in sorted(migrations_dir.glob("*.sql")):
             if migration_file.name not in applied:
                 sql = migration_file.read_text()
-                self.conn.executescript(sql)
-                self.execute(
-                    "INSERT INTO _migrations (filename) VALUES (?)",
-                    (migration_file.name,),
-                )
-                self.conn.commit()
+                with self._lock:
+                    self.conn.executescript(sql)
+                    self.conn.execute(
+                        "INSERT INTO _migrations (filename) VALUES (?)",
+                        (migration_file.name,),
+                    )
+                    self.conn.commit()
 
     def _init_workspace(self, name: str) -> None:
         """Initialize the workspace metadata row."""

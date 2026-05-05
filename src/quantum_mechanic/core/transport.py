@@ -27,6 +27,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 
+from quantum_mechanic.core.context import EventCallback
 from quantum_mechanic.core.loader import TechniqueLoader
 from quantum_mechanic.core.runner import TechniqueResult, TechniqueRunner
 from quantum_mechanic.core.technique import TechniqueMetadata
@@ -55,6 +56,8 @@ class Transport(ABC):
         *,
         safe_mode: bool = False,
         params: dict | None = None,
+        on_event: EventCallback | None = None,
+        extra_providers: list[str] | None = None,
     ) -> TechniqueResult:
         """Execute a technique and return a structured result.
 
@@ -169,6 +172,8 @@ class LocalTransport(Transport):
         *,
         safe_mode: bool = False,
         params: dict | None = None,
+        on_event: EventCallback | None = None,
+        extra_providers: list[str] | None = None,
     ) -> TechniqueResult:
         """Execute a technique in-process via TechniqueRunner.
 
@@ -186,6 +191,8 @@ class LocalTransport(Transport):
                 credential_id=credential_id,
                 safe_mode=safe_mode,
                 params=params,
+                on_event=on_event,
+                extra_providers=extra_providers,
             )
         except Exception as exc:  # pragma: no cover — runner should catch all
             return TechniqueResult(
@@ -256,6 +263,12 @@ class LocalTransport(Transport):
             expires_at=expires,
             auto_refresh=auto_refresh,
         )
+
+    def update_credential(
+        self, cred_id: int, *, secret_data: str, friendly_name: str | None = None
+    ) -> None:
+        """Overwrite the secret for an existing credential."""
+        self._workspace.update_credential_secret(cred_id, secret_data, friendly_name)
 
     def delete_credential(self, cred_id: int) -> bool:
         """Delete a credential from the local workspace."""
@@ -342,6 +355,11 @@ class RemoteTransport(Transport):
         return self._token.host
 
     @property
+    def engagement(self) -> str:
+        """The name of the engagement this transport is bound to."""
+        return self._token.engagement
+
+    @property
     def base_url(self) -> str:
         """Full HTTPS base URL for the qmd server."""
         host = self._token.host
@@ -360,20 +378,30 @@ class RemoteTransport(Transport):
         *,
         safe_mode: bool = False,
         params: dict | None = None,
+        on_event: EventCallback | None = None,
     ) -> TechniqueResult:
         """Execute a technique on the remote qmd server.
 
         Sends POST /techniques/run and returns the result.
         Network errors are caught and returned as status='error'.
         """
+        if on_event:
+            logger.warning("Real-time telemetry streaming not yet supported over RemoteTransport (HTTP).")
+
         try:
             with self._make_client() as client:
+                payload = {
+                    "technique_id": technique_id,
+                    "params": params or {},
+                }
+                if credential_id is not None:
+                    payload["credential_id"] = credential_id
+                if safe_mode:
+                    payload["safe_mode"] = True
+
                 resp = client.post(
                     f"{self.base_url}/techniques/run",
-                    json={
-                        "technique_id": technique_id,
-                        "params": params or {},
-                    },
+                    json=payload,
                     timeout=self._timeout,
                 )
                 resp.raise_for_status()
@@ -390,6 +418,12 @@ class RemoteTransport(Transport):
             )
 
         except Exception as exc:
+            return TechniqueResult(
+                technique_id=technique_id,
+                provider="unknown",
+                status="error",
+                error=str(exc),
+            )
             return TechniqueResult(
                 technique_id=technique_id,
                 provider="unknown",
@@ -554,24 +588,34 @@ class RemoteTransport(Transport):
         tok = self._token
 
         # Write certs to temp files — httpx needs file paths for ssl.SSLContext.
-        # Files are cleaned up when the context manager exits.
-        with (
-            tempfile.NamedTemporaryFile(suffix=".pem", delete=False) as ca_file,
-            tempfile.NamedTemporaryFile(suffix=".pem", delete=False) as cert_file,
-            tempfile.NamedTemporaryFile(suffix=".pem", delete=False) as key_file,
-        ):
-            ca_path = ca_file.name
-            cert_path = cert_file.name
-            key_path = key_file.name
-            ca_file.write(tok.ca_cert_pem.encode())
-            cert_file.write(tok.client_cert_pem.encode())
-            key_file.write(tok.client_key_pem.encode())
+        # We manually unlink them after loading into the SSLContext to avoid leakage.
+        try:
+            with (
+                tempfile.NamedTemporaryFile(suffix=".pem", delete=False) as ca_file,
+                tempfile.NamedTemporaryFile(suffix=".pem", delete=False) as cert_file,
+                tempfile.NamedTemporaryFile(suffix=".pem", delete=False) as key_file,
+            ):
+                ca_path = ca_file.name
+                cert_path = cert_file.name
+                key_path = key_file.name
+                ca_file.write(tok.ca_cert_pem.encode())
+                cert_file.write(tok.client_cert_pem.encode())
+                key_file.write(tok.client_key_pem.encode())
 
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ctx.load_verify_locations(ca_path)        # Pin to engagement CA
-        ctx.load_cert_chain(cert_path, key_path)  # Present operator client cert
-        ctx.check_hostname = False  # CA pinning is our check — hostname is flexible
-        ctx.verify_mode = ssl.CERT_REQUIRED
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.load_verify_locations(ca_path)        # Pin to engagement CA
+            ctx.load_cert_chain(cert_path, key_path)  # Present operator client cert
+            ctx.check_hostname = False  # CA pinning is our check — hostname is flexible
+            ctx.verify_mode = ssl.CERT_REQUIRED
+        finally:
+            # Clean up sensitive files from /tmp immediately
+            for p in (ca_path, cert_path, key_path):
+                try:
+                    import os
+                    if os.path.exists(p):
+                        os.unlink(p)
+                except Exception:
+                    pass
 
         return httpx.Client(
             verify=ctx,

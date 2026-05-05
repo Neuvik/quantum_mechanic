@@ -218,9 +218,22 @@ class AgentStore:
 
         Used by the receiver lifecycle monitor to detect missed heartbeats.
         """
+        if self._use_orm:
+            from sqlalchemy import select
+
+            from quantum_mechanic.core.orm.tables import AgentRow
+            with self._SessionLocal() as session:
+                stmt = select(AgentRow).where(
+                    AgentRow.workspace_id == self._workspace_id,
+                    AgentRow.status == 'active',
+                    AgentRow.last_seen < before_iso
+                )
+                rows = session.scalars(stmt).all()
+                return [{"id": r.id, "last_seen": r.last_seen} for r in rows]
+
         rows = self._db.fetchall(
-            "SELECT id, last_seen FROM agents WHERE status = 'active' AND last_seen < ?",
-            (before_iso,),
+            "SELECT id, last_seen FROM agents WHERE workspace_id = ? AND status = 'active' AND last_seen < ?",
+            (self._workspace_id, before_iso),
         )
         return [dict(r) for r in rows]
 
@@ -267,20 +280,58 @@ class AgentStore:
         return self._pop_tasks_sqlite(agent_id)
 
     def _pop_tasks_sqlite(self, agent_id: str) -> list[Task]:
-        rows = self._db.fetchall(
-            """
-            SELECT id, agent_id, command, args, status, output, error,
-                   created_at, completed_at
-            FROM tasks
-            WHERE workspace_id = ? AND agent_id = ? AND status = 'pending'
-            """,
-            (self._workspace_id, agent_id),
-        )
+        # ----------------------------------------------------------------
+        # ATOMIC UPDATE: We mark tasks as 'running' first, then fetch.
+        # This prevents the race condition where two pop_tasks() calls
+        # return the same pending task.
+        #
+        # Requires SQLite 3.35+ for RETURNING. If older, we use a
+        # transaction with a unique batch ID.
+        # ----------------------------------------------------------------
+        import sqlite3
+        batch_id = str(uuid.uuid4())
+
+        try:
+            # Try atomic RETURNING first (modern SQLite)
+            rows = self._db.fetchall(
+                """
+                UPDATE tasks
+                SET status = 'running'
+                WHERE workspace_id = ? AND agent_id = ? AND status = 'pending'
+                RETURNING id, agent_id, command, args, status, output, error,
+                          created_at, completed_at
+                """,
+                (self._workspace_id, agent_id),
+            )
+            self._db.commit()
+        except sqlite3.OperationalError as e:
+            if "RETURNING" not in str(e): raise
+
+            # Fallback for older SQLite (3.34 and below)
+            # 1. Mark with unique batch_id in one transaction
+            self._db.execute(
+                """
+                UPDATE tasks SET status = 'running', error = ?
+                WHERE workspace_id = ? AND agent_id = ? AND status = 'pending'
+                """,
+                (f"batch:{batch_id}", self._workspace_id, agent_id)
+            )
+            # 2. Fetch those specific rows
+            rows = self._db.fetchall(
+                """
+                SELECT id, agent_id, command, args, status, output, error,
+                       created_at, completed_at
+                FROM tasks
+                WHERE error = ?
+                """,
+                (f"batch:{batch_id}",)
+            )
+            # 3. Clean up the temporary batch marker
+            self._db.execute("UPDATE tasks SET error = NULL WHERE error = ?", (f"batch:{batch_id}",))
+            self._db.commit()
+
         tasks = []
         for r in rows:
-            self._db.execute(
-                "UPDATE tasks SET status = 'running' WHERE id = ?", (r["id"],)
-            )
             tasks.append(
                 Task(
                     id=r["id"],
@@ -289,13 +340,11 @@ class AgentStore:
                     args=r["args"],
                     status="running",
                     output=r["output"],
-                    error=r["error"],
+                    error=r["error"] if not str(r["error"]).startswith("batch:") else None,
                     created_at=r["created_at"],
                     completed_at=r["completed_at"],
                 )
             )
-        if tasks:
-            self._db.commit()
         return tasks
 
     def _pop_tasks_orm(self, agent_id: str) -> list[Task]:
@@ -304,13 +353,19 @@ class AgentStore:
         from quantum_mechanic.core.orm.tables import TaskRow
 
         with self._SessionLocal() as session:
-            rows = session.scalars(
-                select(TaskRow).where(
+            # Atomic SELECT FOR UPDATE (if supported by backend)
+            # SQLite handles this via file-level locks on commit, but
+            # we use the ORM pattern for consistency.
+            stmt = (
+                select(TaskRow)
+                .where(
                     TaskRow.workspace_id == self._workspace_id,
                     TaskRow.agent_id == agent_id,
                     TaskRow.status == "pending",
                 )
-            ).all()
+                .with_for_update()
+            )
+            rows = session.scalars(stmt).all()
 
             tasks = []
             for r in rows:
@@ -401,3 +456,10 @@ class AgentStore:
             registered_at=row.registered_at,
             last_seen=row.last_seen,
         )
+
+    def close(self) -> None:
+        """Dispose of the ORM engine and nullify the session factory."""
+        if hasattr(self, "_engine"):
+            self._engine.dispose()
+        if hasattr(self, "_SessionLocal"):
+            self._SessionLocal = None  # type: ignore[assignment]

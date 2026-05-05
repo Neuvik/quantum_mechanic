@@ -35,6 +35,7 @@ class TestEnumComputeAWS:
         mock_paginator = MagicMock()
         mock_paginator.paginate.return_value = fake_pages
         mock_ec2.get_paginator.return_value = mock_paginator
+        mock_ec2.describe_regions.return_value = {"Regions": [{"RegionName": "us-east-1"}]}
 
         mock_session = MagicMock()
         mock_session.client.return_value = mock_ec2
@@ -78,16 +79,29 @@ class TestEnumComputeAWS:
         }
 
         self._make_aws_ctx(mock_ctx, [fake_page])
-
+    
         from quantum_mechanic.techniques.discovery.enum_compute import execute
-        result = execute(mock_ctx)
+        import sys
+        
+        botocore_mocks = {"botocore.exceptions": MagicMock()}
+        with patch.dict(sys.modules, botocore_mocks):
+            import importlib
+            import quantum_mechanic.techniques.discovery.enum_compute as mod
+            importlib.reload(mod)
+            result = mod.execute(mock_ctx)
+        
+        assert "error" not in result, f"Implementation threw an error: {result.get('error')}"
 
         assert result["provider"] == "aws"
-        assert result["total"] == 1
+        assert result["total"] == 2
+        
+        # Verify both instances parsed (including the identity-less one)
         assert result["instances"][0]["instance_id"] == "i-ABCD1234"
         assert result["instances"][0]["instance_profile_arn"] == (
             "arn:aws:iam::123:instance-profile/ec2-s3-role"
         )
+        assert result["instances"][1]["instance_id"] == "i-NOPROFILE"
+
 
     def test_filters_out_instances_without_profiles(self, mock_ctx):
         """No instances returned when none have Instance Profiles."""
@@ -98,15 +112,30 @@ class TestEnumComputeAWS:
         }
 
         self._make_aws_ctx(mock_ctx, [fake_page])
-
+    
         from quantum_mechanic.techniques.discovery.enum_compute import execute
-        result = execute(mock_ctx)
-
-        assert result["total"] == 0
-        assert result["instances"] == []
+        import sys
+        
+        botocore_mocks = {"botocore.exceptions": MagicMock()}
+        with patch.dict(sys.modules, botocore_mocks):
+            import importlib
+            import quantum_mechanic.techniques.discovery.enum_compute as mod
+            importlib.reload(mod)
+            result = mod.execute(mock_ctx)
+        
+        assert "error" not in result, f"Implementation threw an error: {result.get('error')}"
+    
+        # Under the new logic, the instance without a profile is kept!
+        assert result["total"] == 1
+        assert result["instances"][0]["instance_id"] == "i-000"
 
     def test_unknown_provider_returns_error(self, mock_ctx):
         """An unsupported provider returns an error dict, not an exception."""
+        # Mock Azure SDK modules
+        import sys
+        sys.modules["azure.mgmt.compute"] = MagicMock()
+        sys.modules["azure.mgmt.subscription"] = MagicMock()
+
         mock_ctx.provider_name = "unknowncloud"
         mock_ctx.session = {}
 
@@ -124,26 +153,41 @@ class TestEnumComputeAWS:
 class TestEnumComputeAzure:
     """Tests for the Azure _enum_azure path."""
 
-    def test_returns_vms_with_managed_identity(self, mock_ctx):
-        """Only Azure VMs with a Managed Identity attached are surfaced."""
+    def test_surfaces_all_vms_regardless_of_identity(self, mock_ctx):
+        """All Azure VMs are surfaced, including those without a Managed Identity attached."""
         mock_ctx.provider_name = "azure"
         mock_ctx.session = {"method": "default"}
 
-        fake_vm = MagicMock()
-        fake_vm.id = "/subscriptions/sub123/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/myvm"
-        fake_vm.name = "myvm"
-        fake_vm.location = "eastus"
-        fake_vm.identity = MagicMock()
-        fake_vm.identity.type.value = "UserAssigned"
-        fake_vm.identity.principal_id = None
-        fake_vm.identity.user_assigned_identities = {
+        # VM 1: Has a UserAssigned Managed Identity via Enum type
+        fake_vm_1 = MagicMock()
+        fake_vm_1.id = "/subscriptions/sub123/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/myvm"
+        fake_vm_1.name = "myvm"
+        fake_vm_1.location = "eastus"
+        fake_vm_1.identity = MagicMock()
+        fake_vm_1.identity.type.value = "UserAssigned"
+        fake_vm_1.identity.principal_id = None
+        fake_vm_1.identity.user_assigned_identities = {
             "/subscriptions/sub123/resourceGroups/rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/my-mid": MagicMock(
                 principal_id="pid-111", client_id="cid-222"
             )
         }
 
-        fake_vm_no_id = MagicMock()
-        fake_vm_no_id.identity = None  # No identity — should be excluded.
+        # VM 2: Completely lacks an identity property 
+        fake_vm_2 = MagicMock()
+        fake_vm_2.id = "/subscriptions/sub123/rg/vm-no-id"
+        fake_vm_2.name = "vm-no-id"
+        fake_vm_2.location = "eastus"
+        fake_vm_2.identity = None
+
+        # VM 3: Has identity, but its 'type' is missing or not an Enum, triggering standard fallback
+        # This was the root cause of the AttributeError: 'NoneType' object has no attribute 'value'
+        fake_vm_3 = MagicMock()
+        fake_vm_3.id = "/subscriptions/sub123/rg/vm-str-id"
+        fake_vm_3.name = "vm-str-id"
+        fake_vm_3.location = "westus"
+        fake_vm_3.identity = MagicMock()
+        fake_vm_3.identity.type = None # Mocking what caused the AttributeError 
+        fake_vm_3.identity.user_assigned_identities = None
 
         # Inject fake azure modules so the import inside _enum_azure succeeds
         import sys
@@ -152,7 +196,8 @@ class TestEnumComputeAzure:
             "azure.identity": MagicMock(),
             "azure.mgmt": MagicMock(),
             "azure.mgmt.compute": MagicMock(),
-            "azure.mgmt.resource": MagicMock(),
+            "azure.mgmt.network": MagicMock(),
+            "azure.mgmt.subscription": MagicMock(),
         }
         mock_sub_client = MagicMock()
         mock_sub_client.return_value.subscriptions.list.return_value = [
@@ -160,11 +205,15 @@ class TestEnumComputeAzure:
         ]
         mock_compute_client = MagicMock()
         mock_compute_client.return_value.virtual_machines.list_all.return_value = [
-            fake_vm,
-            fake_vm_no_id,
+            fake_vm_1,
+            fake_vm_2,
+            fake_vm_3,
         ]
-        azure_mocks["azure.mgmt.resource"].SubscriptionClient = mock_sub_client
+        mock_network_client = MagicMock()
+        mock_network_client.return_value.network_interfaces.get.side_effect = Exception("no NIC")
+        azure_mocks["azure.mgmt.subscription"].SubscriptionClient = mock_sub_client
         azure_mocks["azure.mgmt.compute"].ComputeManagementClient = mock_compute_client
+        azure_mocks["azure.mgmt.network"].NetworkManagementClient = mock_network_client
         azure_mocks["azure.identity"].DefaultAzureCredential = MagicMock()
 
         with patch.dict(sys.modules, azure_mocks):
@@ -175,8 +224,19 @@ class TestEnumComputeAzure:
             result = mod._enum_azure(mock_ctx)
 
         assert result["provider"] == "azure"
-        assert result["total"] == 1
-        assert result["instances"][0]["name"] == "myvm"
+        assert result["total"] == 3
+        
+        # Verify VM 1 parsed properly
+        assert result["instances"][0]["instance_id"] == "myvm"
+        assert result["instances"][0]["identity_type"] == "UserAssigned"
+        
+        # Verify VM 2 parsed properly despite having NO identity (fixes blind exclusion bug)
+        assert result["instances"][1]["instance_id"] == "vm-no-id"
+        assert result["instances"][1]["identity_type"] == "None"
+        
+        # Verify VM 3 parsed properly despite missing an Enum type (fixes AttributeError bug)
+        assert result["instances"][2]["instance_id"] == "vm-str-id"
+        assert result["instances"][2]["identity_type"] == "None"
 
 
 # ================================================================
@@ -244,7 +304,7 @@ class TestEnumComputeGCP:
         assert result["provider"] == "gcp"
         # Both instances are now returned — default SA is annotated, not excluded.
         assert result["total"] == 2
-        sas = {inst["name"]: inst["service_accounts"] for inst in result["instances"]}
+        sas = {inst["instance_id"]: inst["service_accounts"] for inst in result["instances"]}
         assert sas["my-vm"][0]["is_default_compute_sa"] is False
         assert sas["default-vm"][0]["is_default_compute_sa"] is True
         assert "Editor" in sas["default-vm"][0]["risk_note"]

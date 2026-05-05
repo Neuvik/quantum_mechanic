@@ -248,17 +248,39 @@ class TestEnumIAM:
             mock_group.name = "Admins"
             mock_client.get_group.return_value.data = mock_group
 
-            # Setup policies
-            mock_policy = MagicMock()
-            mock_policy.id = "pol1"
-            mock_policy.name = "AllAccess"
-            mock_policy.statements = ["Allow group Admins to manage all-resources in tenancy"]
-            mock_client.list_policies.return_value.data = [mock_policy]
+            # Setup recursive compartments
+            mock_comp = MagicMock()
+            mock_comp.id = "ocid1.compartment..child"
+            mock_client.list_compartments.return_value.data = [mock_comp]
+
+            # Setup policies for both tenancy and child compartment
+            mock_policy1 = MagicMock()
+            mock_policy1.id = "pol1"
+            mock_policy1.name = "TenancyPolicy"
+            mock_policy1.statements = ["Allow group Admins to manage all-resources in tenancy"]
+
+            mock_policy2 = MagicMock()
+            mock_policy2.id = "pol2"
+            mock_policy2.name = "ChildPolicy"
+            mock_policy2.statements = ["Allow group Admins to read instances in compartment"]
+
+            def mock_list_policies(compartment_id):
+                resp = MagicMock()
+                if compartment_id == "ocid1.tenancy..456":
+                    resp.data = [mock_policy1]
+                else:
+                    resp.data = [mock_policy2]
+                return resp
+
+            mock_client.list_policies.side_effect = mock_list_policies
 
             res = execute(mock_ctx)
 
             assert res["status"] == "success"
             assert len(res["groups"]) == 1
             assert res["groups"][0]["name"] == "Admins"
-            assert len(res["tenancy_policies"]) == 1
-            assert res["tenancy_policies"][0]["name"] == "AllAccess"
+            assert len(res["policies"]) == 2
+            
+            policy_names = [p["name"] for p in res["policies"]]
+            assert "TenancyPolicy" in policy_names
+            assert "ChildPolicy" in policy_names

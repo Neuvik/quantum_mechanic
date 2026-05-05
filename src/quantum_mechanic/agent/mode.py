@@ -18,6 +18,7 @@ import argparse
 import json
 import logging
 import sys
+from pathlib import Path
 from typing import Any
 
 from quantum_mechanic.core.loader import TechniqueLoader
@@ -26,6 +27,7 @@ from quantum_mechanic.core.workspace import Workspace
 from quantum_mechanic.providers.aws.auth import AWSAuthProvider
 from quantum_mechanic.providers.azure.auth import AzureAuthProvider
 from quantum_mechanic.providers.base import ProviderRegistry
+from quantum_mechanic.providers.entra.auth import EntraAuthProvider
 from quantum_mechanic.providers.gcp.auth import GCPAuthProvider
 from quantum_mechanic.providers.oci.auth import OCIAuthProvider
 
@@ -57,21 +59,40 @@ def _build_registry() -> ProviderRegistry:
     registry = ProviderRegistry()
     registry.register(AWSAuthProvider())
     registry.register(AzureAuthProvider())
+    registry.register(EntraAuthProvider())
     registry.register(GCPAuthProvider())
     registry.register(OCIAuthProvider())
     return registry
 
 
-def run_agent_mode(args: argparse.Namespace) -> None:
-    """Entry point for agent mode."""
+def run_agent_mode(args: argparse.Namespace, workspace_dir: Path | None = None) -> None:
+    """Entry point for agent mode.
+
+    Args:
+        args:          Parsed CLI arguments.
+        workspace_dir: Override the workspace storage directory.
+                       Defaults to ~/.quantum_mechanic/workspaces.
+                       Primarily used in tests to avoid touching the real dir.
+    """
     # --------------------------------------------------------
-    # Setup logging to stderr only (stdout is for JSON data).
+    # Setup logging — minimal for console, verbose for background log
     # --------------------------------------------------------
-    logging.basicConfig(
-        level=logging.WARNING,
-        format="%(levelname)s: %(message)s",
-        stream=sys.stderr,
-    )
+    log_dir = Path.home() / ".quantum_mechanic" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setLevel(logging.WARNING)
+    console_handler.setFormatter(logging.Formatter("%(message)s"))
+
+    file_handler = logging.FileHandler(str(log_dir / "qm.log"))
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
 
     registry = _build_registry()
     loader = TechniqueLoader()
@@ -84,15 +105,15 @@ def run_agent_mode(args: argparse.Namespace) -> None:
     extra_args = args.args or []
 
     if command is None or command == "capabilities":
-        _cmd_capabilities(registry, loader, args)
+        _cmd_capabilities(registry, loader, args, workspace_dir=workspace_dir)
     elif command == "creds":
-        _cmd_creds(args)
+        _cmd_creds(args, workspace_dir=workspace_dir)
     elif command == "run":
-        _cmd_run(extra_args, registry, loader, args)
+        _cmd_run(extra_args, registry, loader, args, workspace_dir=workspace_dir)
     elif command == "import":
-        _cmd_import(extra_args, args)
+        _cmd_import(extra_args, args, workspace_dir=workspace_dir)
     elif command == "workspace":
-        _cmd_workspace(extra_args)
+        _cmd_workspace(extra_args, workspace_dir=workspace_dir)
     else:
         _error_out(f"Unknown agent command: {command}")
 
@@ -101,6 +122,7 @@ def _cmd_capabilities(
     registry: ProviderRegistry,
     loader: TechniqueLoader,
     args: argparse.Namespace,
+    workspace_dir: Path | None = None,
 ) -> None:
     """Output the capabilities manifest."""
     providers = {}
@@ -127,7 +149,7 @@ def _cmd_capabilities(
 
     if args.workspace:
         try:
-            ws = Workspace.load(args.workspace)
+            ws = Workspace.load(args.workspace, workspace_dir=workspace_dir)
             workspace_info = {"name": ws.name}
             creds = ws.list_credentials()
             for c in creds:
@@ -160,13 +182,13 @@ def _cmd_capabilities(
     )
 
 
-def _cmd_creds(args: argparse.Namespace) -> None:
+def _cmd_creds(args: argparse.Namespace, workspace_dir: Path | None = None) -> None:
     """List credentials in agent mode."""
     if not args.workspace:
         _error_out("--workspace required for 'creds' command")
 
     try:
-        ws = Workspace.load(args.workspace)
+        ws = Workspace.load(args.workspace, workspace_dir=workspace_dir)
         creds = ws.list_credentials()
         _json_out(
             {
@@ -194,15 +216,9 @@ def _cmd_run(
     registry: ProviderRegistry,
     loader: TechniqueLoader,
     args: argparse.Namespace,
+    workspace_dir: Path | None = None,
 ) -> None:
-    """Run a technique in agent mode.
-
-    Output is a compact AgentSummary — not a raw data dump.
-    Full evidence is always stored in the workspace database and
-    written to the workspace markdown directory.
-
-    Use --raw to get the full unabridged data dict.
-    """
+    """Run a technique in agent mode."""
     from quantum_mechanic.agent.summarizer import summarize
 
     if not args.workspace:
@@ -215,9 +231,6 @@ def _cmd_run(
     credential_id = None
     raw_output = "--raw" in extra_args
 
-    # --------------------------------------------------------
-    # Parse --credential flag from extra args.
-    # --------------------------------------------------------
     for i, arg in enumerate(extra_args):
         if arg == "--credential" and i + 1 < len(extra_args):
             try:
@@ -226,7 +239,7 @@ def _cmd_run(
                 _error_out(f"Invalid credential ID: {extra_args[i + 1]}")
 
     try:
-        ws = Workspace.load(args.workspace)
+        ws = Workspace.load(args.workspace, workspace_dir=workspace_dir)
         if credential_id is not None:
             ws.active_credential_id = credential_id
 
@@ -234,10 +247,8 @@ def _cmd_run(
         result = runner.run(technique_id, credential_id=credential_id)
 
         if raw_output:
-            # --raw → full unabridged data dict (for scripts/pipelines)
             _json_raw(result.to_dict())
         else:
-            # Default → compact AgentSummary (token-efficient for LLMs)
             registered = loader.get(technique_id)
             tactic = registered.metadata.tactic if registered else "unknown"
             summary = summarize(
@@ -257,7 +268,7 @@ def _cmd_run(
         _error_out(str(e))
 
 
-def _cmd_import(extra_args: list[str], args: argparse.Namespace) -> None:
+def _cmd_import(extra_args: list[str], args: argparse.Namespace, workspace_dir: Path | None = None) -> None:
     """Import credentials in agent mode."""
     if not args.workspace:
         _error_out("--workspace required for 'import' command")
@@ -267,9 +278,6 @@ def _cmd_import(extra_args: list[str], args: argparse.Namespace) -> None:
 
     provider = extra_args[0].lower()
 
-    # --------------------------------------------------------
-    # Parse options from extra args.
-    # --------------------------------------------------------
     opts: dict[str, str] = {}
     i = 1
     while i < len(extra_args):
@@ -285,7 +293,7 @@ def _cmd_import(extra_args: list[str], args: argparse.Namespace) -> None:
             i += 1
 
     try:
-        ws = Workspace.load(args.workspace)
+        ws = Workspace.load(args.workspace, workspace_dir=workspace_dir)
 
         if provider == "aws":
             if "profile" in opts:
@@ -349,7 +357,7 @@ def _cmd_import(extra_args: list[str], args: argparse.Namespace) -> None:
         _error_out(str(e))
 
 
-def _cmd_workspace(extra_args: list[str]) -> None:
+def _cmd_workspace(extra_args: list[str], workspace_dir: Path | None = None) -> None:
     """Workspace operations in agent mode."""
     if not extra_args:
         _error_out("Usage: qm --agent workspace <create|list> [name]")
@@ -361,14 +369,14 @@ def _cmd_workspace(extra_args: list[str]) -> None:
             _error_out("Usage: qm --agent workspace create <name>")
         name = extra_args[1]
         try:
-            ws = Workspace.create(name)
+            ws = Workspace.create(name, workspace_dir=workspace_dir)
             _json_out({"ok": True, "workspace": name})
             ws.close()
         except FileExistsError:
             _error_out(f"Workspace '{name}' already exists")
 
     elif subcmd == "list":
-        workspaces = Workspace.list_all()
+        workspaces = Workspace.list_all(workspace_dir=workspace_dir)
         _json_out({"ok": True, "workspaces": workspaces})
 
     else:

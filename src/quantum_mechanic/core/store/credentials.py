@@ -103,13 +103,14 @@ class CredentialStore:
 
     def _add_sqlite(self, **kwargs) -> int:
         """sqlite3 implementation of add()."""
-        cursor = self._db.execute(
+        row = self._db.fetchone(
             """
             INSERT INTO credentials
                 (provider, credential_type, friendly_name, principal_id,
                  account_id, derived_from_id, secret_data, expires_at,
                  auto_refresh, obtained_via, raw_data)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
             """,
             (
                 kwargs["provider"],
@@ -126,7 +127,7 @@ class CredentialStore:
             ),
         )
         self._db.commit()
-        return cursor.lastrowid  # type: ignore[return-value]
+        return row[0] if row else 0
 
     def _add_orm(self, **kwargs) -> int:
         """SQLAlchemy implementation of add()."""
@@ -195,6 +196,35 @@ class CredentialStore:
             row = session.get(CredentialRow, cred_id)
             if row:
                 row.principal_id = principal_id
+                if friendly_name:
+                    row.friendly_name = friendly_name
+                session.commit()
+
+    def update_secret(
+        self, cred_id: int, secret_data: str, friendly_name: str | None = None
+    ) -> None:
+        """Overwrite the secret_data (and optionally friendly_name) for an existing credential."""
+        if self._use_orm:
+            return self._update_secret_orm(cred_id, secret_data, friendly_name)
+        sql = "UPDATE credentials SET secret_data = ?"
+        params: list[Any] = [secret_data]
+        if friendly_name:
+            sql += ", friendly_name = ?"
+            params.append(friendly_name)
+        sql += " WHERE id = ?"
+        params.append(cred_id)
+        self._db.execute(sql, tuple(params))
+        self._db.commit()
+
+    def _update_secret_orm(
+        self, cred_id: int, secret_data: str, friendly_name: str | None
+    ) -> None:
+        from quantum_mechanic.core.orm.tables import CredentialRow
+
+        with self._SessionLocal() as session:
+            row = session.get(CredentialRow, cred_id)
+            if row:
+                row.secret_data = secret_data
                 if friendly_name:
                     row.friendly_name = friendly_name
                 session.commit()
@@ -368,3 +398,10 @@ class CredentialStore:
             created_at=row.created_at,
             raw_data=row.raw_data,
         )
+
+    def close(self) -> None:
+        """Dispose of the ORM engine and nullify the session factory."""
+        if hasattr(self, "_engine"):
+            self._engine.dispose()
+        if hasattr(self, "_SessionLocal"):
+            self._SessionLocal = None  # type: ignore[assignment]

@@ -15,7 +15,7 @@ from quantum_mechanic.techniques.escalation.gcp_sa_token_creator import execute
 # ---------------------------------------------------------------------------
 def test_gcp_success():
     ctx = MagicMock()
-    ctx.provider = 'gcp'
+    ctx.provider_name = 'gcp'
     # TODO: configure ctx mocks for the gcp path
     # execute(ctx)
     # ctx.finding.assert_called_once()

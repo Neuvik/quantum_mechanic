@@ -26,11 +26,11 @@ from quantum_mechanic.shell.commands import (
 )
 
 
-@pytest.fixture(autouse=True)
-def mock_env_dir(tmp_path, monkeypatch):
+@pytest.fixture
+def workspace_dir(tmp_path):
+    """Isolated workspace directory for each test — no monkeypatching needed."""
     ws_dir = tmp_path / "workspaces"
-    ws_dir.mkdir(exist_ok=True)
-    monkeypatch.setattr("quantum_mechanic.core.database.DEFAULT_WORKSPACE_DIR", ws_dir)
+    ws_dir.mkdir()
     return ws_dir
 
 
@@ -41,26 +41,25 @@ def mock_console():
 
 
 @pytest.fixture
-def state() -> ShellState:
+def state(workspace_dir) -> ShellState:
     registry = ProviderRegistry()
     registry.register(AWSAuthProvider())
     registry.register(AzureAuthProvider())
     registry.register(GCPAuthProvider())
     registry.register(OCIAuthProvider())
-    return ShellState(registry=registry)
+    return ShellState(registry=registry, workspace_dir=workspace_dir)
 
 
 @pytest.fixture
-def state_with_ws(mock_env_dir) -> ShellState:
-    ws = Workspace.create("test-ws")
+def state_with_ws(workspace_dir) -> ShellState:
+    ws = Workspace.create("test-ws", workspace_dir=workspace_dir)
     registry = ProviderRegistry()
     registry.register(AWSAuthProvider())
     registry.register(AzureAuthProvider())
     registry.register(GCPAuthProvider())
     registry.register(OCIAuthProvider())
-    s = ShellState(workspace=ws, registry=registry)
+    s = ShellState(workspace=ws, registry=registry, workspace_dir=workspace_dir)
     yield s
-    # E2-1: always close the workspace connection to avoid resource leaks.
     ws.close()
 
 
@@ -95,8 +94,8 @@ class TestCmdWorkspace:
         cmd_workspace(state, ["load"])
         assert "Usage:" in str(mock_console.call_args[0][0])
 
-    def test_load_success(self, state, mock_console, mock_env_dir):
-        Workspace.create("existing-ws").close()
+    def test_load_success(self, state, mock_console):
+        Workspace.create("existing-ws", workspace_dir=state.workspace_dir).close()
         cmd_workspace(state, ["load", "existing-ws"])
         assert state.workspace is not None
         assert state.workspace.name == "existing-ws"
@@ -110,11 +109,10 @@ class TestCmdWorkspace:
         cmd_workspace(state, ["list"])
         assert "No workspaces found" in str(mock_console.call_args[0][0])
 
-    def test_list_workspaces(self, state, mock_console, mock_env_dir):
-        Workspace.create("ws1").close()
-        Workspace.create("ws2").close()
+    def test_list_workspaces(self, state, mock_console):
+        Workspace.create("ws1", workspace_dir=state.workspace_dir).close()
+        Workspace.create("ws2", workspace_dir=state.workspace_dir).close()
         cmd_workspace(state, ["list"])
-        # print is called multiple times
         output = str(mock_console.call_args_list)
         assert "ws1" in output
         assert "ws2" in output

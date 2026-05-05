@@ -58,16 +58,17 @@ class EvidenceStore:
         self, technique_id: str, output_json: str, credential_id: int | None
     ) -> int:
         now = datetime.now(UTC).isoformat()
-        cursor = self._db.execute(
+        row = self._db.fetchone(
             """
             INSERT INTO evidence
                 (workspace_id, technique_id, credential_id, timestamp, output_json)
             VALUES (?, ?, ?, ?, ?)
+            RETURNING id
             """,
             (self._workspace_id, technique_id, credential_id, now, output_json),
         )
         self._db.commit()
-        return cursor.lastrowid  # type: ignore[return-value]
+        return row[0] if row else 0
 
     def _save_orm(
         self, technique_id: str, output_json: str, credential_id: int | None
@@ -108,6 +109,23 @@ class EvidenceStore:
 
         Used by the RAG orchestrator to gather context for agent advice.
         """
+        if self._use_orm:
+            from sqlalchemy import select
+
+            from quantum_mechanic.core.orm.tables import EvidenceRow
+            with self._SessionLocal() as session:
+                stmt = select(EvidenceRow).where(
+                    EvidenceRow.credential_id == credential_id
+                ).order_by(EvidenceRow.id.desc()).limit(limit)
+                rows = session.scalars(stmt).all()
+                return [
+                    {
+                        "technique_id": r.technique_id,
+                        "output_json": r.output_json,
+                    }
+                    for r in rows
+                ]
+
         rows = self._db.fetchall(
             """
             SELECT technique_id, output_json
@@ -180,13 +198,14 @@ class EvidenceStore:
 
     def _log_api_sqlite(self, **kwargs) -> int:
         now = datetime.now(UTC).isoformat()
-        cursor = self._db.execute(
+        row = self._db.fetchone(
             """
             INSERT INTO api_log
                 (timestamp, credential_id, provider, service, action,
                  request_params, response_status, response_summary,
                  technique_id, duration_ms)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
             """,
             (
                 now, kwargs.get("credential_id"), kwargs["provider"],
@@ -197,7 +216,7 @@ class EvidenceStore:
             ),
         )
         self._db.commit()
-        return cursor.lastrowid  # type: ignore[return-value]
+        return row[0] if row else 0
 
     def _log_api_orm(self, **kwargs) -> int:
         from quantum_mechanic.core.orm.tables import ApiLogRow
@@ -220,3 +239,10 @@ class EvidenceStore:
             session.commit()
             session.refresh(row)
             return row.id  # type: ignore[return-value]
+
+    def close(self) -> None:
+        """Dispose of the ORM engine and nullify the session factory."""
+        if hasattr(self, "_engine"):
+            self._engine.dispose()
+        if hasattr(self, "_SessionLocal"):
+            self._SessionLocal = None  # type: ignore[assignment]

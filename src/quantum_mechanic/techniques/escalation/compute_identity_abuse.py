@@ -111,6 +111,18 @@ from typing import Any
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 
+# ----------------------------------------------------------------
+# Loot schema — CloudFox-style output (loot.csv / table.txt)
+# ----------------------------------------------------------------
+LOOT_ITEMS_KEY = None  # single-row result
+LOOT_SCHEMA = [
+    ('target_profile', 'target_profile'),
+    ('stolen_access_key', 'access_key_id'),
+    ('stolen_secret_key', 'secret_access_key'),
+    ('stolen_session_token', 'session_token'),
+    ('notes', None),
+]
+
 logger = logging.getLogger(__name__)
 
 # ================================================================
@@ -124,14 +136,64 @@ QM_DEFAULT_AZURE_VM_SIZE = "Standard_B1s"
 QM_DEFAULT_GCP_MACHINE_TYPE = "e2-micro"
 
 
+def format_abuse_result(result: Any) -> None:
+    """Decentralized formatter for compute identity abuse."""
+    from rich.panel import Panel
+    from rich.table import Table
+
+    from quantum_mechanic.shell.formatters import console
+
+    data = result.data
+    provider = result.provider
+
+    if data.get("status") == "error":
+        console.print(f"  [bold red]✗[/bold red] {data.get('error', 'Unknown error')}")
+        return
+
+    console.print(f"  [bold red]⚠  COMPUTE IDENTITY ABUSE SUCCESSFUL[/bold red] — [dim]{provider.upper()}[/dim]")
+
+    tbl = Table(box=None, padding=(0, 2))
+    tbl.add_column("Property", style="bold white")
+    tbl.add_column("Value", style="cyan")
+
+    target = data.get("launched_instance_id") or data.get("launched_vm_name") or data.get("launched_instance") or "unknown"
+    tbl.add_row("Launched Instance", target)
+
+    identity = data.get("instance_profile_arn") or data.get("target_managed_identity_id") or data.get("target_service_account") or data.get("compartment_id")
+    tbl.add_row("Attached Identity", identity)
+
+    if "public_ip" in data and data["public_ip"]:
+        tbl.add_row("Public IP", data["public_ip"])
+
+    if "imds_endpoint" in data or "imds_url" in data:
+        tbl.add_row("IMDS Endpoint", data.get("imds_endpoint") or data.get("imds_url"))
+
+    if data.get("instance_terminated"):
+        tbl.add_row("Status", "[dim]Terminated after capture[/dim]")
+    else:
+        tbl.add_row("Status", "[bold green]Running[/bold green]")
+
+    console.print(Panel(tbl, border_style="red", expand=False))
+
+    if data.get("next_steps"):
+        steps = data["next_steps"]
+        if isinstance(steps, list):
+            console.print("\n  [bold yellow]Next Steps:[/bold yellow]")
+            for step in steps:
+                console.print(f"    • {step}")
+        else:
+            console.print(f"\n  [bold yellow]Next Steps:[/bold yellow] {steps}")
+
+
 @technique(
     technique_id="escalation/compute_identity_abuse",
-    tactic="Privilege Escalation",
+    tactic='privilege_escalation',
     mitre_id="T1078.004",
     providers=["aws", "azure", "gcp", "oci"],
     severity="critical",
     safe=False,
     description="Launch a new compute instance with a target cloud identity attached to retrieve credentials via IMDS.",
+    formatter=format_abuse_result,
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Execute compute identity abuse (cross-cloud).

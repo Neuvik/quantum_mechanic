@@ -7,7 +7,7 @@
 # PURPOSE:   Identify the exact permissions and policies attached
 #            to the active principal.
 #
-# PROVIDERS: AWS (Azure, GCP, OCI pending)
+# PROVIDERS: AWS, Azure, GCP, OCI
 #
 # HOW IT WORKS:
 #   AWS   — If User: Calls ListAttachedUserPolicies, ListUserPolicies,
@@ -15,10 +15,29 @@
 #           If Role: Calls ListAttachedRolePolicies, ListRolePolicies,
 #           and GetPolicyVersion logic.
 #
+#   Azure — Enumerates Role Assignments for the current principal's
+#           object ID across all accessible subscriptions.
+#
+#   GCP   — Searches for accessible projects and calls getIamPolicy
+#           on each to identify roles assigned to the current
+#           Service Account or User.
+#
+#   OCI   — Lists user group memberships and recursively enumerates
+#           all policies in all compartments within the tenancy.
+#
 # DETECTION (Blue Team):
 #   AWS   — CloudTrail: ListAttachedUserPolicies, GetPolicyVersion, etc.
 #           Alert on: High volumes of IAM Get/List calls from a
 #           single identity within a short timeframe (enumeration).
+#
+#   Azure — Monitor: RoleAssignments/read. Look for enumeration
+#           of RBAC across multiple subscriptions.
+#
+#   GCP   — Audit Logs: getIamPolicy. Monitor for rapid role
+#           checks across multiple project IDs.
+#
+#   OCI   — Audit Service: ListPolicies, ListUserGroupMemberships.
+#           Monitor for recursive policy listing.
 #
 # SAFE:     Yes — completely read-only, no state changes.
 # ================================================================
@@ -30,6 +49,15 @@ from typing import Any
 
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
+
+# ----------------------------------------------------------------
+# Loot schema — CloudFox-style output (loot.csv / table.txt)
+# ----------------------------------------------------------------
+LOOT_ITEMS_KEY = 'attached_policies'
+LOOT_SCHEMA = [
+    ('PolicyName', 'PolicyName'),
+    ('PolicyArn', 'PolicyArn'),
+]
 
 try:
     from azure.mgmt.authorization import AuthorizationManagementClient
@@ -44,14 +72,107 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def format_iam_result(result: Any) -> None:
+    """Decentralized formatter for IAM enumeration."""
+    from rich.table import Table
+
+    from quantum_mechanic.shell.formatters import console
+
+    data = result.data
+    provider = result.provider
+    principal = data.get("principal", "unknown")
+    principal_type = data.get("principal_type", "unknown")
+
+    console.print(f"  [bold green]✓[/bold green] IAM Enumeration for {provider.upper()} {principal_type} [cyan]{principal}[/cyan]")
+
+    if provider == "aws":
+        attached_policies = data.get("attached_policies", [])
+        inline_policies = data.get("inline_policies", [])
+
+        if not attached_policies and not inline_policies:
+            console.print("  [dim]No attached or inline IAM policies found.[/dim]")
+            return
+
+        if attached_policies:
+            table = Table(box=None, padding=(0, 2), title="Attached Managed Policies", title_style="bold cyan")
+            table.add_column("Policy Name", style="white")
+            table.add_column("Policy ARN", style="dim")
+            for p in attached_policies:
+                table.add_row(p.get("PolicyName", ""), p.get("PolicyArn", ""))
+            console.print(table)
+
+        if inline_policies:
+            table = Table(box=None, padding=(0, 2), title="Inline Policies", title_style="bold yellow")
+            table.add_column("Policy Name", style="white")
+            for p in inline_policies:
+                table.add_row(p.get("PolicyName", ""))
+            console.print(table)
+
+    elif provider == "azure":
+        assignments = data.get("role_assignments", [])
+        if not assignments:
+            console.print("  [dim]No Azure role assignments found.[/dim]")
+            return
+
+        table = Table(box=None, padding=(0, 2), title="Azure Role Assignments", title_style="bold cyan")
+        table.add_column("Role Name", style="bold white")
+        table.add_column("Scope", style="dim")
+        table.add_column("Definition ID", style="dim")
+        for a in assignments:
+            table.add_row(a.get("roleName", "Unknown"), a.get("scope", ""), str(a.get("roleDefinitionId", "")))
+        console.print(table)
+
+    elif provider == "gcp":
+        roles = data.get("project_roles", [])
+        if not roles:
+            console.print("  [dim]No GCP IAM roles found.[/dim]")
+            return
+
+        table = Table(box=None, padding=(0, 2), title="GCP Project Roles", title_style="bold cyan")
+        table.add_column("Project", style="bold white")
+        table.add_column("Role", style="green")
+        table.add_column("Condition", style="dim")
+        for r in roles:
+            condition = r.get("condition") or "None"
+            table.add_row(r.get("project", ""), r.get("role", ""), str(condition))
+        console.print(table)
+
+    elif provider == "oci":
+        groups = data.get("groups", [])
+        policies = data.get("policies", [])
+
+        if not groups and not policies:
+            console.print("  [dim]No OCI groups or policies found.[/dim]")
+            return
+
+        if groups:
+            table = Table(box=None, padding=(0, 2), title="OCI Group Memberships", title_style="bold cyan")
+            table.add_column("Group Name", style="bold white")
+            table.add_column("Group ID", style="dim")
+            for g in groups:
+                table.add_row(g.get("name", ""), g.get("id", ""))
+            console.print(table)
+
+        if policies:
+            table = Table(box=None, padding=(0, 2), title="OCI Policies (Across Compartments)", title_style="bold yellow")
+            table.add_column("Policy Name", style="bold white")
+            table.add_column("Compartment", style="dim")
+            table.add_column("Statements", style="green")
+            for p in policies:
+                statements = "\n".join(p.get("statements", []))
+                table.add_row(p.get("name", ""), p.get("compartment_id", "tenancy"), statements)
+            console.print(table)
+
+
 @technique(
     technique_id="discovery/enum_iam",
-    tactic="Discovery",
+    tactic='discovery',
     mitre_id="T1087.004",
     providers=["aws", "azure", "gcp", "oci"],
     severity="info",
     safe=True,
     description="Enumerate IAM policies and permissions attached to the active principal.",
+    formatter=format_iam_result,
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Execute the IAM enumeration technique.
@@ -94,6 +215,10 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     # 2. Extract specific name
     # e.g. arn:aws:iam::123:user/morpheus -> morpheus
     friendly_name = whoami_res.friendly_name
+
+    if ctx.provider_name == "aws":
+        # Ensure we perfectly isolate the actual Username/RoleName entirely independent of pathing (e.g. testing/production/user -> user)
+        friendly_name = friendly_name.split("/")[-1]
 
     try:
         if whoami_res.principal_type == "user":
@@ -232,6 +357,11 @@ def _enum_azure(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         "principal": friendly_name,
         "principal_type": whoami_res.principal_type,
         "role_assignments": assignments,
+        # Loot schema compatibility: map role_assignments → attached_policies
+        "attached_policies": [
+            {"PolicyName": a.get("roleName", "Unknown"), "PolicyArn": a.get("scope", "")}
+            for a in assignments
+        ],
     }
 
 
@@ -247,6 +377,7 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         }
 
     principal_id = whoami_res.principal_id
+    friendly_name = whoami_res.friendly_name
     member_str = f"user:{principal_id}"
     if whoami_res.principal_type == "service_account":
         member_str = f"serviceAccount:{principal_id}"
@@ -295,14 +426,14 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
 
     return {
         "status": "success",
-        "principal": whoami_res.friendly_name,
+        "principal": friendly_name,
         "principal_type": whoami_res.principal_type,
         "project_roles": roles_found,
     }
 
 
 def _enum_oci(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
-    """Enumerate OCI IAM policies for the current principal."""
+    """Enumerate OCI IAM policies recursively across all compartments."""
     import oci
 
     config = ctx.session["config"]
@@ -346,28 +477,39 @@ def _enum_oci(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         msg = getattr(e, "message", str(e))
         logger.warning(f"Failed to list user group memberships: {msg}")
 
-    # 2. Extract policy statements for the tenancy
-    # We only pull tenancy-level policies here for MVP.
-    # Sub-compartment policies require recursive enumeration.
+    # 2. Extract policy statements recursively across all compartments
+    compartment_ids = [tenancy_id]
     try:
-        tenancy_policies = identity_client.list_policies(compartment_id=tenancy_id).data
-
-        for p in tenancy_policies:
-            policies.append(
-                {
-                    "id": p.id,
-                    "name": p.name,
-                    "statements": p.statements,
-                }
-            )
+        # Fetch all child compartments recursively
+        child_compartments = identity_client.list_compartments(
+            tenancy_id, compartment_id_in_subtree=True, access_level="ACCESSIBLE"
+        ).data
+        compartment_ids.extend([c.id for c in child_compartments])
+        ctx.info(f"Discovered {len(compartment_ids)} accessible compartments for policy enumeration.")
     except Exception as e:
         msg = getattr(e, "message", str(e))
-        logger.warning(f"Failed to list tenancy policies: {msg}")
+        logger.warning(f"Failed to list child compartments: {msg}")
+
+    for cid in compartment_ids:
+        try:
+            comp_policies = identity_client.list_policies(compartment_id=cid).data
+            for p in comp_policies:
+                policies.append(
+                    {
+                        "id": p.id,
+                        "name": p.name,
+                        "compartment_id": cid,
+                        "statements": p.statements,
+                    }
+                )
+        except Exception as e:
+            msg = getattr(e, "message", str(e))
+            logger.debug(f"Failed to list policies in compartment {cid}: {msg}")
 
     return {
         "status": "success",
         "principal": friendly_name,
         "principal_type": whoami_res.principal_type,
         "groups": groups,
-        "tenancy_policies": policies,
+        "policies": policies,
     }

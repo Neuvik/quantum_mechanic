@@ -129,6 +129,7 @@ class TestGCPWhoAmI:
         mock_creds = MagicMock()
         # Delete service_account_email attribute so it uses the user flow
         del mock_creds.service_account_email
+        mock_creds.project_id = None
         mock_creds.token = "fake-token"
         
         # Mock tokeninfo response
@@ -153,6 +154,7 @@ class TestGCPWhoAmI:
         """Test whoami with an unverified user email."""
         mock_creds = MagicMock()
         del mock_creds.service_account_email
+        mock_creds.project_id = None
         mock_creds.token = "fake-token"
         
         mock_resp = MagicMock()
@@ -187,6 +189,7 @@ class TestGCPWhoAmI:
         """Test whoami gracefully handles tokeninfo API errors."""
         mock_creds = MagicMock()
         del mock_creds.service_account_email
+        mock_creds.project_id = None
         mock_creds.token = "fake-token"
         
         mock_urlopen.side_effect = Exception("API connection failed")

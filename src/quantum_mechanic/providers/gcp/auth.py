@@ -24,9 +24,10 @@ from pathlib import Path
 from typing import Any
 
 import google.auth
-import google.auth.credentials
-import google.auth.transport.requests
+from google.auth.credentials import Credentials
+from google.auth.transport.requests import Request
 from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials as TokenCredentials
 
 from quantum_mechanic.providers.base import AuthProvider, WhoAmIResult
 
@@ -44,7 +45,7 @@ class GCPAuthProvider(AuthProvider):
     def provider_name(self) -> str:
         return "gcp"
 
-    def authenticate(self, secret_data: dict[str, Any]) -> google.auth.credentials.Credentials:
+    def authenticate(self, secret_data: dict[str, Any]) -> Credentials:
         """Create GCP credentials from secret data.
 
         Args:
@@ -90,6 +91,11 @@ class GCPAuthProvider(AuthProvider):
                 finally:
                     google_logger.setLevel(old_level)
 
+            if "project_id" in secret_data:
+                credentials.project_id = secret_data["project_id"]
+            elif project:
+                credentials.project_id = project
+
             return credentials
 
         if method == "service_account_file":
@@ -116,9 +122,15 @@ class GCPAuthProvider(AuthProvider):
                 scopes=["https://www.googleapis.com/auth/cloud-platform"],
             )
 
+        if method == "access_token":
+            token = secret_data.get("access_token")
+            if not token:
+                raise ValueError("GCP access_token method requires 'access_token' string")
+            return TokenCredentials(token)
+
         raise ValueError(
             f"Unknown GCP auth method: {method}. "
-            f"Use: default, service_account_file, service_account_info"
+            f"Use: default, service_account_file, service_account_info, access_token"
         )
 
     def whoami(self, session: Any) -> WhoAmIResult:
@@ -140,7 +152,7 @@ class GCPAuthProvider(AuthProvider):
         # Refresh the credentials to ensure they're valid and
         # to populate token metadata.
         # --------------------------------------------------------
-        request = google.auth.transport.requests.Request()
+        request = Request()
         credentials.refresh(request)
 
         # --------------------------------------------------------
@@ -161,6 +173,11 @@ class GCPAuthProvider(AuthProvider):
                 credentials, request
             )
 
+        # Override project_id if it was explicitly passed during import
+        explicit_project = getattr(credentials, "project_id", None)
+        if explicit_project:
+            project_id = explicit_project
+
         return WhoAmIResult(
             provider="gcp",
             principal_id=email or "unknown",
@@ -177,7 +194,7 @@ class GCPAuthProvider(AuthProvider):
     @staticmethod
     def _resolve_user_identity(
         credentials: Any,
-        request: google.auth.transport.requests.Request,
+        request: Request,
     ) -> tuple[str, str | None, str, str]:
         """Resolve identity for user (non-SA) credentials.
 

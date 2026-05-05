@@ -27,6 +27,7 @@ from quantum_mechanic.core.loader import TechniqueLoader
 from quantum_mechanic.providers.aws.auth import AWSAuthProvider
 from quantum_mechanic.providers.azure.auth import AzureAuthProvider
 from quantum_mechanic.providers.base import ProviderRegistry
+from quantum_mechanic.providers.entra.auth import EntraAuthProvider
 from quantum_mechanic.providers.gcp.auth import GCPAuthProvider
 from quantum_mechanic.providers.oci.auth import OCIAuthProvider
 from quantum_mechanic.shell import formatters
@@ -49,6 +50,7 @@ def _build_registry() -> ProviderRegistry:
     registry = ProviderRegistry()
     registry.register(AWSAuthProvider())
     registry.register(AzureAuthProvider())
+    registry.register(EntraAuthProvider())
     registry.register(GCPAuthProvider())
     registry.register(OCIAuthProvider())
     return registry
@@ -111,20 +113,6 @@ def _build_completer(state: ShellState) -> NestedCompleter:
         "techniques": None,
         "run": technique_ids,
         "reload": None,
-        # ── Exploits ────────────────────────────────────────────
-        "exploits": {
-            "list": None,
-            "run": exploit_ids,
-        },
-        # ── Payloads ────────────────────────────────────────────
-        "payloads": {
-            "list": None,
-            "generate": {
-                "--wrapper": {"bash": None, "python": None, "raw": None},
-                "--no-minify": None,
-            },
-            "info": None,
-        },
         # ── Technique info / help ───────────────────────────────
         "info": technique_ids,
         "help": technique_ids,
@@ -134,11 +122,29 @@ def _build_completer(state: ShellState) -> NestedCompleter:
         # ── Agent ───────────────────────────────────────────────
         "ask": None,
         # ── Session ─────────────────────────────────────────────
-        "connect": None,
-        "disconnect": None,
         "exit": None,
         "quit": None,
     }
+
+    # ── Conditional Private Commands (Public Hygiene) ──────────────
+    if "exploits" in COMMANDS:
+        completions["exploits"] = {
+            "list": None,
+            "run": exploit_ids,
+        }
+    if "payloads" in COMMANDS:
+        completions["payloads"] = {
+            "list": None,
+            "generate": {
+                "--wrapper": {"bash": None, "python": None, "raw": None},
+                "--no-minify": None,
+            },
+            "info": None,
+        }
+    if "connect" in COMMANDS:
+        completions["connect"] = None
+    if "disconnect" in COMMANDS:
+        completions["disconnect"] = None
 
     return NestedCompleter.from_nested_dict(completions)
 
@@ -146,12 +152,26 @@ def _build_completer(state: ShellState) -> NestedCompleter:
 def run_shell(args: argparse.Namespace) -> None:
     """Launch the interactive QM shell."""
     # --------------------------------------------------------
-    # Setup logging — minimal for interactive mode.
+    # Setup logging — split between minimal console and verbose file
     # --------------------------------------------------------
-    logging.basicConfig(
-        level=logging.WARNING,
-        format="%(message)s",
-    )
+    log_dir = Path.home() / ".quantum_mechanic" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+
+    # Minimal console output
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.WARNING)
+    console_handler.setFormatter(logging.Formatter("%(message)s"))
+
+    # Verbose file sink
+    file_handler = logging.FileHandler(str(log_dir / "qm.log"))
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
 
     # --------------------------------------------------------
     # Initialize core components.
@@ -165,6 +185,16 @@ def run_shell(args: argparse.Namespace) -> None:
         loader=loader,
         registry=registry,
     )
+
+    def _notify_agent_checkin(agent):
+        """Callback to notify operator of new agent check-ins."""
+        formatters.console.print(
+            f"\n[bold green]⚡ agent check-in:[/bold green] "
+            f"[bold]{agent.hostname}[/bold] ({agent.internal_ip}) "
+            f"ID: [dim]{agent.id[:8]}...[/dim]"
+        )
+
+    state.on_agent_update(_notify_agent_checkin)
 
     # --------------------------------------------------------
     # Load workspace from args if specified.
@@ -189,6 +219,21 @@ def run_shell(args: argparse.Namespace) -> None:
     history_dir = Path.home() / ".quantum_mechanic"
     history_dir.mkdir(parents=True, exist_ok=True)
     history_file = history_dir / "shell_history"
+
+    # --------------------------------------------------------
+    # Direct command execution?
+    # --------------------------------------------------------
+    if args.command:
+        # Join command + args and split by semicolon for chaining
+        full_raw = " ".join([args.command] + args.args)
+        for sub_cmd in full_raw.split(";"):
+            parts = shlex.split(sub_cmd.strip())
+            if not parts: continue
+            _handle_command(state, parts[0].lower(), parts[1:])
+
+        if state.workspace:
+            state.workspace.close()
+        return
 
     session: PromptSession = PromptSession(
         history=FileHistory(str(history_file)),
@@ -217,35 +262,20 @@ def run_shell(args: argparse.Namespace) -> None:
                 break
 
             # --------------------------------------------------------
-            # Parse the command and arguments.
+            # Parse the command and arguments (support semicolon chaining).
             # --------------------------------------------------------
-            try:
-                parts = shlex.split(user_input)
-            except ValueError:
-                parts = user_input.split()
+            for cmd_segment in user_input.split(";"):
+                try:
+                    parts = shlex.split(cmd_segment.strip())
+                except ValueError:
+                    parts = cmd_segment.strip().split()
 
-            cmd_name = parts[0].lower()
-            cmd_args = parts[1:]
+                if not parts: continue
 
-            handler = COMMANDS.get(cmd_name)
-            if handler is None:
-                # --------------------------------------------------------
-                # If the input looks like a technique ID (contains /),
-                # treat it as 'run <technique_id>' automatically.
-                # The user shouldn't need to type 'run' every time.
-                # --------------------------------------------------------
-                if "/" in cmd_name and state.loader.get(cmd_name):
-                    from quantum_mechanic.shell.commands import cmd_run
+                cmd_name = parts[0].lower()
+                cmd_args = parts[1:]
 
-                    cmd_run(state, [cmd_name] + cmd_args)
-                    continue
-
-                formatters.console.print(
-                    f"  [red]✗[/red] Unknown command: {cmd_name}. Run 'help' for commands."
-                )
-                continue
-
-            handler(state, cmd_args)
+                _handle_command(state, cmd_name, cmd_args)
 
         except KeyboardInterrupt:
             formatters.console.print()
@@ -258,3 +288,29 @@ def run_shell(args: argparse.Namespace) -> None:
         except Exception as e:
             formatters.console.print(f"  [red]Error:[/red] {e}")
             logger.exception("Shell error")
+
+
+def _handle_command(state: ShellState, cmd_name: str, cmd_args: list[str]) -> None:
+    """Core command dispatch logic shared by REPL and direct execution."""
+    from quantum_mechanic.shell.commands import COMMANDS
+
+    handler = COMMANDS.get(cmd_name)
+    if handler is None:
+        # --------------------------------------------------------
+        # If the input looks like a technique ID (contains /),
+        # treat it as 'run <technique_id>' automatically.
+        # The user shouldn't need to type 'run' every time.
+        # --------------------------------------------------------
+        if "/" in cmd_name and state.loader.get(cmd_name):
+            from quantum_mechanic.shell.commands import cmd_run
+
+            cmd_run(state, [cmd_name] + cmd_args)
+            return
+
+        formatters.console.print(
+            f"  [red]✗[/red] Unknown command: {cmd_name}. Run 'help' for commands."
+        )
+        return
+
+    handler(state, cmd_args)
+

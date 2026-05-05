@@ -181,6 +181,13 @@ class AssetStore:
                 for r in rows
             ]
 
+    def close(self) -> None:
+        """Dispose of the ORM engine and nullify the session factory."""
+        if hasattr(self, "_engine"):
+            self._engine.dispose()
+        if hasattr(self, "_SessionLocal"):
+            self._SessionLocal = None  # type: ignore[assignment]
+
     # ================================================================
     # Network assets
     # ================================================================

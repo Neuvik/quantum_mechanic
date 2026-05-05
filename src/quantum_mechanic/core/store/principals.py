@@ -78,3 +78,7 @@ class PrincipalStore:
             )
             for r in rows
         ]
+
+    def close(self) -> None:
+        """No-op for consistency."""
+        pass

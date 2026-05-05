@@ -35,17 +35,72 @@ from typing import Any
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 
+# ----------------------------------------------------------------
+# Loot schema — Declarative table mapping
+# ----------------------------------------------------------------
+LOOT_ITEMS_KEY = 'permissions'
+LOOT_SCHEMA = [
+    ('action', 'Action', 'bold cyan'),
+    ('status', 'Status', 'white'),
+]
+
 logger = logging.getLogger(__name__)
+
+
+def format_permissions_result(result: Any) -> None:
+    """Decentralized formatter for enum_permissions."""
+    from rich.panel import Panel
+    from rich.table import Table
+
+    from quantum_mechanic.shell.formatters import console
+
+    data = result.data
+
+    if data.get("error"):
+        console.print(f"  [bold red]✗[/bold red] {data['error']}")
+        return
+
+    provider = result.provider
+    principal = data.get("principal", "unknown")
+    method = data.get("method", "unknown")
+
+    console.print(f"  [bold green]✓[/bold green] Permission Enumeration Successful — [dim]{provider.upper()}[/dim]")
+    console.print(f"  [dim]Principal: [cyan]{principal}[/cyan] | Method: [yellow]{method}[/yellow][/dim]")
+
+    allowed = data.get("allowed_actions", [])
+    denied = data.get("denied_actions", [])
+
+    if not allowed and not denied:
+        console.print("  [dim]No specific actions tested or found.[/dim]")
+        return
+
+    tbl = Table(box=None, padding=(0, 2))
+    tbl.add_column("Action", style="bold cyan")
+    tbl.add_column("Status", justify="left")
+
+    for a in allowed:
+        tbl.add_row(a, "[bold green]ALLOWED[/bold green]")
+
+    for a in denied:
+        tbl.add_row(a, "[dim red]DENIED[/dim red]")
+
+    console.print(Panel(tbl, border_style="dim", expand=False))
+
+    if data.get("next_steps"):
+        console.print("\n  [bold yellow]Next Steps:[/bold yellow]")
+        for step in data["next_steps"]:
+            console.print(f"    • {step}")
 
 
 @technique(
     technique_id="discovery/enum_permissions",
-    tactic="Discovery",
+    tactic='discovery',
     mitre_id="T1087",
     providers=["aws", "azure", "gcp", "oci"],
     severity="info",
     safe=True,
     description="Actively enumerate effective permissions for high-value actions.",
+    formatter=format_permissions_result,
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Execute the permissions enumeration technique.
@@ -339,15 +394,89 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
 
 
 def _enum_oci(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
-    """Enumerate OCI permissions. There is no direct simulator API in OCI without Data Safe/Analyzer."""
+    """Enumerate OCI permissions via active probing."""
+    try:
+        import oci
+    except ImportError:
+        return {
+            "status": "error",
+            "error": "oci package is not installed.",
+            "principal": whoami_res.friendly_name,
+            "allowed_actions": [],
+            "denied_actions": [],
+        }
+
+    config = ctx.session["config"]
+    signer = ctx.session.get("signer")
+
+    tenancy_id = config.get("tenancy")
+    if not tenancy_id:
+        return {
+            "status": "error",
+            "error": "Could not determine tenancy OCID from config.",
+            "principal": whoami_res.friendly_name,
+            "allowed_actions": [],
+            "denied_actions": [],
+        }
+
+    if signer:
+        identity = oci.identity.IdentityClient(config={}, signer=signer)
+        compute = oci.core.ComputeClient(config={}, signer=signer)
+        vcn = oci.core.VirtualNetworkClient(config={}, signer=signer)
+    else:
+        identity = oci.identity.IdentityClient(config)
+        compute = oci.core.ComputeClient(config)
+        vcn = oci.core.VirtualNetworkClient(config)
+
+    allowed_actions = []
+    denied_actions = []
+    errors = []
+
+    def probe(action_name: str, client_obj: Any, method_name: str, **kwargs: Any) -> None:
+        try:
+            method = getattr(client_obj, method_name)
+            method(**kwargs)
+            allowed_actions.append(action_name)
+        except oci.exceptions.ServiceError as e:
+            if getattr(e, "status", None) == 404 and "NotAuthorizedOrNotFound" in getattr(e, "message", "") or getattr(e, "status", None) == 401:
+                denied_actions.append(action_name)
+            else:
+                errors.append(f"{action_name}: {getattr(e, 'message', str(e))}")
+        except Exception as e:
+            errors.append(f"{action_name}: {str(e)}")
+
+    probe("identity:list_users", identity, "list_users", compartment_id=tenancy_id, limit=1)
+    probe("identity:list_groups", identity, "list_groups", compartment_id=tenancy_id, limit=1)
+    probe("compute:list_instances", compute, "list_instances", compartment_id=tenancy_id, limit=1)
+    probe("virtual_network:list_vcns", vcn, "list_vcns", compartment_id=tenancy_id, limit=1)
+
+    # Optional: Object Storage namespace and buckets
+    try:
+        if signer:
+            os_client = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        else:
+            os_client = oci.object_storage.ObjectStorageClient(config)
+
+        ns = os_client.get_namespace().data
+        probe(
+            "object_storage:list_buckets",
+            os_client,
+            "list_buckets",
+            namespace_name=ns,
+            compartment_id=tenancy_id,
+            limit=1
+        )
+    except Exception as e:
+        denied_actions.append("object_storage:get_namespace")
+        errors.append(f"object_storage init: {str(e)}")
+
     return {
         "status": "success",
-        "method": "none",
+        "method": "active_probing_list_apis",
         "principal": whoami_res.friendly_name,
-        "allowed_actions": [],
-        "denied_actions": [],
-        "errors": [],
-        "note": "OCI does not provide a native IAM policy simulation or testing API. Please use 'discovery/enum_iam' to manually review effective OCI policies."
+        "allowed_actions": sorted(allowed_actions),
+        "denied_actions": sorted(denied_actions),
+        "errors": errors,
     }
 
 
@@ -369,7 +498,7 @@ def _generate_next_steps(provider: str, allowed: list[str]) -> list[str]:
         allowed_lower = [a.lower() for a in allowed]
 
         if any("runcommand/action" in a for a in allowed_lower):
-            steps.append("You can execute code on Virtual Machines. Use 'lateral_movement/azure_run_command' to gain RCE on targets.")
+            steps.append("You can execute code on Virtual Machines. Use 'lateral_movement/vm_execute_command' to gain RCE on targets.")
         if any("roleassignments/write" in a for a in allowed_lower):
             steps.append("You have RBAC write access. You can assign yourself or others Highly Privileged roles (e.g., Owner/Contributor).")
         if any("managedidentities/assign/action" in a for a in allowed_lower) and any("virtualmachines/write" in a for a in allowed_lower):

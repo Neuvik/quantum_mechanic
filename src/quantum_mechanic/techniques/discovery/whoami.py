@@ -48,17 +48,77 @@ from __future__ import annotations
 
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
+
+# ----------------------------------------------------------------
+# Loot schema — CloudFox-style output (loot.csv / table.txt)
+# ----------------------------------------------------------------
+LOOT_ITEMS_KEY = None  # single-row result
+LOOT_SCHEMA = [
+    ('principal_id', 'principal_id'),
+    ('principal_type', 'principal_type'),
+    ('friendly_name', 'friendly_name'),
+    ('account_id', 'account_id'),
+    ('provider', 'provider'),
+    ('notes', None),
+]
 from quantum_mechanic.providers.base import WhoAmIResult
+
+
+def format_whoami(result: Any) -> None:
+    """Decentralized formatter for whoami.
+
+    Signature matches: func(result: TechniqueResult) -> None
+    """
+    from rich.panel import Panel
+
+    from quantum_mechanic.shell.formatters import console
+
+    data = result.data
+    if not isinstance(data, WhoAmIResult):
+        return
+
+    lines = []
+    lines.append(f"[bold]Provider:[/bold]  {data.provider.upper()}")
+    lines.append(f"[bold]Identity:[/bold]  {data.friendly_name}")
+    lines.append(f"[bold]Type:[/bold]      {data.principal_type}")
+    lines.append(f"[bold]Account:[/bold]   {data.account_id}")
+    if data.account_name:
+        lines.append(f"[bold]Acct Name:[/bold] {data.account_name}")
+    if data.tenant_id:
+        lines.append(f"[bold]Tenant:[/bold]    {data.tenant_id}")
+
+    if data.extra:
+        if "subscriptions" in data.extra:
+            subs = data.extra["subscriptions"]
+            if subs:
+                lines.append(f"\n[bold]Subscriptions:[/bold] ({len(subs)})")
+                for s in subs:
+                    lines.append(f"  • {s.get('name', 'unnamed')} ({s.get('id', '?')})")
+        if "user_id" in data.extra:
+            lines.append(f"[bold]User ID:[/bold]   {data.extra['user_id']}")
+
+    lines.append("\n[dim]Stored to workspace ✓[/dim]")
+
+    title = f"[bold]CREDENTIAL — {data.provider.upper()} {data.principal_type.title()}[/bold]"
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title=title,
+            border_style="green",
+            expand=False,
+        )
+    )
 
 
 @technique(
     technique_id="discovery/whoami",
-    tactic="Discovery",
+    tactic='discovery',
     mitre_id="T1087.004",
     providers=["aws", "azure", "gcp", "oci"],
     severity="info",
     safe=True,
     description="Identify the active principal associated with the current credentials.",
+    formatter=format_whoami,
 )
 def execute(ctx: ExecutionContext) -> WhoAmIResult:
     """Execute the whoami technique.

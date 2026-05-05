@@ -49,19 +49,66 @@ from typing import Any
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 
+# ----------------------------------------------------------------
+# Loot schema — CloudFox-style output (loot.csv / table.txt)
+# ----------------------------------------------------------------
+LOOT_ITEMS_KEY = 'chains'
+LOOT_SCHEMA = [
+    ('starting_principal', 'starting_principal'),
+    ('assumed_role_arn', 'assumed_role_arn'),
+    ('depth', 'depth'),
+    ('notes', None),
+]
+
 logger = logging.getLogger(__name__)
 
 MAX_DEPTH = 5  # Maximum role-chain depth to prevent infinite recursion
 
 
+def format_chain_result(result: Any) -> None:
+    """Decentralized formatter for assume_role_chain."""
+    from rich.table import Table
+
+    from quantum_mechanic.shell.formatters import console
+
+    data = result.data
+    chains = data.get("chains", [])
+
+    if not chains:
+        console.print("  [dim]No exploitable role chains found.[/dim]")
+        return
+
+    console.print(f"  [bold red]⚠  {len(chains)} ROLE PIVOT PATH(S) DISCOVERED[/bold red]")
+
+    for i, chain in enumerate(chains, 1):
+        tbl = Table(box=None, padding=(0, 2), title=f"Pivot Path #{i}", title_align="left")
+        tbl.add_column("Hop", justify="right", style="dim")
+        tbl.add_column("Role ARN / Action", style="bold white")
+        tbl.add_column("Status", justify="center")
+
+        # Start principal
+        tbl.add_row("0", data.get("starting_principal", "unknown"), "[green]START[/green]")
+
+        # We only have one role per chain item in the current logic,
+        # but the data structure stores it flattened.
+        status = "[bold green]ASSUMED[/bold green]" if chain.get("assumed") else "[yellow]CAN ASSUME[/yellow]"
+        if chain.get("error"):
+            status = f"[red]FAILED ({chain['error']})[/red]"
+
+        tbl.add_row(str(chain.get("depth", 0) + 1), chain.get("role_arn", "unknown"), status)
+
+        console.print(tbl)
+
+
 @technique(
     technique_id="escalation/assume_role_chain",
-    tactic="Privilege Escalation",
+    tactic='privilege_escalation',
     mitre_id="T1548",
     providers=["aws"],
     severity="high",
     safe=False,
     description="Enumerate and follow IAM role trust chains via sts:AssumeRole to extract derived credentials.",
+    formatter=format_chain_result,
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Execute role-chain assumption.

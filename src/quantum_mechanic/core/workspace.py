@@ -155,6 +155,18 @@ class Workspace:
         """Add or update a cloud account."""
         return self._accounts.add(account)
 
+    def upsert_account(
+        self, id: str, provider: str, name: str | None = None,
+        account_type: str = "account", parent_id: str | None = None,
+        metadata: str = "{}"
+    ) -> None:
+        """Convenience method to add or update a cloud account."""
+        return self._accounts.add(Account(
+            id=id, provider=provider, name=name or id,
+            account_type=account_type, parent_id=parent_id,
+            metadata=metadata
+        ))
+
     def get_account(self, account_id: str) -> Account | None:
         """Retrieve an account by ID."""
         return self._accounts.get(account_id)
@@ -208,6 +220,12 @@ class Workspace:
     ) -> list[Credential]:
         """List credentials with optional filters."""
         return self._credentials.list(provider=provider, status=status)
+
+    def update_credential_secret(
+        self, cred_id: int, secret_data: str, friendly_name: str | None = None
+    ) -> None:
+        """Overwrite the stored secret for a credential (e.g. refreshed token store)."""
+        return self._credentials.update_secret(cred_id, secret_data, friendly_name)
 
     def update_credential_status(self, cred_id: int, status: str) -> None:
         """Update the status of a credential."""
@@ -349,5 +367,12 @@ class Workspace:
     # ================================================================
 
     def close(self) -> None:
-        """Close the workspace database connection."""
+        """Close the workspace database connection and all domain stores."""
+        self._accounts.close()
+        self._agents.close()
+        self._assets.close()
+        self._credentials.close()
+        self._evidence.close()
+        self._findings.close()
+        self._principals.close()
         self.db.close()

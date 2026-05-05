@@ -156,14 +156,14 @@ def _summarize_enum_iam(data: dict, provider: str) -> tuple[str, list[str], dict
 
     elif provider == "oci":
         groups = data.get("groups", [])
-        policies = data.get("tenancy_policies", [])
-        stats = {"groups": len(groups), "tenancy_policies": len(policies)}
+        policies = data.get("policies", [])
+        stats = {"groups": len(groups), "policies": len(policies)}
         _RISKY_GROUPS = {"Administrators"}
         for g in groups:
             if g.get("name") in _RISKY_GROUPS:
                 flags.append(f"group:{g.get('name')}")
         principal = data.get("principal", "unknown")
-        summary = f"{principal} in {len(groups)} group(s), {len(policies)} tenancy polic{'ies' if len(policies) != 1 else 'y'}."
+        summary = f"{principal} in {len(groups)} group(s), {len(policies)} polic{'ies' if len(policies) != 1 else 'y'} discovered across compartments."
         if flags:
             summary += f" Flags: {', '.join(flags)}."
 
@@ -239,34 +239,31 @@ def _summarize_assume_role_chain(data: dict, provider: str) -> tuple[str, list[s
     return summary, flags, stats
 
 
-def _summarize_azure_run_command(data: dict, provider: str) -> tuple[str, list[str], dict]:
-    vm_name = data.get("vm_name", "unknown")
+def _summarize_vm_execute_command(data: dict, provider: str) -> tuple[str, list[str], dict]:
+    target = data.get("target", "unknown")
     stdout = data.get("stdout", "")
-    success = data.get("success", False)
-    safe_mode = data.get("safe_mode", False)
-    command = data.get("command", "")
+    status = data.get("status", "")
+    safe_mode = status == "would_execute"
 
     flags: list[str] = []
-    if success and stdout:
+    if stdout and not safe_mode and not data.get("error"):
         flags.append("rce:confirmed")
-        # Flag if we got root/admin
-        if "uid=0" in stdout or "root" in stdout.splitlines()[0] if stdout.splitlines() else "":
+        first = stdout.splitlines()[0] if stdout.splitlines() else ""
+        if "uid=0" in stdout or "root" in first:
             flags.append("rce:root_context")
 
     stats: dict[str, Any] = {
-        "vm_name": vm_name,
-        "command": command[:60],
+        "target": target,
         "stdout_len": len(stdout),
     }
 
     if safe_mode:
-        summary = f"WOULD execute '{command}' on {vm_name} (safe_mode — not run)."
-    elif success:
-        first_line = stdout.splitlines()[0][:80] if stdout else "(no output)"
-        summary = f"RCE on {vm_name}. Output: {first_line}"
+        summary = f"WOULD execute on {target} (safe_mode — not run)."
+    elif data.get("error"):
+        summary = f"vm_execute_command on {target} failed: {data['error'][:80]}"
     else:
-        error = data.get("error", "unknown error")
-        summary = f"RunCommand on {vm_name} failed: {error[:80]}"
+        first_line = stdout.splitlines()[0][:80] if stdout else "(no output)"
+        summary = f"RCE on {target}. Output: {first_line}"
 
     return summary, flags, stats
 
@@ -281,7 +278,7 @@ _SUMMARIZERS: dict[str, Any] = {
     "discovery/enum_iam":                  _summarize_enum_iam,
     "discovery/enum_compute":              _summarize_enum_compute,
     "escalation/assume_role_chain":        _summarize_assume_role_chain,
-    "lateral_movement/azure_run_command":  _summarize_azure_run_command,
+    "lateral_movement/vm_execute_command":  _summarize_vm_execute_command,
 }
 
 

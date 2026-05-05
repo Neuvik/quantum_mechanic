@@ -32,7 +32,7 @@ class TestTechniqueMetadata:
             providers=["aws", "azure"],
         )
         assert m.id == "discovery/whoami"
-        assert m.tactic == "discovery"
+        assert m.tactic == "discovery"  # TechniqueMetadata stores raw — normalization is in @technique
         assert m.providers == ["aws", "azure"]
 
     def test_default_severity_is_info(self):
@@ -116,7 +116,7 @@ class TestTechniqueDecorator:
 
         m = execute.__technique__
         assert m.id == "discovery/enum_iam"
-        assert m.tactic == "discovery"
+        assert m.tactic == "Discovery"  # @technique normalizes to Title Case
         assert m.providers == ["aws", "gcp"]
         assert m.severity == "medium"
         assert m.mitre_id == "T1087"

@@ -51,7 +51,8 @@ class TestTechniqueDecorator:
 
         meta = escalate.__technique__
         assert meta.id == "privesc/assume-role"
-        assert meta.tactic == "privilege_escalation"
+        assert meta.tactic == "Privilege Escalation"  # @technique normalizes to Title Case
+
         assert meta.providers == ["aws", "azure"]
         assert meta.severity == "high"
         assert meta.mitre_id == "T1548"
