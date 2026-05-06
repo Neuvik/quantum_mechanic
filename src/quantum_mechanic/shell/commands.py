@@ -959,9 +959,8 @@ def cmd_loot(state: ShellState, args: list[str]) -> None:
     """Display saved loot from previous technique runs: loot [technique_id]"""
     import csv
     from pathlib import Path
-
-    from rich import box
     from rich.table import Table
+    from rich import box
 
     if state.workspace is None:
         console.print("  [red]✗[/red] No active workspace.")
@@ -981,20 +980,36 @@ def cmd_loot(state: ShellState, args: list[str]) -> None:
         if not loot_dir.exists():
             console.print(f"  [red]✗[/red] No loot for '{target_id}'.")
             return
-        _render_loot_dir(loot_dir, target_id)
+        with console.pager(styles=True):
+            _render_loot_dir(loot_dir, target_id)
         return
 
-    # Otherwise list all available loot dirs
+    # Default view: Show a summary table of techniques that have loot
     csv_files = sorted(loot_root.rglob("loot.csv"))
     if not csv_files:
         console.print("  [dim]No loot.csv files found.[/dim]")
         return
 
+    summary = Table(title="Loot Summary", box=box.ROUNDED, border_style="dim")
+    summary.add_column("Technique ID", style="bold cyan")
+    summary.add_column("Rows", justify="right", style="green")
+    summary.add_column("Last Updated", style="dim")
+
     for csv_path in csv_files:
         rel = csv_path.parent.relative_to(loot_root)
         tech_id = str(rel)
-        _render_loot_dir(csv_path.parent, tech_id)
-        console.print()
+        try:
+            with csv_path.open(newline="", encoding="utf-8") as fh:
+                row_count = sum(1 for _ in fh) - 1 # skip header
+            mtime = Path(csv_path).stat().st_mtime
+            from datetime import datetime
+            dt = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+            summary.add_row(tech_id, str(max(0, row_count)), dt)
+        except Exception:
+            continue
+
+    console.print(summary)
+    console.print("  [dim]Use 'loot <id>' to view full results for a technique.[/dim]")
 
 
 def _render_loot_dir(loot_dir, tech_id: str) -> None:
@@ -1002,9 +1017,8 @@ def _render_loot_dir(loot_dir, tech_id: str) -> None:
     import csv
     import importlib
     from pathlib import Path
-
-    from rich import box
     from rich.table import Table
+    from rich import box
 
     csv_path = Path(loot_dir) / "loot.csv"
     if not csv_path.exists():
@@ -1020,7 +1034,6 @@ def _render_loot_dir(loot_dir, tech_id: str) -> None:
         return
 
     # If the technique module has a newer LOOT_SCHEMA, merge its columns in.
-    # This picks up new columns added since the CSV was last written.
     try:
         mod_path = f"quantum_mechanic.techniques.{tech_id.replace('/', '.')}"
         mod = importlib.import_module(mod_path)
@@ -1033,18 +1046,12 @@ def _render_loot_dir(loot_dir, tech_id: str) -> None:
     except Exception:
         pass
 
-    # Deduplicate by primary key (first column), keeping the last written row.
-    # This ensures re-runs show fresh data (e.g. IPs populated after fix)
-    # rather than accumulating stale rows from earlier runs.
     if fieldnames:
         key_col = fieldnames[0]
         keyed: dict = {}
         for row in rows:
-            keyed[row.get(key_col, "")] = row  # last write wins
+            keyed[row.get(key_col, "")] = row
         rows = list(keyed.values())
-    else:
-        seen: set = set()
-        rows = [r for r in rows if (t := tuple(r.values())) not in seen and not seen.add(t)]
 
     console.print(f"  [bold cyan]{tech_id}[/bold cyan]  [dim]({len(rows)} row(s))[/dim]")
 
@@ -1103,14 +1110,11 @@ def cmd_ask(state: ShellState, args: list[str]) -> None:
 
     question = " ".join(args)
 
-    # Import locally to avoid slow CLI startup if agent isn't used
-    # And gracefully degrade if LangChain/Anthropic are not installed!
     try:
         from rich.markdown import Markdown
-
         from quantum_mechanic.agent.orchestrator import AgentOrchestrator
     except ImportError:
-        console.print("\n[red]✗ Agent Dependencies Missing[/red]")
+        console.print("\\n[red]✗ Agent Dependencies Missing[/red]")
         console.print("  The RAG Agent is an optional feature.")
         console.print("  To enable it, install the AI dependencies:")
         console.print("  [bold cyan]pip install quantum-mechanic[agent][/bold cyan]")
@@ -1122,13 +1126,13 @@ def cmd_ask(state: ShellState, args: list[str]) -> None:
             response = agent.ask(question)
         except Exception as e:
             if "api key" in str(e).lower() or "anthropic" in str(e).lower():
-                console.print("\n[red]✗ Anthropic API Key Missing[/red]")
+                console.print("\\n[red]✗ Anthropic API Key Missing[/red]")
                 console.print("  Please set the [bold cyan]ANTHROPIC_API_KEY[/bold cyan] environment variable.")
                 return
-            console.print(f"\n[red]✗ Agent Error:[/red] {e}")
+            console.print(f"\\n[red]✗ Agent Error:[/red] {e}")
             return
 
-    console.print("\n[bold cyan]🧠 Quantum Mechanic Agent[/bold cyan]")
+    console.print("\\n[bold cyan]🧠 Quantum Mechanic Agent[/bold cyan]")
     console.print(Markdown(response))
     console.print()
 
@@ -1152,10 +1156,9 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
         m = registered.metadata
         safe_label = "[green]Safe (Read-Only)[/green]" if m.safe else "[red]Impact (Modifies State)[/red]"
 
-        console.print(f"\n[bold white]MODULE: {m.id}[/bold white]")
-        console.print(f"  [dim]{m.description}[/dim]\n")
+        console.print(f"\\n[bold white]MODULE: {m.id}[/bold white]")
+        console.print(f"  [dim]{m.description}[/dim]\\n")
 
-        # Key Intel
         intel = [
             f"[bold cyan]Tactic:[/bold cyan]    {m.tactic}",
             f"[bold cyan]MITRE ID:[/bold cyan]  {m.mitre_id or '—'}",
@@ -1168,7 +1171,6 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
 
         console.print()
 
-        # 1. Show structured options if defined
         if m.parameters:
             from rich.table import Table
             param_table = Table(box=None, padding=(0, 2), show_header=True)
@@ -1185,16 +1187,13 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
             console.print(param_table)
             console.print()
 
-            # 1.1 Show Usage Examples
             console.print("  [bold white]Usage Examples:[/bold white]")
             console.print(f"    qm> run {m.id}")
-            # Generate a dynamic example if parameters have examples defined
             example_parts = [f"{p.name}={p.example}" for p in m.parameters if p.example]
             if example_parts:
                 console.print(f"    qm> run {m.id} {' '.join(example_parts)}")
             console.print()
 
-        # 2. Fallback to legacy block extraction for USAGE/DETAILS
         try:
             mod = importlib.import_module(registered.module_path)
             src = inspect.getsource(mod)
@@ -1203,7 +1202,7 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
                 idx = src.find(start_marker)
                 if idx == -1:
                     return []
-                end = src.find("\n#\n", idx)
+                end = src.find("\\n#\\n", idx)
                 block = src[idx:end if end != -1 else idx + 800]
                 lines = []
                 for ln in block.splitlines():
@@ -1214,7 +1213,7 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
             params_lines = _extract_block(src, "# PARAMETERS")
             if params_lines and not m.parameters:
                 console.print("[bold]Parameters (via --param key=value):[/bold]")
-                for ln in params_lines[1:]:  # skip "PARAMETERS (via ctx.params)" header
+                for ln in params_lines[1:]:
                     console.print(f"  {ln}")
                 console.print()
 
@@ -1226,7 +1225,7 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
                         console.print(f"  [dim]{ln}[/dim]")
                 console.print()
         except Exception:
-            pass  # Source extraction is best-effort
+            pass
 
         return
 
@@ -1237,7 +1236,6 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
 def cmd_report(state: ShellState, args: list[str]) -> None:
     """Render the engagement narrative inline in the terminal using Rich tables."""
     import json
-
     from rich.panel import Panel
     from rich.table import Table
     from rich.tree import Tree
@@ -1246,121 +1244,120 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
         console.print("  [red]✗[/red] No active workspace/connection. Load one first.")
         return
 
-    transport = state.transport
-    info = transport.workspace_info()
-    ws_name = info.get("name", "Unknown Workspace")
+    with console.pager(styles=True):
+        transport = state.transport
+        info = transport.workspace_info()
+        ws_name = info.get("name", "Unknown Workspace")
 
-    # ── Header ──────────────────────────────────────────────────────
-    from datetime import UTC, datetime
-    now_str = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
-    creds_all = transport.list_credentials()
-    providers = ", ".join(sorted({c.get("provider", "unknown").upper() for c in creds_all})) or "none"
-    console.print(Panel(
-        f"[bold white]Attack Path — {ws_name}[/bold white]\n"
-        f"[dim]Updated: {now_str}   Providers: {providers}[/dim]",
-        style="blue",
-    ))
+        from datetime import UTC, datetime
+        now_str = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+        creds_all = transport.list_credentials()
+        providers = ", ".join(sorted({c.get("provider", "unknown").upper() for c in creds_all})) or "none"
+        
+        console.print(Panel(
+            f"[bold white]Attack Path — {ws_name}[/bold white]\\n"
+            f"[dim]Updated: {now_str}   Providers: {providers}[/dim]",
+            style="blue",
+        ))
 
-    # ── Credential Chain ─────────────────────────────────────────────
-    console.print("\n[bold cyan]Credential Chain[/bold cyan]")
-    console.print("[dim]How each identity was obtained:[/dim]\n")
-    if not creds_all:
-        console.print("  [dim]No credentials loaded.[/dim]")
-    else:
-        children: dict[int | None, list] = {}
-        for c in creds_all:
-            children.setdefault(c.get("derived_from_id"), []).append(c)
+        console.print("\\n[bold cyan]Credential Chain[/bold cyan]")
+        console.print("[dim]How each identity was obtained:[/dim]\\n")
+        if not creds_all:
+            console.print("  [dim]No credentials loaded.[/dim]")
+        else:
+            children: dict[int | None, list] = {}
+            for c in creds_all:
+                children.setdefault(c.get("derived_from_id"), []).append(c)
 
-        def _render_tree(tree_node, cred_id: int | None) -> None:
-            for c in children.get(cred_id, []):
-                name = c.get("friendly_name") or c.get("credential_type", "unknown")
-                obtained_via = c.get("obtained_via")
-                obtained = f" ← {obtained_via}" if obtained_via else ""
-                status = c.get("status", "unknown")
-                status_style = "red" if status == "expired" else (
-                    "yellow" if status == "expiring" else "green"
+            def _render_tree(tree_node, cred_id: int | None) -> None:
+                for c in children.get(cred_id, []):
+                    name = c.get("friendly_name") or c.get("credential_type", "unknown")
+                    obtained_via = c.get("obtained_via")
+                    obtained = f" ← {obtained_via}" if obtained_via else ""
+                    status = c.get("status", "unknown")
+                    status_style = "red" if status == "expired" else (
+                        "yellow" if status == "expiring" else "green"
+                    )
+                    label = (
+                        f"[bold]#{c.get('id')}[/bold] [{status_style}]{c.get('provider', 'unknown').upper()}[/{status_style}] "
+                        f"`{name}`[dim]{obtained}[/dim]"
+                    )
+                    branch = tree_node.add(label)
+                    _render_tree(branch, c.get("id"))
+
+            root_tree = Tree("[bold]Credentials[/bold]")
+            _render_tree(root_tree, None)
+            console.print(root_tree)
+
+        console.print("\\n[bold cyan]Technique Timeline[/bold cyan]")
+        evidence_rows = transport.list_evidence()
+        if not evidence_rows:
+            console.print("  [dim]No techniques have been run yet.[/dim]")
+        else:
+            tbl = Table(show_header=True, header_style="bold", box=None, padding=(0, 1))
+            tbl.add_column("#", style="dim", width=4)
+            tbl.add_column("Timestamp", width=16)
+            tbl.add_column("Technique")
+            tbl.add_column("Provider", width=8)
+            tbl.add_column("Principal")
+
+            for i, row in enumerate(evidence_rows, 1):
+                ts = str(row.get("timestamp", ""))[:16]
+                tech = row.get("technique_id", "unknown")
+                provider = "?"
+                principal = "?"
+                try:
+                    data = json.loads(row.get("output_json", "{}"))
+                    provider = (data.get("provider") or "?").upper()
+                    principal = (
+                        data.get("principal")
+                        or data.get("friendly_name")
+                        or data.get("starting_principal", "?").split("/")[-1]
+                        or "?"
+                    )
+                except Exception:
+                    pass
+                tbl.add_row(str(i), ts, tech, provider, principal)
+
+            console.print(tbl)
+
+        console.print("\\n[bold cyan]Findings[/bold cyan]")
+        findings = transport.list_findings()
+        if not findings:
+            console.print("  [dim]No findings recorded yet.[/dim]")
+        else:
+            _SEV_STYLE = {
+                "critical": ("🔴", "bold red"),
+                "high":     ("🟠", "bold yellow"),
+                "medium":   ("🟡", "yellow"),
+                "low":      ("🔵", "cyan"),
+                "info":     ("⚪", "dim"),
+            }
+            ftbl = Table(show_header=True, header_style="bold", box=None, padding=(0, 1))
+            ftbl.add_column("ID", width=5)
+            ftbl.add_column("Severity", width=10)
+            ftbl.add_column("Finding")
+            ftbl.add_column("Provider", width=8)
+            ftbl.add_column("Technique")
+
+            for f in sorted(findings, key=lambda x: (
+                {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(
+                    x.get("severity", "info").lower(), 99)
+            )):
+                fid = f.get("id", "?")
+                sev = f.get("severity", "info").lower()
+                emoji, style = _SEV_STYLE.get(sev, ("⚪", "dim"))
+                ftbl.add_row(
+                    f"F{fid:03d}" if isinstance(fid, int) else str(fid),
+                    f"[{style}]{emoji} {sev.upper()}[/{style}]",
+                    f.get("title", "Untitled"),
+                    f.get("provider", "?").upper(),
+                    f.get("technique_id", "?"),
                 )
-                label = (
-                    f"[bold]#{c.get('id')}[/bold] [{status_style}]{c.get('provider', 'unknown').upper()}[/{status_style}] "
-                    f"`{name}`[dim]{obtained}[/dim]"
-                )
-                branch = tree_node.add(label)
-                _render_tree(branch, c.get("id"))
+            console.print(ftbl)
 
-        root_tree = Tree("[bold]Credentials[/bold]")
-        _render_tree(root_tree, None)
-        console.print(root_tree)
+        console.print()
 
-    # ── Technique Timeline ───────────────────────────────────────────
-    console.print("\n[bold cyan]Technique Timeline[/bold cyan]")
-    evidence_rows = transport.list_evidence()
-    if not evidence_rows:
-        console.print("  [dim]No techniques have been run yet.[/dim]")
-    else:
-        tbl = Table(show_header=True, header_style="bold", box=None, padding=(0, 1))
-        tbl.add_column("#", style="dim", width=4)
-        tbl.add_column("Timestamp", width=16)
-        tbl.add_column("Technique")
-        tbl.add_column("Provider", width=8)
-        tbl.add_column("Principal")
-
-        for i, row in enumerate(evidence_rows, 1):
-            ts = str(row.get("timestamp", ""))[:16]
-            tech = row.get("technique_id", "unknown")
-            provider = "?"
-            principal = "?"
-            try:
-                data = json.loads(row.get("output_json", "{}"))
-                provider = (data.get("provider") or "?").upper()
-                principal = (
-                    data.get("principal")
-                    or data.get("friendly_name")
-                    or data.get("starting_principal", "?").split("/")[-1]
-                    or "?"
-                )
-            except Exception:
-                pass
-            tbl.add_row(str(i), ts, tech, provider, principal)
-
-        console.print(tbl)
-
-    # ── Findings ─────────────────────────────────────────────────────
-    console.print("\n[bold cyan]Findings[/bold cyan]")
-    findings = transport.list_findings()
-    if not findings:
-        console.print("  [dim]No findings recorded yet.[/dim]")
-    else:
-        _SEV_STYLE = {
-            "critical": ("🔴", "bold red"),
-            "high":     ("🟠", "bold yellow"),
-            "medium":   ("🟡", "yellow"),
-            "low":      ("🔵", "cyan"),
-            "info":     ("⚪", "dim"),
-        }
-        ftbl = Table(show_header=True, header_style="bold", box=None, padding=(0, 1))
-        ftbl.add_column("ID", width=5)
-        ftbl.add_column("Severity", width=10)
-        ftbl.add_column("Finding")
-        ftbl.add_column("Provider", width=8)
-        ftbl.add_column("Technique")
-
-        for f in sorted(findings, key=lambda x: (
-            {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(
-                x.get("severity", "info").lower(), 99)
-        )):
-            fid = f.get("id", "?")
-            sev = f.get("severity", "info").lower()
-            emoji, style = _SEV_STYLE.get(sev, ("⚪", "dim"))
-            ftbl.add_row(
-                f"F{fid:03d}" if isinstance(fid, int) else str(fid),
-                f"[{style}]{emoji} {sev.upper()}[/{style}]",
-                f.get("title", "Untitled"),
-                f.get("provider", "?").upper(),
-                f.get("technique_id", "?"),
-            )
-        console.print(ftbl)
-
-    console.print()
 
 
 
