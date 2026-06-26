@@ -513,3 +513,5 @@ def _enum_oci(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         "groups": groups,
         "policies": policies,
     }
+
+# ================================================================

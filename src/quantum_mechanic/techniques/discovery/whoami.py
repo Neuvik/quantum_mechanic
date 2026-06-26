@@ -114,7 +114,7 @@ def format_whoami(result: Any) -> None:
     technique_id="discovery/whoami",
     tactic='discovery',
     mitre_id="T1087.004",
-    providers=["aws", "azure", "gcp", "oci"],
+    providers=["aws", "azure", "gcp", "oci", "entra"],
     severity="info",
     safe=True,
     description="Identify the active principal associated with the current credentials.",

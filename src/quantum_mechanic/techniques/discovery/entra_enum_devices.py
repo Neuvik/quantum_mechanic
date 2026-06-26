@@ -45,6 +45,19 @@ _DEVICES_URL = (
     "&$top=999"
 )
 
+# ----------------------------------------------------------------
+# Loot & Formatter
+# ----------------------------------------------------------------
+LOOT_ITEMS_KEY = "devices"
+LOOT_SCHEMA = [
+    ("displayName", "Device Name", "bold cyan"),
+    ("operatingSystem", "OS", "white"),
+    ("trustType", "Trust Type", "dim"),
+    ("isCompliant", "Compliant", "dim"),
+    ("isManaged", "Managed", "dim"),
+    ("id", "Object ID", "dim"),
+]
+
 _TRUST_TYPE_LABELS = {
     "AzureAD": "Azure AD Joined",
     "ServerAD": "Hybrid Joined",
@@ -90,7 +103,7 @@ def _format_entra_enum_devices(result: Any) -> None:
         )
         managed = d.get("isManaged")
         managed_str = "[green]✓[/green]" if managed else "[dim]✗[/dim]"
-        trust = _TRUST_TYPE_LABELS.get(d.get("trustType", ""), d.get("trustType", "—"))
+        trust = d.get("trustType", "—")
         os_ver = d.get("operatingSystem", "—")
         tbl.add_row(d.get("displayName", "—"), os_ver, trust, compliant_str, managed_str)
 
@@ -110,6 +123,8 @@ def _format_entra_enum_devices(result: Any) -> None:
         "Enumerate Entra ID registered and joined devices, including compliance status."
     ),
     formatter=_format_entra_enum_devices,
+    loot_schema=LOOT_SCHEMA,
+    loot_items_key=LOOT_ITEMS_KEY,
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Enumerate Entra ID devices via Graph /devices."""
@@ -131,9 +146,13 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
     non_compliant = sum(1 for d in devices if d.get("isCompliant") is False)
     by_trust: dict[str, int] = {}
+    copied_devices = []
     for d in devices:
-        t = d.get("trustType", "Unknown")
-        by_trust[t] = by_trust.get(t, 0) + 1
+        raw_trust = d.get("trustType") or "Unknown"
+        d_copy = dict(d)
+        d_copy["trustType"] = _TRUST_TYPE_LABELS.get(raw_trust, raw_trust)
+        copied_devices.append(d_copy)
+        by_trust[raw_trust] = by_trust.get(raw_trust, 0) + 1
 
     return {
         "provider": "entra",
@@ -141,5 +160,5 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         "total": len(devices),
         "non_compliant": non_compliant,
         "by_trust_type": by_trust,
-        "devices": devices,
+        "devices": copied_devices,
     }

@@ -44,6 +44,20 @@ _USERS_URL = (
 )
 
 
+# ----------------------------------------------------------------
+# Loot & Formatter
+# ----------------------------------------------------------------
+LOOT_ITEMS_KEY = "users"
+LOOT_SCHEMA = [
+    ("userPrincipalName", "UPN", "bold cyan"),
+    ("displayName", "Display Name", "white"),
+    ("mail", "Mail", "dim"),
+    ("userType", "Type", "dim"),
+    ("accountEnabled", "Enabled", "dim"),
+    ("id", "Object ID", "dim"),
+]
+
+
 def _format_entra_enum_users(result: Any) -> None:
     from rich.table import Table
 
@@ -91,6 +105,8 @@ def _format_entra_enum_users(result: Any) -> None:
     safe=True,
     description="Enumerate all Entra ID user accounts via Microsoft Graph.",
     formatter=_format_entra_enum_users,
+    loot_schema=LOOT_SCHEMA,
+    loot_items_key=LOOT_ITEMS_KEY,
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Enumerate Entra ID users via Graph /users."""
@@ -109,6 +125,10 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     with httpx.Client(timeout=60) as http:
         users = graph_list(http, _USERS_URL, headers)
 
+    for u in users:
+        u.setdefault("username", u.get("userPrincipalName") or u.get("mail") or "—")
+        u.setdefault("type", u.get("userType") or "Member")
+        u.setdefault("info", f"Display Name: {u.get('displayName', '—')}")
 
     guests = sum(1 for u in users if u.get("userType") == "Guest")
     disabled = sum(1 for u in users if not u.get("accountEnabled", True))

@@ -159,11 +159,24 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
                 paginator = l_client.get_paginator("list_functions")
                 for page in paginator.paginate():
                     for f in page.get("Functions", []):
+                        env_vars = f.get("Environment", {}).get("Variables", {})
+                        
+                        code_location = None
+                        try:
+                            # Try to get function details to extract the pre-signed code download URL
+                            func_details = l_client.get_function(FunctionName=f.get("FunctionName"))
+                            code_location = func_details.get("Code", {}).get("Location")
+                        except (BotoCoreError, ClientError):
+                            pass
+
                         functions.append({
                             "name": f.get("FunctionName"),
                             "role": f.get("Role"),
                             "runtime": f.get("Runtime"),
                             "region": region,
+                            "env_var_count": len(env_vars),
+                            "env_vars": env_vars,
+                            "code_location": code_location,
                         })
             except ClientError:
                 pass

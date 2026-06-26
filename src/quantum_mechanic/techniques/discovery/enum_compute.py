@@ -133,6 +133,7 @@ def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
                             profile = inst.get("IamInstanceProfile")
                             instances.append({
                                 "instance_id": inst.get("InstanceId"),
+                                "vm_id": inst.get("InstanceId"),
                                 "state": inst.get("State", {}).get("Name"),
                                 "type": inst.get("InstanceType"),
                                 "key_name": inst.get("KeyName"),
@@ -340,6 +341,7 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
 
                 instances.append({
                     "instance_id": inst.get("name"),
+                    "vm_id": inst.get("name"),
                     "name": inst.get("name"),
                     "zone": inst.get("zone", "").split("/")[-1],
                     "region": inst.get("zone", "").split("/")[-1],
@@ -411,6 +413,7 @@ def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
                         continue
                     instances.append({
                         "instance_id": inst.display_name,
+                        "vm_id": inst.id,
                         "ocid": inst.id,
                         "display_name": inst.display_name,
                         "compartment_id": inst.compartment_id,

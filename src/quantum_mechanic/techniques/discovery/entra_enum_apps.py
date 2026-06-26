@@ -51,6 +51,21 @@ _SP_URL = (
 )
 
 
+# ----------------------------------------------------------------
+# Loot & Formatter
+# ----------------------------------------------------------------
+LOOT_ITEMS_KEY = "apps"
+LOOT_SCHEMA = [
+    ("displayName", "Display Name", "bold cyan"),
+    ("type", "Type", "white"),
+    ("appId", "App ID", "dim"),
+    ("signInAudience", "Audience", "dim"),
+    ("secrets", "Secrets", "yellow"),
+    ("enabled", "Enabled", "dim"),
+    ("id", "Object ID", "dim"),
+]
+
+
 def _format_entra_enum_apps(result: Any) -> None:
     from rich.table import Table
 
@@ -102,6 +117,8 @@ def _format_entra_enum_apps(result: Any) -> None:
         "Enumerate Entra ID app registrations and service principals via Microsoft Graph."
     ),
     formatter=_format_entra_enum_apps,
+    loot_schema=LOOT_SCHEMA,
+    loot_items_key=LOOT_ITEMS_KEY,
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Enumerate Entra ID apps and service principals via Graph."""
@@ -127,11 +144,34 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     ]
     with_secrets = [a for a in applications if a.get("passwordCredentials")]
 
+    apps = []
+    for a in applications:
+        apps.append({
+            "displayName": a.get("displayName"),
+            "type": "App Registration",
+            "appId": a.get("appId"),
+            "signInAudience": a.get("signInAudience"),
+            "secrets": len(a.get("passwordCredentials", [])),
+            "enabled": "—",
+            "id": a.get("id"),
+        })
+    for sp in service_principals:
+        apps.append({
+            "displayName": sp.get("displayName"),
+            "type": "Service Principal",
+            "appId": sp.get("appId"),
+            "signInAudience": "—",
+            "secrets": 0,
+            "enabled": "Yes" if sp.get("accountEnabled") else "No",
+            "id": sp.get("id"),
+        })
+
     return {
         "provider": "entra",
         "tenant_id": store.tenant_id,
         "applications": applications,
         "service_principals": service_principals,
+        "apps": apps,
         "multi_tenant_count": len(multi_tenant),
         "with_secrets_count": len(with_secrets),
     }

@@ -32,6 +32,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
+
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 
@@ -101,6 +103,8 @@ def format_permissions_result(result: Any) -> None:
     safe=True,
     description="Actively enumerate effective permissions for high-value actions.",
     formatter=format_permissions_result,
+    loot_schema=LOOT_SCHEMA,
+    loot_items_key=LOOT_ITEMS_KEY,
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Execute the permissions enumeration technique.
@@ -145,6 +149,17 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         steps = _generate_next_steps(ctx.provider_name, result.get("allowed_actions", []))
         if steps:
             result["next_steps"] = steps
+
+    # --------------------------------------------------------
+    # Flatten permitted/denied actions to populate loot table.
+    # --------------------------------------------------------
+    permissions_loot = []
+    for action in result.get("allowed_actions", []):
+        permissions_loot.append({"action": action, "status": "ALLOWED"})
+    for action in result.get("denied_actions", []):
+        permissions_loot.append({"action": action, "status": "DENIED"})
+    result["permissions"] = permissions_loot
+    result["provider"] = ctx.provider_name
 
     return result
 
@@ -249,17 +264,6 @@ def _enum_aws(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
 
 def _enum_azure(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
     """Enumerate Azure effective permissions using Authorization API."""
-    try:
-        from azure.mgmt.authorization import AuthorizationManagementClient
-    except ImportError:
-        return {
-            "status": "error",
-            "error": "azure-mgmt-authorization package is not installed.",
-            "principal": whoami_res.friendly_name,
-            "allowed_actions": [],
-            "denied_actions": [],
-        }
-
     friendly_name = whoami_res.friendly_name
     subscriptions = whoami_res.extra.get("subscriptions", [])
 
@@ -278,23 +282,44 @@ def _enum_azure(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
     not_data_actions = set()
     errors = []
 
+    # --------------------------------------------------------
+    # Get ARM management token from active credential.
+    # --------------------------------------------------------
+    try:
+        token_obj = ctx.session.get_token("https://management.azure.com/.default")
+        token = token_obj.token
+    except Exception as token_err:
+        return {
+            "status": "error",
+            "error": f"Failed to obtain management token: {token_err}",
+            "principal": friendly_name,
+            "allowed_actions": [],
+            "denied_actions": [],
+        }
+
+    # --------------------------------------------------------
+    # Query permissions API for each accessible subscription.
+    # --------------------------------------------------------
     for sub in subscriptions:
         sub_id = sub["id"]
         try:
-            auth_client = AuthorizationManagementClient(ctx.session, sub_id)
+            url = f"https://management.azure.com/subscriptions/{sub_id}/providers/Microsoft.Authorization/permissions?api-version=2022-04-01"
+            headers = {"Authorization": f"Bearer {token}"}
+            with httpx.Client(timeout=60) as http:
+                r = http.get(url, headers=headers)
+                if r.status_code != 200:
+                    raise Exception(f"HTTP {r.status_code}: {r.text}")
 
-            # This API calculates the caller's effective permissions for the given subscription.
-            sub_permissions = auth_client.permissions.list_for_subscription()
-
-            for perm in sub_permissions:
-                if perm.actions:
-                    allowed_actions.update(perm.actions)
-                if perm.not_actions:
-                    not_actions.update(perm.not_actions)
-                if perm.data_actions:
-                    data_actions.update(perm.data_actions)
-                if perm.not_data_actions:
-                    not_data_actions.update(perm.not_data_actions)
+                sub_permissions = r.json().get("value", [])
+                for perm in sub_permissions:
+                    if perm.get("actions"):
+                        allowed_actions.update(perm["actions"])
+                    if perm.get("notActions"):
+                        not_actions.update(perm["notActions"])
+                    if perm.get("dataActions"):
+                        data_actions.update(perm["dataActions"])
+                    if perm.get("notDataActions"):
+                        not_data_actions.update(perm["notDataActions"])
 
         except Exception as e:
             msg = getattr(e, "message", str(e))
@@ -303,7 +328,7 @@ def _enum_azure(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
 
     return {
         "status": "success",
-        "method": "AuthorizationManagementClient.permissions.list_for_subscription",
+        "method": "GET /subscriptions/{sub_id}/providers/Microsoft.Authorization/permissions",
         "principal": friendly_name,
         "allowed_actions": sorted(list(allowed_actions)),
         "denied_actions": sorted(list(not_actions)),

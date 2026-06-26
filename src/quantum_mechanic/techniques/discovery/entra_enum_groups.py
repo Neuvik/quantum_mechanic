@@ -44,6 +44,19 @@ _GROUPS_URL = (
 )
 
 
+# ----------------------------------------------------------------
+# Loot & Formatter
+# ----------------------------------------------------------------
+LOOT_ITEMS_KEY = "groups"
+LOOT_SCHEMA = [
+    ("displayName", "Display Name", "bold cyan"),
+    ("group_type", "Type", "white"),
+    ("isAssignableToRole", "Role-Assignable", "bold yellow"),
+    ("id", "Object ID", "dim"),
+    ("description", "Description", "dim"),
+]
+
+
 def _classify_group(g: dict) -> str:
     group_types = g.get("groupTypes", [])
     if g.get("isAssignableToRole"):
@@ -87,7 +100,7 @@ def _format_entra_enum_groups(result: Any) -> None:
         role_flag = "[bold yellow]YES[/bold yellow]" if g.get("isAssignableToRole") else ""
         tbl.add_row(
             g.get("displayName", "—"),
-            _classify_group(g),
+            g.get("group_type", "—"),
             role_flag,
             g.get("id", ""),
         )
@@ -106,6 +119,8 @@ def _format_entra_enum_groups(result: Any) -> None:
     safe=True,
     description="Enumerate Entra ID groups and classify by type via Microsoft Graph.",
     formatter=_format_entra_enum_groups,
+    loot_schema=LOOT_SCHEMA,
+    loot_items_key=LOOT_ITEMS_KEY,
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Enumerate Entra ID groups via Graph /groups."""
@@ -128,6 +143,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     by_type: dict[str, int] = {}
     for g in groups:
         gtype = _classify_group(g)
+        g["group_type"] = gtype
         by_type[gtype] = by_type.get(gtype, 0) + 1
 
     return {

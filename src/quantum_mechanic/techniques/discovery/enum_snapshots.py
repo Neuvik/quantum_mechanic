@@ -165,7 +165,11 @@ def format_snapshots_result(result: Any) -> None:
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     if ctx.session is not None:
         return _exec_authenticated(ctx)
-    return _exec_anonymous(ctx)
+    return {
+        "status": "error",
+        "error": "This technique requires an active AWS credential. Anonymous enumeration of AWS snapshots is not supported by the AWS API.",
+        "snapshots": [],
+    }
 
 
 def _exec_authenticated(ctx: ExecutionContext) -> dict[str, Any]:
@@ -182,23 +186,34 @@ def _exec_authenticated(ctx: ExecutionContext) -> dict[str, Any]:
     except ImportError:
         return {"error": "boto3 not installed.", "snapshots": []}
 
+    account_id = ctx.get_param("account_id") or ""
+    search = ctx.get_param("search") or ""
+    is_external_recon = bool(account_id or search)
+
     regions = _resolve_regions(ctx, session=ctx.session)
     if isinstance(regions, dict):
         return regions
 
-    ctx.info(f"Authenticated scan — {len(regions)} region(s) for owned snapshots and AMIs...")
+    if is_external_recon:
+        ctx.info(f"Authenticated external scan — {len(regions)} region(s) for public snapshots in target account...")
+    else:
+        ctx.info(f"Authenticated internal scan — {len(regions)} region(s) for owned snapshots and AMIs...")
 
     snapshots: list[dict[str, Any]] = []
     for region in regions:
         try:
             ec2 = ctx.session.client("ec2", region_name=region)
-            snapshots.extend(_enum_snapshots(ec2, region))
-            snapshots.extend(_enum_amis(ec2, region))
+            if is_external_recon:
+                snapshots.extend(_enum_snapshots_public(ec2, region, account_id, search))
+                snapshots.extend(_enum_amis_public(ec2, region, account_id, search))
+            else:
+                snapshots.extend(_enum_snapshots(ec2, region))
+                snapshots.extend(_enum_amis(ec2, region))
         except ClientError as e:
             logger.debug("Skipping region %s: %s", region, e)
 
     public_count = sum(1 for s in snapshots if s.get("public"))
-    if public_count:
+    if public_count and not is_external_recon:
         ctx.info(f"[bold red]⚠ {public_count} public resource(s) found.[/bold red]")
 
     return {
@@ -206,52 +221,6 @@ def _exec_authenticated(ctx: ExecutionContext) -> dict[str, Any]:
         "total": len(snapshots),
         "public_count": public_count,
         "regions_scanned": len(regions),
-    }
-
-
-def _exec_anonymous(ctx: ExecutionContext) -> dict[str, Any]:
-    """External recon: find public snapshots/AMIs in a target account (no creds needed)."""
-    try:
-        from botocore import UNSIGNED
-        from botocore.config import Config
-    except ImportError:
-        return {"error": "boto3 not installed.", "snapshots": []}
-
-    account_id = ctx.get_param("account_id") or ""
-    search = ctx.get_param("search") or ""
-
-    if not account_id and not search:
-        return {
-            "error": (
-                "Unauthenticated mode requires 'account_id' or 'search' to scope results. "
-                "Example: account_id=123456789012  or  search=prod"
-            ),
-            "snapshots": [],
-        }
-
-    regions = _resolve_regions(ctx, session=None)
-    if isinstance(regions, dict):
-        return regions
-
-    ctx.info(f"Anonymous scan — {len(regions)} region(s), no credential required...")
-
-    anon_cfg = Config(signature_version=UNSIGNED)
-    snapshots: list[dict[str, Any]] = []
-
-    for region in regions:
-        try:
-            ec2 = boto3.client("ec2", region_name=region, config=anon_cfg)
-            snapshots.extend(_enum_snapshots_public(ec2, region, account_id, search))
-            snapshots.extend(_enum_amis_public(ec2, region, account_id, search))
-        except Exception as e:
-            logger.debug("Skipping region %s (anonymous): %s", region, e)
-
-    return {
-        "snapshots": snapshots,
-        "total": len(snapshots),
-        "public_count": len(snapshots),  # all results are public by definition
-        "regions_scanned": len(regions),
-        "mode": "anonymous",
     }
 
 
@@ -376,11 +345,11 @@ def _enum_amis(ec2, region: str) -> list[dict[str, Any]]:
 
 
 # ----------------------------------------------------------------
-# Anonymous (unauthenticated) enumeration
+# External recon (public) enumeration
 # ----------------------------------------------------------------
 
 def _enum_snapshots_public(ec2, region: str, account_id: str, search: str) -> list[dict[str, Any]]:
-    """Find publicly restorable snapshots using anonymous API calls."""
+    """Find publicly restorable snapshots using authenticated API calls."""
     results = []
     try:
         kwargs: dict[str, Any] = {"RestorableByUserIds": ["all"]}
@@ -405,12 +374,12 @@ def _enum_snapshots_public(ec2, region: str, account_id: str, search: str) -> li
                     "owner_id": snap.get("OwnerId", ""),
                 })
     except Exception as e:
-        logger.debug("anonymous describe_snapshots failed in %s: %s", region, e)
+        logger.debug("public describe_snapshots failed in %s: %s", region, e)
     return results
 
 
 def _enum_amis_public(ec2, region: str, account_id: str, search: str) -> list[dict[str, Any]]:
-    """Find public AMIs using anonymous API calls."""
+    """Find public AMIs using authenticated API calls."""
     results = []
     try:
         kwargs: dict[str, Any] = {"ExecutableUsers": ["all"]}
@@ -445,5 +414,7 @@ def _enum_amis_public(ec2, region: str, account_id: str, search: str) -> list[di
                 "architecture": image.get("Architecture", ""),
             })
     except Exception as e:
-        logger.debug("anonymous describe_images failed in %s: %s", region, e)
+        logger.debug("public describe_images failed in %s: %s", region, e)
     return results
+
+

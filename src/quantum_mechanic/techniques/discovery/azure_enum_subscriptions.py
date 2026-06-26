@@ -52,6 +52,18 @@ _STATE_LABELS = {
 }
 
 
+# ----------------------------------------------------------------
+# Loot & Formatter
+# ----------------------------------------------------------------
+LOOT_ITEMS_KEY = "subscriptions"
+LOOT_SCHEMA = [
+    ("displayName", "Display Name", "bold cyan"),
+    ("subscriptionId", "Subscription ID", "dim"),
+    ("state", "State", "white"),
+    ("tenantId", "Tenant ID", "dim"),
+]
+
+
 def _format_azure_enum_subscriptions(result: Any) -> None:
     from rich.table import Table
 
@@ -101,6 +113,8 @@ def _format_azure_enum_subscriptions(result: Any) -> None:
         "Enumerate all Azure subscriptions accessible to the current identity via ARM."
     ),
     formatter=_format_azure_enum_subscriptions,
+    loot_schema=LOOT_SCHEMA,
+    loot_items_key=LOOT_ITEMS_KEY,
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Enumerate Azure subscriptions via ARM /subscriptions."""
