@@ -280,6 +280,30 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
                     "user_assigned_identities": user_assigned,
                 })
 
+                # Persist to workspace AssetStore so cross-technique queries
+                # ("which VMs have MIs with privileged Graph perms?") work
+                # without re-running enum_compute.
+                import json as _json
+                _mi_metadata = {
+                    "system_assigned_principal_id": identity.principal_id if identity else None,
+                    "user_assigned_identities": user_assigned,
+                    "identity_type": id_type,
+                }
+                try:
+                    ctx.workspace.upsert_compute_instance(
+                        provider="azure",
+                        instance_id=vm.name,
+                        name=vm.name,
+                        state=power_state,
+                        instance_type=vm.hardware_profile.vm_size if vm.hardware_profile else None,
+                        private_ip=private_ip,
+                        public_ip=public_ip,
+                        identity_arn=identity.principal_id if identity else None,
+                        metadata=_json.dumps(_mi_metadata),
+                    )
+                except Exception as _persist_err:
+                    logger.debug("Failed to persist VM %s to workspace: %s", vm.name, _persist_err)
+
         return {
             "provider": "azure",
             "instances": instances,

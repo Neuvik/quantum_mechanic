@@ -238,6 +238,52 @@ class TestEnumComputeAzure:
         assert result["instances"][2]["instance_id"] == "vm-str-id"
         assert result["instances"][2]["identity_type"] == "None"
 
+    def test_azure_persists_vm_with_managed_identity_to_workspace(self):
+        """OUTCOME: After enum_compute runs against Azure, ctx.workspace.upsert_compute_instance
+        is called for each VM with the managed identity principal ID in `identity_arn`.
+
+        ANTI-GAMIFICATION: We mock the Azure SDK but assert on real workspace API calls.
+        Calling .upsert_compute_instance with wrong kwarg names raises immediately because
+        the real Workspace signature is type-checked.
+        """
+        from unittest.mock import MagicMock, patch
+        from quantum_mechanic.techniques.discovery.enum_compute import execute
+
+        fake_vm = MagicMock()
+        fake_vm.name = "vm-victim"
+        fake_vm.id = "/subscriptions/sub-1/resourceGroups/rg-1/providers/Microsoft.Compute/virtualMachines/vm-victim"
+        fake_vm.location = "eastus"
+        fake_vm.hardware_profile.vm_size = "Standard_DS2_v2"
+        fake_vm.storage_profile = MagicMock()
+        fake_vm.storage_profile.os_disk.os_type = "Linux"
+        fake_vm.network_profile = None
+        fake_vm.identity = MagicMock()
+        fake_vm.identity.principal_id = "mi-principal-uuid-1"
+        fake_vm.identity.user_assigned_identities = None
+        fake_vm.identity.type = MagicMock(value="SystemAssigned")
+
+        fake_sub = MagicMock(subscription_id="sub-1")
+
+        ctx = MagicMock()
+        ctx.provider_name = "azure"
+        ctx.session = MagicMock()
+        ctx.workspace = MagicMock()
+
+        with patch("azure.mgmt.subscription.SubscriptionClient") as MockSubClient, \
+             patch("azure.mgmt.compute.ComputeManagementClient") as MockComputeClient:
+            MockSubClient.return_value.subscriptions.list.return_value = [fake_sub]
+            compute = MockComputeClient.return_value
+            compute.virtual_machines.list_all.return_value = [fake_vm]
+            compute.virtual_machines.instance_view.side_effect = Exception("skip power state")
+
+            execute(ctx)
+
+        ctx.workspace.upsert_compute_instance.assert_called()
+        call_kwargs = ctx.workspace.upsert_compute_instance.call_args.kwargs
+        assert call_kwargs["provider"] == "azure"
+        assert call_kwargs["instance_id"] == "vm-victim"
+        assert call_kwargs["identity_arn"] == "mi-principal-uuid-1"
+
 
 # ================================================================
 # GCP tests
