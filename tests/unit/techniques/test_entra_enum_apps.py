@@ -157,12 +157,11 @@ class TestEnumApps:
                 "resourceAppId": "00000003-0000-0000-c000-000000000000",  # Graph
                 "resourceAccess": [{"id": "perm-id-1", "type": "Role"}],
             }],
-            # Pre-resolved permission name list (Phase A convenience — Phase B resolves IDs).
-            "_resolved_perms": ["RoleManagement.ReadWrite.Directory"],
         }]
 
         store = _make_store(_make_token("access_token"))
         ctx = _build_ctx(store)
+        # Resolver patched to return the perm name; classifier under test.
         with patch(
             "quantum_mechanic.techniques.discovery.entra_enum_apps.graph_list",
             side_effect=[apps_with_perm, []],  # applications, servicePrincipals
@@ -264,6 +263,42 @@ class TestEnumApps:
             _format_entra_enum_apps(fake_result)
         output = buf.getvalue()
         assert "Highest Perm Tier" in output or "ControlPlane" in output
+
+    def test_emits_resolve_stats_in_result(self):
+        """OUTCOME: result dict includes _resolve_stats so operators can see how the resolver did.
+
+        Stat semantics: attempts = total perm_entries seen across all apps; resolved = how many
+        of those had a name lookup hit.
+        """
+        apps_with_perm = [{
+            "id": "app-1",
+            "appId": "appid-1",
+            "displayName": "App",
+            "signInAudience": "AzureADMyOrg",
+            "passwordCredentials": [],
+            "requiredResourceAccess": [{
+                "resourceAppId": "00000003-0000-0000-c000-000000000000",
+                "resourceAccess": [
+                    {"id": "uuid-known", "type": "Role"},
+                    {"id": "uuid-unknown", "type": "Role"},
+                ],
+            }],
+        }]
+
+        store = _make_store(_make_token("access_token"))
+        ctx = _build_ctx(store)
+        with patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_apps.graph_list",
+            side_effect=[apps_with_perm, []],
+        ), patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_apps.GraphPermResolver.resolve_perm_names",
+            return_value=["Known.Perm"],  # one of the two UUIDs resolved
+        ):
+            result = execute(ctx)
+
+        stats = result["_resolve_stats"]
+        assert stats["attempts"] == 2
+        assert stats["resolved"] == 1
 
 
 class TestLootMetadata:

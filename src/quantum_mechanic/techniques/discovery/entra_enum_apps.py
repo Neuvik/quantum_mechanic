@@ -15,12 +15,17 @@
 #   Calls GET /applications (app registrations owned by this tenant)
 #   and GET /servicePrincipals (all SPs including third-party).
 #   Both endpoints are paginated via @odata.nextLink.
+#            For each Application's requiredResourceAccess, queries
+#            /servicePrincipals?$filter=appId eq '<resource>' to translate
+#            permission UUIDs to human-readable names (cached per resource).
 #
 # DETECTION (Blue Team):
 #   Graph Audit Logs: microsoft.graph/applications/read,
 #     microsoft.graph/servicePrincipals/read.
 #   Alert on: Enumeration of /applications — this reveals the full
 #     OAuth app inventory, including apps with client secrets.
+#   Also: microsoft.graph/servicePrincipals/read filtered by appId
+#         (resolver call per resource SP).
 #
 # SAFE:     Yes — read-only. No state changes.
 # ================================================================
@@ -100,6 +105,13 @@ def _format_entra_enum_apps(result: Any) -> None:
         f"[bold]{len(sps)}[/bold] service principals"
     )
 
+    stats = data.get("_resolve_stats", {})
+    if stats.get("attempts", 0) > 0 and stats.get("resolved", 0) == 0:
+        console.print(
+            "  [yellow]⚠[/yellow]  Resolved 0/{} Graph permissions — "
+            "check Graph token scope (Application.Read.All recommended)".format(stats["attempts"])
+        )
+
     # Build a quick lookup for the enriched per-app tier so we can render
     # alongside the raw Graph object fields.
     tier_by_app_id = {
@@ -170,18 +182,22 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         # The resolver caches per resource_app_id so each resource SP (Graph,
         # SharePoint, Exchange, etc.) is fetched at most once per run.
         resolver = GraphPermResolver(http=http, headers=headers)
+        _resolve_attempts = 0
+        _resolve_successes = 0
         for app in applications:
             resolved: list[str] = []
             for rra in app.get("requiredResourceAccess", []):
                 resource_app_id = rra.get("resourceAppId")
                 if not resource_app_id:
                     continue
-                resolved.extend(
-                    resolver.resolve_perm_names(
-                        resource_app_id=resource_app_id,
-                        perm_entries=rra.get("resourceAccess", []),
-                    )
+                perm_entries = rra.get("resourceAccess", [])
+                names = resolver.resolve_perm_names(
+                    resource_app_id=resource_app_id,
+                    perm_entries=perm_entries,
                 )
+                _resolve_attempts += len(perm_entries)
+                _resolve_successes += len(names)
+                resolved.extend(names)
             app["_resolved_perms"] = resolved
 
     multi_tenant = [
@@ -206,8 +222,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
     apps = []
     for a in applications:
-        # Resolve permission names from `_resolved_perms` (Phase A convenience).
-        # Real permission UUID → name resolution lands in Phase B.
+        # Resolved by GraphPermResolver above.
         perm_names = a.get("_resolved_perms", [])
         apps.append({
             "displayName": a.get("displayName"),
@@ -228,7 +243,9 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             "secrets": 0,
             "enabled": "Yes" if sp.get("accountEnabled") else "No",
             "id": sp.get("id"),
-            "highest_perm_tier": eam.TIER_UNKNOWN,  # SPs resolved in Phase B
+            # Service principals do not carry requiredResourceAccess; tier resolution for
+            # SPs requires appRoleAssignments enumeration (out of scope here).
+            "highest_perm_tier": eam.TIER_UNKNOWN,
         })
 
     return {
@@ -239,4 +256,5 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         "apps": apps,
         "multi_tenant_count": len(multi_tenant),
         "with_secrets_count": len(with_secrets),
+        "_resolve_stats": {"attempts": _resolve_attempts, "resolved": _resolve_successes},
     }
