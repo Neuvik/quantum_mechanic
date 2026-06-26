@@ -33,6 +33,7 @@ import httpx
 
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
+from quantum_mechanic.providers.entra import eam
 from quantum_mechanic.providers.entra.foci import foci_expand
 from quantum_mechanic.providers.entra.graph import graph_list
 from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
@@ -61,6 +62,7 @@ LOOT_SCHEMA = [
     ("appId", "App ID", "dim"),
     ("signInAudience", "Audience", "dim"),
     ("secrets", "Secrets", "yellow"),
+    ("highest_perm_tier", "Highest Perm Tier", "bold red"),
     ("enabled", "Enabled", "dim"),
     ("id", "Object ID", "dim"),
 ]
@@ -144,8 +146,25 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     ]
     with_secrets = [a for a in applications if a.get("passwordCredentials")]
 
+    _tier_rank = {
+        eam.TIER_CONTROL_PLANE: 0,
+        eam.TIER_MANAGEMENT_PLANE: 1,
+        eam.TIER_WORKLOAD_PLANE: 2,
+        eam.TIER_USER_ACCESS: 3,
+        eam.TIER_UNKNOWN: 4,
+    }
+
+    def _highest_tier(perm_names: list[str]) -> str:
+        if not perm_names:
+            return eam.TIER_UNKNOWN
+        tiers = [eam.classify_graph_permission(p) for p in perm_names]
+        return min(tiers, key=lambda t: _tier_rank.get(t, 4))
+
     apps = []
     for a in applications:
+        # Resolve permission names from `_resolved_perms` (Phase A convenience).
+        # Real permission UUID → name resolution lands in Phase B.
+        perm_names = a.get("_resolved_perms", [])
         apps.append({
             "displayName": a.get("displayName"),
             "type": "App Registration",
@@ -154,6 +173,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             "secrets": len(a.get("passwordCredentials", [])),
             "enabled": "—",
             "id": a.get("id"),
+            "highest_perm_tier": _highest_tier(perm_names),
         })
     for sp in service_principals:
         apps.append({
@@ -164,6 +184,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             "secrets": 0,
             "enabled": "Yes" if sp.get("accountEnabled") else "No",
             "id": sp.get("id"),
+            "highest_perm_tier": eam.TIER_UNKNOWN,  # SPs resolved in Phase B
         })
 
     return {

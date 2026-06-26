@@ -116,8 +116,24 @@ class TestEnumApps:
         result = _run(apps=[], sps=[])
         assert result["applications"] == []
         assert result["service_principals"] == []
+        assert result["apps"] == []
         assert result["multi_tenant_count"] == 0
         assert result["with_secrets_count"] == 0
+
+    def test_unified_apps_list(self):
+        result = _run()
+        apps = result["apps"]
+        assert len(apps) == 4
+        # Verify app registration
+        assert apps[0]["displayName"] == "Internal App"
+        assert apps[0]["type"] == "App Registration"
+        assert apps[0]["secrets"] == 1
+        assert apps[0]["enabled"] == "—"
+        # Verify service principal
+        assert apps[2]["displayName"] == "Internal App"
+        assert apps[2]["type"] == "Service Principal"
+        assert apps[2]["secrets"] == 0
+        assert apps[2]["enabled"] == "Yes"
 
     def test_foci_expansion_error(self):
         store = _make_store(_make_token("refresh_token"))
@@ -125,3 +141,44 @@ class TestEnumApps:
         with patch("quantum_mechanic.techniques.discovery.entra_enum_apps.foci_expand", return_value=None):
             result = execute(ctx)
         assert "error" in result
+
+    def test_highest_perm_tier_emitted_per_app(self):
+        """OUTCOME: Apps with Graph permissions get a `highest_perm_tier` column.
+
+        ANTI-GAMIFICATION: real classifier — assertions exercise the JSON template.
+        """
+        apps_with_perm = [{
+            "id": "app-1",
+            "appId": "appid-1",
+            "displayName": "Privileged App",
+            "signInAudience": "AzureADMyOrg",
+            "passwordCredentials": [],
+            "requiredResourceAccess": [{
+                "resourceAppId": "00000003-0000-0000-c000-000000000000",  # Graph
+                "resourceAccess": [{"id": "perm-id-1", "type": "Role"}],
+            }],
+            # Pre-resolved permission name list (Phase A convenience — Phase B resolves IDs).
+            "_resolved_perms": ["RoleManagement.ReadWrite.Directory"],
+        }]
+
+        store = _make_store(_make_token("access_token"))
+        ctx = _build_ctx(store)
+        with patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_apps.graph_list",
+            side_effect=[apps_with_perm, []],  # applications, servicePrincipals
+        ):
+            result = execute(ctx)
+
+        enriched_app = next(a for a in result["apps"] if a["displayName"] == "Privileged App")
+        assert enriched_app["highest_perm_tier"] == "ControlPlane"
+
+
+class TestLootMetadata:
+    def test_loot_metadata_configured(self):
+        meta = getattr(execute, "__technique__", None)
+        assert meta is not None
+        assert meta.loot_items_key == "apps"
+        schema = meta.loot_schema
+        assert isinstance(schema, list)
+        assert len(schema) > 0
+        assert schema[0][0] == "displayName"
