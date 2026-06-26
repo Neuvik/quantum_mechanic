@@ -38,6 +38,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -283,7 +284,6 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
                 # Persist to workspace AssetStore so cross-technique queries
                 # ("which VMs have MIs with privileged Graph perms?") work
                 # without re-running enum_compute.
-                import json as _json
                 _mi_metadata = {
                     "system_assigned_principal_id": identity.principal_id if identity else None,
                     "user_assigned_identities": user_assigned,
@@ -299,10 +299,13 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
                         private_ip=private_ip,
                         public_ip=public_ip,
                         identity_arn=identity.principal_id if identity else None,
-                        metadata=_json.dumps(_mi_metadata),
+                        metadata=json.dumps(_mi_metadata),
                     )
                 except Exception as _persist_err:
-                    logger.debug("Failed to persist VM %s to workspace: %s", vm.name, _persist_err)
+                    logger.warning(
+                        "Workspace persistence for VM %s failed: %s (%s)",
+                        vm.name, _persist_err, type(_persist_err).__name__,
+                    )
 
         return {
             "provider": "azure",

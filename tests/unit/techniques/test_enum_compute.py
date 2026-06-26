@@ -240,12 +240,13 @@ class TestEnumComputeAzure:
 
     def test_azure_persists_vm_with_managed_identity_to_workspace(self):
         """OUTCOME: After enum_compute runs against Azure, ctx.workspace.upsert_compute_instance
-        is called for each VM with the managed identity principal ID in `identity_arn`.
+        is called for each VM with the expected kwarg set.
 
-        ANTI-GAMIFICATION: We mock the Azure SDK but assert on real workspace API calls.
-        Calling .upsert_compute_instance with wrong kwarg names raises immediately because
-        the real Workspace signature is type-checked.
+        ANTI-GAMIFICATION: Assertion uses assert_called_once_with on the full expected kwargs dict.
+        A rename of any kwarg in the call site fails this test, even though ctx.workspace
+        is a MagicMock (the kwarg dict is compared exactly).
         """
+        import json
         from unittest.mock import MagicMock, patch
         from quantum_mechanic.techniques.discovery.enum_compute import execute
 
@@ -278,11 +279,26 @@ class TestEnumComputeAzure:
 
             execute(ctx)
 
-        ctx.workspace.upsert_compute_instance.assert_called()
-        call_kwargs = ctx.workspace.upsert_compute_instance.call_args.kwargs
-        assert call_kwargs["provider"] == "azure"
-        assert call_kwargs["instance_id"] == "vm-victim"
-        assert call_kwargs["identity_arn"] == "mi-principal-uuid-1"
+        # When identity.user_assigned_identities is None, the technique leaves the
+        # local `user_assigned` dict as {} (the `if ... user_assigned_identities`
+        # branch is skipped). Power state falls back to "unknown" because
+        # instance_view raised above.
+        expected_metadata = json.dumps({
+            "system_assigned_principal_id": "mi-principal-uuid-1",
+            "user_assigned_identities": {},
+            "identity_type": "SystemAssigned",
+        })
+        ctx.workspace.upsert_compute_instance.assert_called_once_with(
+            provider="azure",
+            instance_id="vm-victim",
+            name="vm-victim",
+            state="unknown",
+            instance_type="Standard_DS2_v2",
+            private_ip=None,
+            public_ip=None,
+            identity_arn="mi-principal-uuid-1",
+            metadata=expected_metadata,
+        )
 
 
 # ================================================================
