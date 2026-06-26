@@ -1,8 +1,6 @@
 """Tests for entra_enum_group_members --transitive parameter."""
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
 from quantum_mechanic.providers.entra.token_store import EntraToken, EntraTokenStore, GRAPH
@@ -17,7 +15,7 @@ def _make_store():
         resource=GRAPH,
         tenant_id="t1",
         client_id=FOCI_DEFAULT_CLIENT,
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
     ))
     return store
 

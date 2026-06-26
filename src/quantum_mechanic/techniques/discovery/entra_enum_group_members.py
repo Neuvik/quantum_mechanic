@@ -11,7 +11,8 @@
 # PROVIDERS: Entra
 #
 # HOW IT WORKS:
-#   Calls GET /groups/{id}/members with $select for key fields.
+#   Calls GET /groups/{id}/members (or /transitiveMembers when
+#   --transitive is set, to expand nested group memberships).
 #   Handles Graph pagination.
 #
 # OPSEC:     LOW — Standard Graph API calls used by legitimate apps.
@@ -98,7 +99,6 @@ def format_group_members_result(result: Any) -> None:
             "Expand nested group memberships recursively via Graph transitiveMembers.",
             required=False,
             type=ParameterType.BOOLEAN,
-            example="true",
         ),
     ],
 )
@@ -128,8 +128,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
         # 2. List members
         ctx.info(f"Enumerating members for group: {group_name}...")
-        transitive_raw = ctx.get_param("transitive")
-        transitive = bool(transitive_raw) and str(transitive_raw).lower() not in ("false", "0", "")
+        transitive = bool(ctx.get_param("transitive"))
         endpoint = "transitiveMembers" if transitive else "members"
         url = f"https://graph.microsoft.com/v1.0/groups/{group_id}/{endpoint}"
         members = graph_list(http, url, headers)
