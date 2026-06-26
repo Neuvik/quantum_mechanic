@@ -15,9 +15,12 @@ each Graph SP is fetched at most once per technique run.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class GraphPermResolver:
@@ -82,10 +85,12 @@ class GraphPermResolver:
         try:
             resp = self._http.get(url, headers=self._headers)
             if resp.status_code != 200:
+                logger.debug("graph_perms: %s returned HTTP %d", resource_app_id, resp.status_code)
                 self._cache[resource_app_id] = ({}, {})
                 return self._cache[resource_app_id]
             body = resp.json()
-        except Exception:
+        except (httpx.HTTPError, ValueError) as e:
+            logger.debug("graph_perms: resolver fetch failed for %s: %s", resource_app_id, e)
             self._cache[resource_app_id] = ({}, {})
             return self._cache[resource_app_id]
 

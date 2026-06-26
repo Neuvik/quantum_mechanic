@@ -3,7 +3,6 @@ from unittest.mock import MagicMock
 
 from quantum_mechanic.providers.entra.graph_perms import GraphPermResolver
 
-
 _GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
 
 
@@ -38,7 +37,7 @@ def test_resolve_perm_names_returns_role_value_for_role_entry():
 
 
 def test_resolve_perm_names_returns_scope_value_for_scope_entry():
-    """OUTCOME: Delegated permission (type=Scope) UUID resolves to the oauth2PermissionScope's `value`."""
+    """OUTCOME: Delegated permission (Scope) UUID resolves to scope's value field."""
     http = MagicMock()
     http.get.return_value = MagicMock(
         status_code=200,
