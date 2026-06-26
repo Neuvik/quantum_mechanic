@@ -166,7 +166,68 @@ class TestEnumApps:
         with patch(
             "quantum_mechanic.techniques.discovery.entra_enum_apps.graph_list",
             side_effect=[apps_with_perm, []],  # applications, servicePrincipals
+        ), patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_apps.GraphPermResolver.resolve_perm_names",
+            return_value=["RoleManagement.ReadWrite.Directory"],
         ):
+            result = execute(ctx)
+
+        enriched_app = next(a for a in result["apps"] if a["displayName"] == "Privileged App")
+        assert enriched_app["highest_perm_tier"] == "ControlPlane"
+
+    def test_real_resolver_populates_resolved_perms_and_classifies(self):
+        """OUTCOME: When an app's requiredResourceAccess references a real Graph perm UUID,
+        the resolver translates it and the classifier emits the correct tier.
+
+        ANTI-GAMIFICATION: Real resolver + real classifier. Only Graph HTTP is mocked.
+        If either component regresses, this test fails.
+        """
+        graph_app_id = "00000003-0000-0000-c000-000000000000"
+        fake_perm_uuid = "fake-rolemanagement-uuid"
+
+        apps_with_perm = [{
+            "id": "app-1",
+            "appId": "appid-1",
+            "displayName": "Privileged App",
+            "signInAudience": "AzureADMyOrg",
+            "passwordCredentials": [],
+            "requiredResourceAccess": [{
+                "resourceAppId": graph_app_id,
+                "resourceAccess": [{"id": fake_perm_uuid, "type": "Role"}],
+            }],
+            # No _resolved_perms — Task 2's resolver must populate it
+        }]
+
+        # Resolver HTTP: returns Microsoft Graph SP with one appRole matching fake_perm_uuid
+        resolver_resp = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "value": [{
+                    "id": "graph-sp-id",
+                    "appId": graph_app_id,
+                    "appRoles": [
+                        {
+                            "id": fake_perm_uuid,
+                            "value": "RoleManagement.ReadWrite.Directory",
+                        }
+                    ],
+                    "oauth2PermissionScopes": [],
+                }]
+            },
+        )
+
+        store = _make_store(_make_token("access_token"))
+        ctx = _build_ctx(store)
+        with patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_apps.graph_list",
+            side_effect=[apps_with_perm, []],
+        ), patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_apps.httpx.Client",
+        ) as mock_httpx:
+            mock_http = MagicMock()
+            mock_http.__enter__.return_value = mock_http
+            mock_http.get.return_value = resolver_resp
+            mock_httpx.return_value = mock_http
             result = execute(ctx)
 
         enriched_app = next(a for a in result["apps"] if a["displayName"] == "Privileged App")

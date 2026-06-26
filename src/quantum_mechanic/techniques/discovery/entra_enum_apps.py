@@ -36,6 +36,7 @@ from quantum_mechanic.core.technique import technique
 from quantum_mechanic.providers.entra import eam
 from quantum_mechanic.providers.entra.foci import foci_expand
 from quantum_mechanic.providers.entra.graph import graph_list
+from quantum_mechanic.providers.entra.graph_perms import GraphPermResolver
 from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
 
 _APPS_URL = (
@@ -164,6 +165,24 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     with httpx.Client(timeout=60) as http:
         applications = graph_list(http, _APPS_URL, headers)
         service_principals = graph_list(http, _SP_URL, headers)
+
+        # Resolve Graph permission UUIDs → human names on each Application.
+        # The resolver caches per resource_app_id so each resource SP (Graph,
+        # SharePoint, Exchange, etc.) is fetched at most once per run.
+        resolver = GraphPermResolver(http=http, headers=headers)
+        for app in applications:
+            resolved: list[str] = []
+            for rra in app.get("requiredResourceAccess", []):
+                resource_app_id = rra.get("resourceAppId")
+                if not resource_app_id:
+                    continue
+                resolved.extend(
+                    resolver.resolve_perm_names(
+                        resource_app_id=resource_app_id,
+                        perm_entries=rra.get("resourceAccess", []),
+                    )
+                )
+            app["_resolved_perms"] = resolved
 
     multi_tenant = [
         a for a in applications
