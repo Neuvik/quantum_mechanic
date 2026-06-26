@@ -303,52 +303,22 @@ def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
     return {"status": "success", "admins": admins}
 
 # ================================================================
-# Entra ID — Directory Role Discovery
+# Entra ID — delegate to entra_enum_privileged_roles (authoritative)
 # ================================================================
 
+from quantum_mechanic.techniques.discovery import entra_enum_privileged_roles
+
 def _enum_entra(ctx: ExecutionContext) -> dict[str, Any]:
-    from quantum_mechanic.providers.entra.token_store import GRAPH
-    from quantum_mechanic.providers.entra.graph import graph_list
-
-    admins = []
-    store = ctx.session
-    token = store.best_token(GRAPH)
-    if not token:
-        return {"error": "No Graph token available."}
-        
-    headers = {"Authorization": f"Bearer {token.value}"}
-
-    try:
-        with httpx.Client(timeout=30) as http:
-            # 1. List activated roles
-            roles = graph_list(http, "https://graph.microsoft.com/v1.0/directoryRoles", headers)
-            
-            # High-value Directory Roles
-            HIGH_VALUE_ROLES = [
-                "Global Administrator",
-                "Privileged Role Administrator",
-                "Application Administrator",
-                "Cloud Application Administrator"
-            ]
-
-            for role in roles:
-                role_name = role.get("displayName", "Unknown Role")
-                if role_name in HIGH_VALUE_ROLES:
-                    role_id = role.get("id")
-                    
-                    # 2. Resolve members
-                    members = graph_list(http, f"https://graph.microsoft.com/v1.0/directoryRoles/{role_id}/members", headers)
-                    for m in members:
-                        name = m.get("userPrincipalName") or m.get("displayName") or m.get("id")
-                        mtype = m.get("@odata.type", "").split(".")[-1]
-                        
-                        admins.append({
-                            "principal": name,
-                            "type": mtype,
-                            "role": role_name,
-                            "reason": f"Full Directory Control ({role_name})" if "Global" in role_name else f"High-privilege Role ({role_name})"
-                        })
-    except Exception as e:
-        ctx.debug(f"Entra Role scan failed: {e}")
-
+    result = entra_enum_privileged_roles.execute(ctx)
+    if "error" in result:
+        return {"status": "error", "error": result["error"], "admins": []}
+    admins = [
+        {
+            "principal": a.get("principal_name", "—"),
+            "type": a.get("principal_type", "—"),
+            "role": a.get("role_name", "—"),
+            "reason": f"{a.get('tier', '')} — {a.get('assignment_type', 'Permanent')}",
+        }
+        for a in result.get("assignments", [])
+    ]
     return {"status": "success", "admins": admins}

@@ -136,90 +136,20 @@ def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
     return {"status": "success", "groups": groups_out}
 
 # ================================================================
-# Azure / Entra — Graph Group Discovery
+# Azure / Entra — delegate to entra_enum_groups (authoritative)
 # ================================================================
 
-def _enum_entra(ctx: ExecutionContext) -> dict[str, Any]:
-    return _enum_graph(ctx, provider_label="Entra")
+from quantum_mechanic.techniques.discovery import entra_enum_groups
 
 def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
-    # Azure AD groups are accessed via Graph. 
-    # We attempt to use the same logic, but the session might be different.
-    return _enum_graph(ctx, provider_label="Azure")
+    return _enum_entra(ctx)
 
-def _enum_graph(ctx: ExecutionContext, provider_label: str) -> dict[str, Any]:
-    from quantum_mechanic.providers.entra.token_store import GRAPH
-    from quantum_mechanic.providers.entra.graph import graph_list
-
-    groups_out = []
-    
-    # In Entra provider, ctx.session is EntraTokenStore
-    # In Azure provider, it might be different, but we check if we can get a Graph token
-    store = ctx.session
-    token = None
-    
-    if hasattr(store, "best_token"):
-        token = store.best_token(GRAPH)
-    
-    if not token:
-        # Try to fall back to environment or interactive if possible? 
-        # For now, if no token, we can't do much.
-        ctx.debug(f"No Graph token available for {provider_label} group discovery.")
-        return {"status": "error", "error": "No Graph token available.", "groups": []}
-        
-    headers = {"Authorization": f"Bearer {token.value}"}
-
-    try:
-        ctx.info(f"Listing {provider_label} groups via Microsoft Graph...")
-        with httpx.Client(timeout=30) as http:
-            # List groups
-            groups = graph_list(http, "https://graph.microsoft.com/v1.0/groups?$select=id,displayName,description", headers)
-            
-            for g in groups:
-                gid = g.get("id")
-                name = g.get("displayName")
-                desc = g.get("description", "")
-                
-                # Resolve member count
-                # We use /$count which requires ConsistencyLevel: eventual but that's for advanced filtering.
-                # A simpler way is to just list members, but that can be slow.
-                # Graph also supports /members/$count if we use the right headers.
-                # But to keep it simple and compatible, we'll try to get the members.
-                member_count = 0
-                try:
-                    # We only need the count, so $top=1 might be enough if we just want to see if it's empty,
-                    # but we want the actual count.
-                    # Unfortunately, Graph doesn't always return @odata.count unless requested with $count=true
-                    # and ConsistencyLevel: eventual header.
-                    
-                    # For a "heuristic" scan, let's just fetch members with a small top and see.
-                    # Or better, use the $count feature if possible.
-                    count_headers = headers.copy()
-                    count_headers["ConsistencyLevel"] = "eventual"
-                    count_url = f"https://graph.microsoft.com/v1.0/groups/{gid}/members/$count"
-                    resp = http.get(count_url, headers=count_headers)
-                    if resp.status_code == 200:
-                        member_count = int(resp.text)
-                    else:
-                        # Fallback: list members (might be capped by graph_list default)
-                        m_list = graph_list(http, f"https://graph.microsoft.com/v1.0/groups/{gid}/members?$select=id", headers, max_pages=1)
-                        member_count = len(m_list)
-                except Exception:
-                    pass
-
-                groups_out.append({
-                    "name": name,
-                    "id": gid,
-                    "members": member_count,
-                    "description": desc
-                })
-        
-        ctx.success(f"Discovered {len(groups_out)} {provider_label} groups.")
-    except Exception as e:
-        ctx.debug(f"{provider_label} Graph scan failed: {e}")
-        return {"status": "error", "error": str(e), "groups": []}
-
-    return {"status": "success", "groups": groups_out}
+def _enum_entra(ctx: ExecutionContext) -> dict[str, Any]:
+    result = entra_enum_groups.execute(ctx)
+    for g in result.get("groups", []):
+        g.setdefault("name", g.get("displayName", "—"))
+        g.setdefault("members", 0)
+    return result
 
 # ================================================================
 # GCP — Project IAM Policy Group Extraction

@@ -123,56 +123,16 @@ def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
     return {"status": "success", "users": users}
 
 # ================================================================
-# Azure / Entra — Entra ID User Discovery
+# Azure / Entra — delegate to entra_enum_users (authoritative)
 # ================================================================
 
+from quantum_mechanic.techniques.discovery import entra_enum_users
+
 def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
-    """Azure implementation reuses Entra Graph logic as Azure users are Entra principals."""
     return _enum_entra(ctx)
 
 def _enum_entra(ctx: ExecutionContext) -> dict[str, Any]:
-    from quantum_mechanic.providers.entra.token_store import GRAPH
-    from quantum_mechanic.providers.entra.graph import graph_list
-
-    users = []
-    store = ctx.session
-    # In Entra provider, session is an EntraTokenStore
-    # In Azure provider, we might need to handle session differently if it's not EntraTokenStore
-    # But for unified_enum_admins, it seems to assume the session is compatible or handle it.
-    
-    try:
-        # Check if we are in an Entra context or Azure context
-        # If Azure, we might need to get the graph token from the Azure session if supported
-        # However, the requirement says "reuse Entra Graph logic".
-        
-        token = None
-        if hasattr(store, "best_token"):
-            token = store.best_token(GRAPH)
-        
-        if not token:
-            ctx.debug("No Graph token available for Entra user enumeration.")
-            return {"error": "No Graph token available.", "users": []}
-            
-        headers = {"Authorization": f"Bearer {token.value}"}
-        url = "https://graph.microsoft.com/v1.0/users?$select=id,displayName,userPrincipalName,userType,accountEnabled"
-
-        ctx.info("Enumerating Entra ID users via Microsoft Graph...")
-        with httpx.Client(timeout=30) as http:
-            graph_users = graph_list(http, url, headers)
-            for u in graph_users:
-                enabled = "Enabled" if u.get("accountEnabled") else "Disabled"
-                users.append({
-                    "username": u.get("userPrincipalName") or u.get("displayName"),
-                    "type": u.get("userType", "Member"),
-                    "id": u.get("id"),
-                    "info": f"Status: {enabled}"
-                })
-        ctx.success(f"Discovered {len(users)} Entra users.")
-    except Exception as e:
-        ctx.debug(f"Entra user scan failed: {e}")
-        return {"error": str(e), "users": []}
-
-    return {"status": "success", "users": users}
+    return entra_enum_users.execute(ctx)
 
 # ================================================================
 # GCP — Project Member Discovery
