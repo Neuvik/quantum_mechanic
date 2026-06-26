@@ -356,7 +356,6 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
                 'discovery/unified_enum_apps',
                 'discovery/entra_enum_group_members',
                 'discovery/entra_enum_privileged_roles',
-                'discovery/entra_enum_roles',
                 'discovery/whoami',
                 'discovery/entra_whoami',
                 'discovery/entra_enum_identity',
@@ -400,7 +399,6 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
                     'discovery/unified_enum_apps',
                     'discovery/entra_enum_group_members',
                     'discovery/entra_enum_privileged_roles',
-                    'discovery/entra_enum_roles',
                     'discovery/whoami',
                     'discovery/entra_whoami',
                     'discovery/entra_enum_identity',
@@ -477,20 +475,6 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
                     a_norm = _norm_dict(a)
                     pid = a_norm.get("principalid")
                     pname = a_norm.get("principalname")
-                    if pid and pname:
-                        add_to_mapping(pid, pname)
-            elif tech_id == 'discovery/entra_enum_roles':
-                roles_list = data.get("roles") or []
-                for r in roles_list:
-                    if not isinstance(r, dict):
-                        continue
-                    r_norm = _norm_dict(r)
-                    rid = r_norm.get("roleid")
-                    rname = r_norm.get("rolename")
-                    pid = r_norm.get("principalid")
-                    pname = r_norm.get("principalname")
-                    if rid and rname:
-                        add_to_mapping(rid, rname)
                     if pid and pname:
                         add_to_mapping(pid, pname)
             elif tech_id in ('discovery/whoami', 'discovery/entra_whoami'):
@@ -674,7 +658,7 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
                     logger.debug("Failed to load privileged roles CSV map from %s: %s", sub, csv_err)
 
         # Load from roles CSVs
-        for sub in ["entra_enum_roles"]:
+        for sub in ["entra_enum_privileged_roles"]:
             roles_csv = loot_dir / "discovery" / sub / "loot.csv"
             if roles_csv.exists():
                 try:
