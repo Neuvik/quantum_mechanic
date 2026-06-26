@@ -53,19 +53,23 @@ LOOT_SCHEMA = [
 
 def format_privileged_roles(result: Any) -> None:
     """Formatter for Privileged Role discovery results."""
-    from rich.table import Table
     from rich import box
+    from rich.table import Table
+
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
     assignments = data.get("assignments", [])
-    
+
     if not assignments:
         console.print("  [dim]No privileged role assignments found.[/dim]")
         return
 
-    console.print(f"  [bold green]✓[/bold green] Discovered [bold cyan]{len(assignments)}[/bold cyan] privileged assignment(s)")
-    
+    console.print(
+        f"  [bold green]✓[/bold green] Discovered "
+        f"[bold cyan]{len(assignments)}[/bold cyan] privileged assignment(s)"
+    )
+
     tbl = Table(box=box.ROUNDED, border_style="dim")
     tbl.add_column("Tier", style="bold")
     tbl.add_column("Role Name", style="bold yellow")
@@ -75,16 +79,16 @@ def format_privileged_roles(result: Any) -> None:
 
     # Sort by Tier then Role Name
     sorted_data = sorted(assignments, key=lambda x: (x.get("tier", "Z"), x.get("role_name", "")))
-    
+
     for a in sorted_data:
-        tier = a.get("tier", "Unknown")
-        if tier == "ControlPlane":
+        tier = a.get("tier", eam.TIER_UNKNOWN)
+        if tier == eam.TIER_CONTROL_PLANE:
             t_color = "red"
-        elif tier == "ManagementPlane":
+        elif tier == eam.TIER_MANAGEMENT_PLANE:
             t_color = "yellow"
         else:
             t_color = "white"
-        
+
         tbl.add_row(
             f"[{t_color}]{tier}[/{t_color}]",
             a.get("role_name", "Unknown"),
@@ -92,7 +96,7 @@ def format_privileged_roles(result: Any) -> None:
             a.get("principal_type", "—"),
             a.get("assignment_type", "Permanent")
         )
-            
+
     console.print(tbl)
 
 @technique(
@@ -102,7 +106,10 @@ def format_privileged_roles(result: Any) -> None:
     providers=["entra"],
     severity="high",
     safe=True,
-    description="Deep discovery of privileged Entra ID roles (EAM-classified), Service Principals, and PIM eligibility.",
+    description=(
+        "Deep discovery of privileged Entra ID roles (EAM-classified), "
+        "Service Principals, and PIM eligibility."
+    ),
     formatter=format_privileged_roles,
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,
@@ -114,7 +121,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     if token is None:
         return {"error": "No Graph token available."}
 
-    if token.token_type == "refresh_token":
+    if token.token_type == "refresh_token":  # noqa: S105
         token = foci_expand(store, GRAPH)
         if token is None:
             return {"error": "FOCI expansion for Graph failed."}
@@ -122,27 +129,43 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     headers = {"Authorization": f"Bearer {token.value}"}
     results = []
 
+    role_defs_url = (
+        "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions"
+    )
+    role_assignments_url = (
+        "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments"
+        "?$expand=principal"
+    )
+    role_eligibility_url = (
+        "https://graph.microsoft.com/v1.0/roleManagement/directory/"
+        "roleEligibilitySchedules?$expand=principal"
+    )
+
     with httpx.Client(timeout=30) as http:
         ctx.info("Resolving directory role definitions...")
         # 1. Get role definitions to map IDs
-        role_defs = graph_list(http, "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions", headers)
+        role_defs = graph_list(http, role_defs_url, headers)
         id_to_role = {rd["id"]: rd["displayName"] for rd in role_defs}
 
         ctx.info("Enumerating active role assignments...")
         # 2. Get active role assignments
-        assignments = graph_list(http, "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?$expand=principal", headers)
-        
+        assignments = graph_list(http, role_assignments_url, headers)
+
         for a in assignments:
             role_id = a.get("roleDefinitionId")
             role_name = id_to_role.get(role_id, "Unknown Role")
-            
+
             # Classify role via EAM (ControlPlane / ManagementPlane / etc.)
             tier = eam.classify_role_name(role_name)
-            
+
             principal = a.get("principal", {})
             p_type = principal.get("@odata.type", "").split(".")[-1] or "Unknown"
-            p_name = principal.get("userPrincipalName") or principal.get("displayName") or a.get("principalId")
-            
+            p_name = (
+                principal.get("userPrincipalName")
+                or principal.get("displayName")
+                or a.get("principalId")
+            )
+
             results.append({
                 "tier": tier,
                 "role_name": role_name,
@@ -157,16 +180,20 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         # This requires more permissions but is high value.
         try:
             ctx.info("Probing PIM eligibility schedules...")
-            eligible = graph_list(http, "https://graph.microsoft.com/v1.0/roleManagement/directory/roleEligibilitySchedules?$expand=principal", headers)
+            eligible = graph_list(http, role_eligibility_url, headers)
             for e in eligible:
                 role_id = e.get("roleDefinitionId")
                 role_name = id_to_role.get(role_id, "Unknown Role")
                 tier = eam.classify_role_name(role_name)
-                
+
                 principal = e.get("principal", {})
                 p_type = principal.get("@odata.type", "").split(".")[-1] or "Unknown"
-                p_name = principal.get("userPrincipalName") or principal.get("displayName") or e.get("principalId")
-                
+                p_name = (
+                    principal.get("userPrincipalName")
+                    or principal.get("displayName")
+                    or e.get("principalId")
+                )
+
                 results.append({
                     "tier": tier,
                     "role_name": role_name,

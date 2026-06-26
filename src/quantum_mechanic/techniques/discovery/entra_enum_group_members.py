@@ -27,7 +27,7 @@ from typing import Any
 import httpx
 
 from quantum_mechanic.core.context import ExecutionContext
-from quantum_mechanic.core.technique import technique, Parameter, ParameterType
+from quantum_mechanic.core.technique import Parameter, ParameterType, technique
 from quantum_mechanic.providers.entra.foci import foci_expand
 from quantum_mechanic.providers.entra.graph import graph_list
 from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
@@ -47,20 +47,25 @@ LOOT_SCHEMA = [
 
 def format_group_members_result(result: Any) -> None:
     """Formatter for Entra Group Member enumeration results."""
-    from rich.table import Table
     from rich import box
+    from rich.table import Table
+
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
     members = data.get("members", [])
     group_name = data.get("group_name", "Unknown Group")
-    
+
     if not members:
         console.print(f"  [dim]No members found for group '{group_name}'.[/dim]")
         return
 
-    console.print(f"  [bold green]✓[/bold green] Discovered [bold cyan]{len(members)}[/bold cyan] member(s) in group '[bold yellow]{group_name}[/bold yellow]'")
-    
+    console.print(
+        f"  [bold green]✓[/bold green] Discovered "
+        f"[bold cyan]{len(members)}[/bold cyan] member(s) in group "
+        f"'[bold yellow]{group_name}[/bold yellow]'"
+    )
+
     tbl = Table(box=box.ROUNDED, border_style="dim")
     tbl.add_column("Member (UPN/Name)", style="bold cyan")
     tbl.add_column("Type", style="dim")
@@ -72,7 +77,7 @@ def format_group_members_result(result: Any) -> None:
             m.get("member_type", "—"),
             m.get("member_id", "—"),
         )
-            
+
     console.print(tbl)
 
 @technique(
@@ -105,7 +110,7 @@ def format_group_members_result(result: Any) -> None:
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Execute Group Member Enumeration."""
     group_id = ctx.get_param("group_id")
-    
+
     store: EntraTokenStore = ctx.session
     token = store.best_token(GRAPH)
     if token is None:
@@ -119,12 +124,16 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
     with httpx.Client(timeout=30) as http:
         # 1. Try to get the group name first for better reporting
+        group_name_url = (
+            f"https://graph.microsoft.com/v1.0/groups/{group_id}"
+            "?$select=displayName"
+        )
         try:
-            resp = http.get(f"https://graph.microsoft.com/v1.0/groups/{group_id}?$select=displayName", headers=headers)
+            resp = http.get(group_name_url, headers=headers)
             if resp.status_code == 200:
                 group_name = resp.json().get("displayName", group_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to get group displayName: %s", exc)
 
         # 2. List members
         ctx.info(f"Enumerating members for group: {group_name}...")
@@ -132,11 +141,11 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         endpoint = "transitiveMembers" if transitive else "members"
         url = f"https://graph.microsoft.com/v1.0/groups/{group_id}/{endpoint}"
         members = graph_list(http, url, headers)
-        
+
         for m in members:
             mtype = m.get("@odata.type", "").split(".")[-1]
             name = m.get("userPrincipalName") or m.get("displayName") or m.get("id")
-            
+
             results.append({
                 "group_id": group_id,
                 "group_name": group_name,

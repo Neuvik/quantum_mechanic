@@ -129,7 +129,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     if token is None:
         return {"error": "No Graph token available."}
 
-    if token.token_type == "refresh_token":
+    if token.token_type == "refresh_token":  # noqa: S105
         token = foci_expand(store, GRAPH)
         if token is None:
             return {"error": "FOCI expansion for Graph failed."}
