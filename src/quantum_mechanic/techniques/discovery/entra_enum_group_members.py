@@ -93,6 +93,13 @@ def format_group_members_result(result: Any) -> None:
             type=ParameterType.STRING,
             example="00000000-0000-0000-0000-000000000000"
         ),
+        Parameter(
+            "transitive",
+            "Expand nested group memberships recursively via Graph transitiveMembers.",
+            required=False,
+            type=ParameterType.BOOLEAN,
+            example="true",
+        ),
     ],
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
@@ -121,7 +128,10 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
         # 2. List members
         ctx.info(f"Enumerating members for group: {group_name}...")
-        url = f"https://graph.microsoft.com/v1.0/groups/{group_id}/members"
+        transitive_raw = ctx.get_param("transitive")
+        transitive = bool(transitive_raw) and str(transitive_raw).lower() not in ("false", "0", "")
+        endpoint = "transitiveMembers" if transitive else "members"
+        url = f"https://graph.microsoft.com/v1.0/groups/{group_id}/{endpoint}"
         members = graph_list(http, url, headers)
         
         for m in members:
