@@ -138,6 +138,88 @@ def test_returns_parsed_buckets_from_oci():
     
     result = execute(ctx)
     assert result["provider"] == "oci"
-    # In OCI it iterates tenancy and then compartments. 
+    # In OCI it iterates tenancy and then compartments.
     # Simplified mock might return just the tenancy one or both.
     assert result.get("total") >= 1
+
+
+# ================================================================
+# --public-only flag
+# ================================================================
+
+import boto3
+
+def _make_aws_ctx(public_only: bool = False):
+    ctx = create_autospec(ExecutionContext, instance=True)
+    ctx.provider_name = "aws"
+    ctx.get_param.side_effect = lambda k: True if k == "public_only" and public_only else None
+    ctx.session = create_autospec(boto3.Session, instance=True)
+    ctx.workspace = MagicMock()
+    return ctx
+
+
+def test_aws_public_only_filters_to_exposed_buckets():
+    """OUTCOME: --public-only returns only buckets with a non-empty public label.
+
+    ANTI-GAMIFICATION: ctx.session is create_autospec(boto3.Session).
+    Calling .get() on it raises AttributeError immediately (wrong interface).
+    """
+    ctx = _make_aws_ctx(public_only=True)
+    s3 = MagicMock()
+    ctx.session.client.return_value = s3
+    s3.list_buckets.return_value = {"Buckets": [
+        {"Name": "public-bucket",  "CreationDate": MagicMock(strftime=lambda f: "2024-01-01")},
+        {"Name": "private-bucket", "CreationDate": MagicMock(strftime=lambda f: "2024-01-01")},
+    ]}
+
+    def mock_acl(Bucket):
+        if Bucket == "public-bucket":
+            return {"Grants": [{"Grantee": {"URI": "http://acs.amazonaws.com/groups/global/AllUsers"}, "Permission": "READ"}]}
+        return {"Grants": []}
+    s3.get_bucket_acl.side_effect = mock_acl
+    s3.get_bucket_policy_status.side_effect = Exception("no policy")
+
+    result = execute(ctx)
+
+    assert result["total"] == 1
+    assert result["buckets"][0]["name"] == "public-bucket"
+    assert "AllUsers" in result["buckets"][0]["public"]
+
+
+def test_aws_public_only_writes_finding_for_exposed_bucket():
+    """OUTCOME: each publicly exposed bucket produces one workspace finding."""
+    ctx = _make_aws_ctx(public_only=True)
+    s3 = MagicMock()
+    ctx.session.client.return_value = s3
+    s3.list_buckets.return_value = {"Buckets": [
+        {"Name": "exposed", "CreationDate": MagicMock(strftime=lambda f: "2024-01-01")},
+    ]}
+    s3.get_bucket_acl.return_value = {"Grants": [
+        {"Grantee": {"URI": "http://acs.amazonaws.com/groups/global/AllUsers"}, "Permission": "READ"}
+    ]}
+    s3.get_bucket_policy_status.side_effect = Exception("no policy")
+
+    execute(ctx)
+
+    ctx.workspace.add_finding.assert_called_once()
+    call_kwargs = ctx.workspace.add_finding.call_args.kwargs
+    assert call_kwargs["severity"] == "high"
+    assert "exposed" in call_kwargs["title"]
+
+
+def test_aws_without_public_only_returns_all_buckets_no_findings():
+    """OUTCOME: default (no --public-only) returns all buckets; no findings written."""
+    ctx = _make_aws_ctx(public_only=False)
+    s3 = MagicMock()
+    ctx.session.client.return_value = s3
+    s3.list_buckets.return_value = {"Buckets": [
+        {"Name": "pub",  "CreationDate": MagicMock(strftime=lambda f: "2024-01-01")},
+        {"Name": "priv", "CreationDate": MagicMock(strftime=lambda f: "2024-01-01")},
+    ]}
+    s3.get_bucket_acl.return_value = {"Grants": []}
+    s3.get_bucket_policy_status.side_effect = Exception("no policy")
+
+    result = execute(ctx)
+
+    assert result["total"] == 2
+    ctx.workspace.add_finding.assert_not_called()

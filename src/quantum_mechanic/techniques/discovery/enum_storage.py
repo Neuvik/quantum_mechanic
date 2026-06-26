@@ -93,6 +93,7 @@ LOOT_SCHEMA = [
     loot_items_key=LOOT_ITEMS_KEY,
     parameters=[
         Parameter("target", "A specific bucket or storage account name.", required=False),
+        Parameter("public_only", "Only return publicly exposed buckets and write workspace findings.", required=False),
     ]
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
@@ -182,6 +183,22 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
                 "public": _check_public(s3, name),
             })
 
+        import json as _json
+        public_only = bool(ctx.get_param("public_only"))
+        if public_only:
+            buckets = [b for b in buckets if b["public"]]
+            for b in buckets:
+                ctx.workspace.add_finding(
+                    technique_id="discovery/enum_storage",
+                    tactic="discovery",
+                    title=f"Publicly Exposed S3 Bucket: {b['name']}",
+                    severity="high",
+                    provider="aws",
+                    description=f"Bucket '{b['name']}' grants public access: {b['public']}",
+                    evidence=_json.dumps({"bucket": b["name"], "public": b["public"]}),
+                    mitre_id="T1530",
+                )
+
         return {
             "provider": "aws",
             "buckets": buckets,
@@ -264,6 +281,10 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
                         })
                 except Exception as e:
                     ctx.warn(f"Failed to list storage accounts in subscription {sub_id}: {e}")
+
+        public_only = bool(ctx.get_param("public_only"))
+        if public_only:
+            buckets = [b for b in buckets if b.get("public") == "Enabled"]
 
         return {
             "provider": "azure",

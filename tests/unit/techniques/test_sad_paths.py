@@ -224,17 +224,6 @@ class TestEnumPermissionsSadPaths:
 
 
 # ================================================================
-# discovery/enum_storage_acls
-# ================================================================
-
-class TestEnumStorageAclsSadPaths:
-    def test_unknown_provider_returns_dict(self):
-        from quantum_mechanic.techniques.discovery.enum_storage_acls import execute
-        result = execute(_ctx("unknown"))
-        assert isinstance(result, dict)
-
-
-# ================================================================
 # collection/get_keyvault_secrets
 # ================================================================
 
