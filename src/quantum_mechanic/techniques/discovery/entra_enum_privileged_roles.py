@@ -4,7 +4,8 @@
 # TACTIC:    Discovery (TA0007)
 # TECHNIQUE: T1087.004 — Cloud Account Discovery
 #
-# PURPOSE:   Identify "Tier 0" and "Tier 1" identities in Entra ID.
+# PURPOSE:   Identify ControlPlane / ManagementPlane identities in Entra ID
+#            via the Enterprise Access Model (EAM) classifier.
 #            Enumerates directory roles with a focus on administrative
 #            privileges, PIM eligibility, and non-human principals.
 #
@@ -15,7 +16,7 @@
 #   2. Enumerates all role assignments via /roleManagement/directory/roleAssignments.
 #   3. (Optional) Probes /roleManagement/directory/roleEligibilitySchedules
 #      to identify users eligible for roles via PIM.
-#   4. Categorizes results into Tiers (Tier 0: Global Admin, etc.).
+#   4. Categorizes results via EAM (ControlPlane / ManagementPlane / etc.).
 #
 # OPSEC:     LOW — Standard Graph API queries.
 # SAFE:      Yes
@@ -30,39 +31,12 @@ import httpx
 
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
+from quantum_mechanic.providers.entra import eam
 from quantum_mechanic.providers.entra.foci import foci_expand
 from quantum_mechanic.providers.entra.graph import graph_list
 from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
 
 logger = logging.getLogger(__name__)
-
-# ----------------------------------------------------------------
-# Tier Mapping
-# ----------------------------------------------------------------
-TIER_0 = {
-    "Global Administrator",
-    "Privileged Role Administrator",
-}
-
-TIER_1 = {
-    "User Administrator",
-    "Conditional Access Administrator",
-    "Application Administrator",
-    "Cloud Application Administrator",
-    "Authentication Administrator",
-    "Security Administrator",
-    "Exchange Administrator",
-    "SharePoint Administrator",
-    "Helpdesk Administrator",
-    "Privileged Authentication Administrator",
-}
-
-def get_tier(role_name: str) -> str:
-    if role_name in TIER_0:
-        return "Tier 0 (Critical)"
-    if role_name in TIER_1:
-        return "Tier 1 (High)"
-    return "Tier 2 (Operator)"
 
 # ----------------------------------------------------------------
 # Loot schema
@@ -104,7 +78,12 @@ def format_privileged_roles(result: Any) -> None:
     
     for a in sorted_data:
         tier = a.get("tier", "Unknown")
-        t_color = "red" if "Tier 0" in tier else ("yellow" if "Tier 1" in tier else "white")
+        if tier == "ControlPlane":
+            t_color = "red"
+        elif tier == "ManagementPlane":
+            t_color = "yellow"
+        else:
+            t_color = "white"
         
         tbl.add_row(
             f"[{t_color}]{tier}[/{t_color}]",
@@ -123,7 +102,7 @@ def format_privileged_roles(result: Any) -> None:
     providers=["entra"],
     severity="high",
     safe=True,
-    description="Deep discovery of privileged Entra ID roles (Tier 0/1), Service Principals, and PIM eligibility.",
+    description="Deep discovery of privileged Entra ID roles (EAM-classified), Service Principals, and PIM eligibility.",
     formatter=format_privileged_roles,
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,
@@ -157,8 +136,8 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             role_id = a.get("roleDefinitionId")
             role_name = id_to_role.get(role_id, "Unknown Role")
             
-            # Filter for Tier 0/1 or interesting roles
-            tier = get_tier(role_name)
+            # Classify role via EAM (ControlPlane / ManagementPlane / etc.)
+            tier = eam.classify_role_name(role_name)
             
             principal = a.get("principal", {})
             p_type = principal.get("@odata.type", "").split(".")[-1] or "Unknown"
@@ -182,7 +161,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             for e in eligible:
                 role_id = e.get("roleDefinitionId")
                 role_name = id_to_role.get(role_id, "Unknown Role")
-                tier = get_tier(role_name)
+                tier = eam.classify_role_name(role_name)
                 
                 principal = e.get("principal", {})
                 p_type = principal.get("@odata.type", "").split(".")[-1] or "Unknown"
