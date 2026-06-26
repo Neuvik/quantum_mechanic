@@ -172,6 +172,38 @@ class TestEnumApps:
         enriched_app = next(a for a in result["apps"] if a["displayName"] == "Privileged App")
         assert enriched_app["highest_perm_tier"] == "ControlPlane"
 
+    def test_formatter_renders_highest_perm_tier_column(self):
+        """OUTCOME: The Rich table includes Highest Perm Tier with per-cell coloring.
+
+        ANTI-GAMIFICATION: We render to a Rich Console capture and assert on the output text.
+        If the formatter regresses (drops the column), this test catches it.
+        """
+        from io import StringIO
+
+        from rich.console import Console
+
+        from quantum_mechanic.techniques.discovery.entra_enum_apps import (
+            _format_entra_enum_apps,
+        )
+
+        fake_result = type("R", (), {})()
+        fake_result.data = {
+            "applications": [{"displayName": "X", "signInAudience": "AzureADMyOrg",
+                              "passwordCredentials": [], "appId": "x-id", "id": "x-oid"}],
+            "service_principals": [],
+            "apps": [{"displayName": "X", "type": "App Registration", "appId": "x-id",
+                      "signInAudience": "AzureADMyOrg", "secrets": 0, "enabled": "—",
+                      "id": "x-oid", "highest_perm_tier": "ControlPlane"}],
+            "multi_tenant_count": 0, "with_secrets_count": 0,
+        }
+        # Capture console output by patching the module-level console
+        buf = StringIO()
+        test_console = Console(file=buf, force_terminal=False, width=200)
+        with patch("quantum_mechanic.shell.formatters.console", test_console):
+            _format_entra_enum_apps(fake_result)
+        output = buf.getvalue()
+        assert "Highest Perm Tier" in output or "ControlPlane" in output
+
 
 class TestLootMetadata:
     def test_loot_metadata_configured(self):

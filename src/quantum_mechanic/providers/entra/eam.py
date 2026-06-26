@@ -3,6 +3,18 @@
 Loads JSON templates at import time and exposes pure-function classifiers.
 Templates are sourced from EntraOps (MIT-licensed) and live alongside this
 module in the `eam_data/` subdirectory.
+
+Phase A wires `classify_role_name` and `classify_graph_permission` into
+existing techniques. Two contracts that Phase B work must honor:
+
+1. `entra_enum_apps` reads each application's `_resolved_perms` field
+   (a list of Graph permission name strings). Phase B's permission UUID→name
+   resolver MUST set this field on application objects before they reach
+   the apps technique's `_highest_tier` call.
+
+2. `classify_role_action` is unused in Phase A — reserved for Phase B's
+   custom directory-role enumeration via /roleManagement/directory/roleDefinitions
+   with `$expand=rolePermissions`.
 """
 from __future__ import annotations
 

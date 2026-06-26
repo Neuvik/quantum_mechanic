@@ -68,6 +68,18 @@ LOOT_SCHEMA = [
 ]
 
 
+def _tier_cell(tier: str) -> str:
+    """Render an EAM tier value with per-cell color coding."""
+    if tier == eam.TIER_CONTROL_PLANE:
+        return f"[red]{tier}[/red]"
+    if tier == eam.TIER_MANAGEMENT_PLANE:
+        return f"[yellow]{tier}[/yellow]"
+    if tier == eam.TIER_WORKLOAD_PLANE:
+        return f"[cyan]{tier}[/cyan]"
+    # UserAccess + Unknown fall through to dim
+    return f"[dim]{tier}[/dim]"
+
+
 def _format_entra_enum_apps(result: Any) -> None:
     from rich.table import Table
 
@@ -78,34 +90,47 @@ def _format_entra_enum_apps(result: Any) -> None:
         console.print(f"  [red]✗[/red] {data.get('error', 'Unknown error')}")
         return
 
-    apps = data.get("applications", [])
+    apps_raw = data.get("applications", [])
     sps = data.get("service_principals", [])
 
     console.print(
         f"  [bold green]✓[/bold green] "
-        f"[bold]{len(apps)}[/bold] app registrations, "
+        f"[bold]{len(apps_raw)}[/bold] app registrations, "
         f"[bold]{len(sps)}[/bold] service principals"
     )
 
-    if apps:
+    # Build a quick lookup for the enriched per-app tier so we can render
+    # alongside the raw Graph object fields.
+    tier_by_app_id = {
+        row.get("appId"): row.get("highest_perm_tier", eam.TIER_UNKNOWN)
+        for row in data.get("apps", [])
+        if row.get("type") == "App Registration"
+    }
+
+    if apps_raw:
         tbl = Table(title="App Registrations", box=None, padding=(0, 2), show_header=True)
         tbl.add_column("Display Name", style="cyan")
         tbl.add_column("Audience", style="dim")
         tbl.add_column("Secrets", style="yellow")
+        tbl.add_column("Highest Perm Tier")
         tbl.add_column("App ID", style="dim")
 
-        for a in apps[:50]:
+        for a in apps_raw[:50]:
             secrets = len(a.get("passwordCredentials", []))
             secret_str = f"[yellow]{secrets}[/yellow]" if secrets else "[dim]0[/dim]"
+            tier = tier_by_app_id.get(a.get("appId"), eam.TIER_UNKNOWN)
             tbl.add_row(
                 a.get("displayName", "—"),
                 a.get("signInAudience", "—"),
                 secret_str,
+                _tier_cell(tier),
                 a.get("appId", ""),
             )
         console.print(tbl)
-        if len(apps) > 50:
-            console.print(f"  [dim]... and {len(apps) - 50} more apps in result data[/dim]")
+        if len(apps_raw) > 50:
+            console.print(
+                f"  [dim]... and {len(apps_raw) - 50} more apps in result data[/dim]"
+            )
 
 
 @technique(
