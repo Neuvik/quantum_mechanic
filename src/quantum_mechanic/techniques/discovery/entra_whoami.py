@@ -53,6 +53,7 @@ _ME_DIR_ROLES  = (
     f"{_GRAPH_BASE}/me/transitiveMemberOf/microsoft.graph.directoryRole"
     "?$select=id,displayName,roleTemplateId"
 )
+_ME_OWNED = f"{_GRAPH_BASE}/me/ownedObjects?$select=id,displayName,appId,@odata.type"
 
 
 # ----------------------------------------------------------------
@@ -124,6 +125,19 @@ def _format_entra_whoami(result: Any) -> None:
     else:
         console.print("  [dim]No group memberships found.[/dim]")
 
+    # ── Owned objects (escalation paths) ────────────────────────
+    owned = data.get("owned_objects", [])
+    if owned:
+        own_tbl = Table(title=f"Owned Objects — Escalation Paths ({len(owned)})", box=None, padding=(0, 2))
+        own_tbl.add_column("Type", style="dim")
+        own_tbl.add_column("Display Name", style="bold green")
+        own_tbl.add_column("App ID / ID", style="cyan")
+        for o in owned:
+            otype = o.get("@odata.type", "").split(".")[-1]
+            own_tbl.add_row(otype, o.get("displayName", "—"), o.get("appId") or o.get("id", ""))
+        console.print(own_tbl)
+        console.print("  [dim]Tip: run escalation/entra_app_creds on an owned Application to escalate.[/dim]")
+
 
 # ----------------------------------------------------------------
 # Technique
@@ -164,6 +178,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     me: dict[str, Any] = {}
     groups: list[dict[str, Any]] = []
     directory_roles: list[dict[str, Any]] = []
+    owned_objects: list[dict[str, Any]] = []
 
     with httpx.Client(timeout=30) as http:
         # /me
@@ -182,6 +197,11 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         resp = http.get(_ME_DIR_ROLES, headers=headers)
         if resp.status_code == 200:
             directory_roles = resp.json().get("value", [])
+
+        # /me/ownedObjects — apps and SPs owned by this principal (escalation paths)
+        resp = http.get(_ME_OWNED, headers=headers)
+        if resp.status_code == 200:
+            owned_objects = resp.json().get("value", [])
 
     claims = token.raw_claims or decode_jwt_claims(token.value)
 
@@ -209,6 +229,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         "me": me,
         "groups": groups,
         "directory_roles": directory_roles,
+        "owned_objects": owned_objects,
         "posture": {
             "mfa": mfa,
             "device_claims": token.device_claims,

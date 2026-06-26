@@ -79,6 +79,17 @@ _DIR_ROLES_RESPONSE = {
     ]
 }
 
+_OWNED_OBJECTS_RESPONSE = {
+    "value": [
+        {
+            "@odata.type": "#microsoft.graph.application",
+            "id": "app-id-1",
+            "displayName": "Owned App",
+            "appId": "client-id-1",
+        }
+    ]
+}
+
 
 def _build_ctx(store: EntraTokenStore) -> MagicMock:
     ctx = MagicMock(spec=ExecutionContext)
@@ -129,6 +140,7 @@ class TestSuccessWithAccessToken:
             (200, _ME_RESPONSE),
             (200, _MEMBER_OF_RESPONSE),
             (200, _DIR_ROLES_RESPONSE),
+            (200, _OWNED_OBJECTS_RESPONSE),
         )
         with patch("quantum_mechanic.techniques.discovery.entra_whoami.httpx.Client", return_value=http):
             return execute(ctx)
@@ -157,6 +169,25 @@ class TestSuccessWithAccessToken:
         assert len(result["directory_roles"]) == 1
         assert result["directory_roles"][0]["displayName"] == "Global Administrator"
 
+    def test_owned_objects_populated(self):
+        result = self._run()
+        assert len(result["owned_objects"]) == 1
+        assert result["owned_objects"][0]["displayName"] == "Owned App"
+
+    def test_owned_objects_empty_on_403(self):
+        """OUTCOME: owned_objects defaults to [] when /me/ownedObjects returns non-200."""
+        store = _make_store(_make_access_token())
+        ctx = _build_ctx(store)
+        http = _mock_http_responses(
+            (200, _ME_RESPONSE),
+            (200, _MEMBER_OF_RESPONSE),
+            (200, _DIR_ROLES_RESPONSE),
+            (403, {"error": {"code": "Forbidden"}}),
+        )
+        with patch("quantum_mechanic.techniques.discovery.entra_whoami.httpx.Client", return_value=http):
+            result = execute(ctx)
+        assert result["owned_objects"] == []
+
     def test_posture_mfa_from_claims(self):
         result = self._run()
         assert result["posture"]["mfa"] is True
@@ -181,6 +212,7 @@ class TestSuccessWithAccessToken:
             (200, _ME_RESPONSE),
             (200, _MEMBER_OF_RESPONSE),
             (200, _DIR_ROLES_RESPONSE),
+            (200, {"value": []}),
         )
         with patch("quantum_mechanic.techniques.discovery.entra_whoami.httpx.Client", return_value=http):
             execute(ctx)
@@ -202,6 +234,7 @@ class TestFociExpansion:
             (200, _ME_RESPONSE),
             (200, _MEMBER_OF_RESPONSE),
             (200, _DIR_ROLES_RESPONSE),
+            (200, {"value": []}),
         )
         with patch(
             "quantum_mechanic.techniques.discovery.entra_whoami.foci_expand",
@@ -236,6 +269,7 @@ class TestGraphErrors:
             (403, {"error": {"code": "Authorization_RequestDenied", "message": "Insufficient privileges"}}),
             (200, _MEMBER_OF_RESPONSE),
             (200, _DIR_ROLES_RESPONSE),
+            (200, {"value": []}),
         )
         with patch("quantum_mechanic.techniques.discovery.entra_whoami.httpx.Client", return_value=http):
             result = execute(ctx)
@@ -252,6 +286,7 @@ class TestGraphErrors:
             (200, _ME_RESPONSE),
             (403, {"error": {"code": "Forbidden"}}),
             (200, _DIR_ROLES_RESPONSE),
+            (200, {"value": []}),
         )
         with patch("quantum_mechanic.techniques.discovery.entra_whoami.httpx.Client", return_value=http):
             result = execute(ctx)
@@ -281,6 +316,7 @@ class TestGraphErrors:
             (200, me_no_upn),
             (200, {"value": []}),
             (200, {"value": []}),
+            (200, {"value": []}),
         )
         with patch("quantum_mechanic.techniques.discovery.entra_whoami.httpx.Client", return_value=http):
             result = execute(ctx)
@@ -307,6 +343,7 @@ class TestMfaPosture:
         ctx = _build_ctx(store)
         http = _mock_http_responses(
             (200, {"id": "u", "tenantId": "t"}),
+            (200, {"value": []}),
             (200, {"value": []}),
             (200, {"value": []}),
         )
