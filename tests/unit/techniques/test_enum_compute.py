@@ -79,22 +79,22 @@ class TestEnumComputeAWS:
         }
 
         self._make_aws_ctx(mock_ctx, [fake_page])
-    
-        from quantum_mechanic.techniques.discovery.enum_compute import execute
+
         import sys
-        
+
         botocore_mocks = {"botocore.exceptions": MagicMock()}
         with patch.dict(sys.modules, botocore_mocks):
             import importlib
+
             import quantum_mechanic.techniques.discovery.enum_compute as mod
             importlib.reload(mod)
             result = mod.execute(mock_ctx)
-        
+
         assert "error" not in result, f"Implementation threw an error: {result.get('error')}"
 
         assert result["provider"] == "aws"
         assert result["total"] == 2
-        
+
         # Verify both instances parsed (including the identity-less one)
         assert result["instances"][0]["instance_id"] == "i-ABCD1234"
         assert result["instances"][0]["instance_profile_arn"] == (
@@ -112,19 +112,19 @@ class TestEnumComputeAWS:
         }
 
         self._make_aws_ctx(mock_ctx, [fake_page])
-    
-        from quantum_mechanic.techniques.discovery.enum_compute import execute
+
         import sys
-        
+
         botocore_mocks = {"botocore.exceptions": MagicMock()}
         with patch.dict(sys.modules, botocore_mocks):
             import importlib
+
             import quantum_mechanic.techniques.discovery.enum_compute as mod
             importlib.reload(mod)
             result = mod.execute(mock_ctx)
-        
+
         assert "error" not in result, f"Implementation threw an error: {result.get('error')}"
-    
+
         # Under the new logic, the instance without a profile is kept!
         assert result["total"] == 1
         assert result["instances"][0]["instance_id"] == "i-000"
@@ -172,7 +172,7 @@ class TestEnumComputeAzure:
             )
         }
 
-        # VM 2: Completely lacks an identity property 
+        # VM 2: Completely lacks an identity property
         fake_vm_2 = MagicMock()
         fake_vm_2.id = "/subscriptions/sub123/rg/vm-no-id"
         fake_vm_2.name = "vm-no-id"
@@ -186,7 +186,7 @@ class TestEnumComputeAzure:
         fake_vm_3.name = "vm-str-id"
         fake_vm_3.location = "westus"
         fake_vm_3.identity = MagicMock()
-        fake_vm_3.identity.type = None # Mocking what caused the AttributeError 
+        fake_vm_3.identity.type = None # Mocking what caused the AttributeError
         fake_vm_3.identity.user_assigned_identities = None
 
         # Inject fake azure modules so the import inside _enum_azure succeeds
@@ -219,21 +219,22 @@ class TestEnumComputeAzure:
         with patch.dict(sys.modules, azure_mocks):
             # Re-import so it picks up the mocked modules
             import importlib
+
             import quantum_mechanic.techniques.discovery.enum_compute as mod
             importlib.reload(mod)
             result = mod._enum_azure(mock_ctx)
 
         assert result["provider"] == "azure"
         assert result["total"] == 3
-        
+
         # Verify VM 1 parsed properly
         assert result["instances"][0]["instance_id"] == "myvm"
         assert result["instances"][0]["identity_type"] == "UserAssigned"
-        
+
         # Verify VM 2 parsed properly despite having NO identity (fixes blind exclusion bug)
         assert result["instances"][1]["instance_id"] == "vm-no-id"
         assert result["instances"][1]["identity_type"] == "None"
-        
+
         # Verify VM 3 parsed properly despite missing an Enum type (fixes AttributeError bug)
         assert result["instances"][2]["instance_id"] == "vm-str-id"
         assert result["instances"][2]["identity_type"] == "None"
@@ -248,11 +249,15 @@ class TestEnumComputeAzure:
         """
         import json
         from unittest.mock import MagicMock, patch
+
         from quantum_mechanic.techniques.discovery.enum_compute import execute
 
         fake_vm = MagicMock()
         fake_vm.name = "vm-victim"
-        fake_vm.id = "/subscriptions/sub-1/resourceGroups/rg-1/providers/Microsoft.Compute/virtualMachines/vm-victim"
+        fake_vm.id = (
+            "/subscriptions/sub-1/resourceGroups/rg-1"
+            "/providers/Microsoft.Compute/virtualMachines/vm-victim"
+        )
         fake_vm.location = "eastus"
         fake_vm.hardware_profile.vm_size = "Standard_DS2_v2"
         fake_vm.storage_profile = MagicMock()
@@ -270,10 +275,10 @@ class TestEnumComputeAzure:
         ctx.session = MagicMock()
         ctx.workspace = MagicMock()
 
-        with patch("azure.mgmt.subscription.SubscriptionClient") as MockSubClient, \
-             patch("azure.mgmt.compute.ComputeManagementClient") as MockComputeClient:
-            MockSubClient.return_value.subscriptions.list.return_value = [fake_sub]
-            compute = MockComputeClient.return_value
+        with patch("azure.mgmt.subscription.SubscriptionClient") as mock_sub_client, \
+             patch("azure.mgmt.compute.ComputeManagementClient") as mock_compute_client:
+            mock_sub_client.return_value.subscriptions.list.return_value = [fake_sub]
+            compute = mock_compute_client.return_value
             compute.virtual_machines.list_all.return_value = [fake_vm]
             compute.virtual_machines.instance_view.side_effect = Exception("skip power state")
 
@@ -359,6 +364,7 @@ class TestEnumComputeGCP:
         }
         with patch.dict(sys.modules, gcp_mocks):
             import importlib
+
             import quantum_mechanic.techniques.discovery.enum_compute as mod
             importlib.reload(mod)
             result = mod._enum_gcp(mock_ctx)

@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, call, patch
+from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, patch
 
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
@@ -14,7 +14,7 @@ from quantum_mechanic.techniques.discovery.entra_enum_apps import execute
 
 
 def _future() -> datetime:
-    return datetime.now(timezone.utc) + timedelta(hours=1)
+    return datetime.now(UTC) + timedelta(hours=1)
 
 
 def _make_token(token_type: str = "access_token") -> EntraToken:
@@ -138,7 +138,10 @@ class TestEnumApps:
     def test_foci_expansion_error(self):
         store = _make_store(_make_token("refresh_token"))
         ctx = _build_ctx(store)
-        with patch("quantum_mechanic.techniques.discovery.entra_enum_apps.foci_expand", return_value=None):
+        with patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_apps.foci_expand",
+            return_value=None,
+        ):
             result = execute(ctx)
         assert "error" in result
 
