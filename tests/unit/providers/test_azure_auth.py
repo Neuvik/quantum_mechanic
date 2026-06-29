@@ -7,9 +7,10 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-from azure.identity import ClientSecretCredential, DefaultAzureCredential
+from azure.identity import ClientSecretCredential
 
 from quantum_mechanic.providers.azure.auth import AzureAuthProvider
+from quantum_mechanic.providers.azure.static_token import StaticTokenCredential
 
 
 @pytest.fixture
@@ -18,15 +19,29 @@ def provider() -> AzureAuthProvider:
 
 
 class TestAzureAuthenticate:
-    def test_authenticate_default(self, provider: AzureAuthProvider) -> None:
-        """Test authentication with default method."""
-        cred = provider.authenticate({"method": "default"})
-        assert isinstance(cred, DefaultAzureCredential)
+    def test_authenticate_captured_token(self, provider: AzureAuthProvider) -> None:
+        """Test authentication with captured_token method."""
+        cred = provider.authenticate({
+            "method": "captured_token",
+            "access_token": "fake-jwt-token",
+            "expires_on": 9999999999,
+            "captured_principal": "user@example.com",
+        })
+        assert isinstance(cred, StaticTokenCredential)
 
-    def test_authenticate_cli(self, provider: AzureAuthProvider) -> None:
-        """Test authentication with cli method."""
-        cred = provider.authenticate({"method": "cli"})
-        assert isinstance(cred, DefaultAzureCredential)
+    def test_authenticate_captured_token_missing_access_token(
+        self, provider: AzureAuthProvider
+    ) -> None:
+        """Test captured_token requires access_token."""
+        with pytest.raises(ValueError, match="captured_token method requires"):
+            provider.authenticate({"method": "captured_token", "expires_on": 9999999999})
+
+    def test_authenticate_captured_token_missing_expires_on(
+        self, provider: AzureAuthProvider
+    ) -> None:
+        """Test captured_token requires expires_on."""
+        with pytest.raises(ValueError, match="captured_token method requires"):
+            provider.authenticate({"method": "captured_token", "access_token": "x"})
 
     def test_authenticate_service_principal_success(self, provider: AzureAuthProvider) -> None:
         """Test SP authentication with all required fields."""
@@ -48,11 +63,6 @@ class TestAzureAuthenticate:
         }
         with pytest.raises(ValueError, match="requires 'tenant_id'"):
             provider.authenticate(data)
-
-    def test_authenticate_fallback(self, provider: AzureAuthProvider) -> None:
-        """Test authentication without method falls back to default."""
-        cred = provider.authenticate({})
-        assert isinstance(cred, DefaultAzureCredential)
 
 
 class TestAzureWhoAmI:
@@ -181,7 +191,19 @@ def test_imported_credential_not_substituted_by_local_state():
 
     This is the regression alarm for credential isolation. If this test ever fails,
     the harness is unsafe to use against customer engagements.
+
+    The fix removes DefaultAzureCredential from azure.auth entirely. We assert that
+    the module has no such symbol AND that authenticate() returns a credential whose
+    get_token() returns ONLY the stored bytes (no local-state lookup possible).
     """
+    import quantum_mechanic.providers.azure.auth as azure_auth_mod
+
+    # Structural assertion: the silent-substitution path is gone from the module.
+    assert not hasattr(azure_auth_mod, "DefaultAzureCredential"), (
+        "azure.auth must not import DefaultAzureCredential — that was the substitution "
+        "vector. Capture-at-import is the only allowed path for local CLI state."
+    )
+
     # Operator imported credential for alice@target-org.example.
     secret_data = {
         "method": "captured_token",
@@ -190,16 +212,9 @@ def test_imported_credential_not_substituted_by_local_state():
         "captured_principal": "alice@target-org.example",
     }
 
-    # Local az session is mbrenner — if isolation breaks, this would win.
-    impostor_token = MagicMock(token=_fake_jwt_for("mbrenner-adm@hawkins588.com", "oid-B", "tid-B"))
-    with patch(
-        "quantum_mechanic.providers.azure.auth.DefaultAzureCredential"
-    ) as mock_default:
-        mock_default.return_value.get_token.return_value = impostor_token
-
-        provider = AzureAuthProvider()
-        credential = provider.authenticate(secret_data)
-        result = provider.whoami(credential)
+    provider = AzureAuthProvider()
+    credential = provider.authenticate(secret_data)
+    result = provider.whoami(credential)
 
     assert result.friendly_name == "alice@target-org.example", (
         f"Expected alice@target-org.example, got {result.friendly_name!r} — "
@@ -207,5 +222,39 @@ def test_imported_credential_not_substituted_by_local_state():
         "by local az session at use time."
     )
     assert result.tenant_id == "tid-A", f"Tenant must match stored cred, got {result.tenant_id!r}"
-    # DefaultAzureCredential MUST NOT have been called — that's the bug signature
-    mock_default.assert_not_called()
+
+
+# ================================================================
+# REFUSAL TESTS: Local-state credentials must never be silently used
+# ----------------------------------------------------------------
+# These guard against re-introduction of the substitution bug class.
+# Any stored credential that references local CLI state must raise.
+# ================================================================
+
+
+def test_method_default_in_stored_secret_raises():
+    """OUTCOME: A stored credential with method='default' raises — that's the bug shape."""
+    provider = AzureAuthProvider()
+    with pytest.raises(ValueError, match="references local CLI state"):
+        provider.authenticate({"method": "default"})
+
+
+def test_method_cli_in_stored_secret_raises():
+    """OUTCOME: A stored credential with method='cli' raises — same bug class."""
+    provider = AzureAuthProvider()
+    with pytest.raises(ValueError, match="references local CLI state"):
+        provider.authenticate({"method": "cli"})
+
+
+def test_empty_method_in_stored_secret_raises():
+    """OUTCOME: A stored credential with no method also raises — defensive."""
+    provider = AzureAuthProvider()
+    with pytest.raises(ValueError, match="references local CLI state"):
+        provider.authenticate({})
+
+
+def test_unknown_method_raises_not_silent():
+    """OUTCOME: An unknown method raises ValueError, not silent DefaultAzureCredential fallback."""
+    provider = AzureAuthProvider()
+    with pytest.raises(ValueError, match="Unrecognized Azure credential method"):
+        provider.authenticate({"method": "wat"})

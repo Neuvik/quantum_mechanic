@@ -4,9 +4,9 @@
 # PURPOSE:   Azure authentication and identity resolution.
 #
 #            Supports:
-#              - DefaultAzureCredential (az login, env vars, MI)
+#              - StaticTokenCredential (captured token from import)
 #              - Client ID + secret (service principal)
-#              - Refresh token import (for device code / phishing)
+#              - EntraTokenStore (FOCI / refresh token reuse)
 #
 # DETECTION (Blue Team):
 #   Azure AD Sign-in Logs: Look for token acquisitions from
@@ -20,10 +20,7 @@ import json
 import logging
 from typing import Any
 
-from azure.identity import (
-    ClientSecretCredential,
-    DefaultAzureCredential,
-)
+from azure.identity import ClientSecretCredential
 from azure.mgmt.subscription import SubscriptionClient
 
 from quantum_mechanic.providers.base import AuthProvider, WhoAmIResult
@@ -43,34 +40,51 @@ class AzureAuthProvider(AuthProvider):
         return "azure"
 
     def authenticate(self, secret_data: dict[str, Any]) -> Any:
-        """Create an Azure credential object.
+        """Create an Azure credential object from STORED secret data.
+
+        Refuses to use local CLI state — local-state pathways are import-time
+        only (see `shell/commands.py::_import_azure`), they must NEVER appear
+        in stored secret_data. If they do, that's the silent-substitution bug
+        class and we fail loudly.
 
         Args:
             secret_data: Must contain one of:
-                - {"method": "default"}  — use DefaultAzureCredential
+                - {"method": "captured_token", "access_token": "...",
+                   "expires_on": ..., "captured_principal": "..."}
                 - {"tenant_id": "...", "client_id": "...",
                    "client_secret": "..."}  — service principal
-                - {"method": "cli"}  — use az login credentials
+                - {"token_store": {...}} — EntraTokenStore (FOCI support)
 
         Returns:
             Azure credential object (TokenCredential).
 
         Raises:
-            ValueError: If required fields are missing.
+            ValueError: If required fields are missing OR if the method
+                references local state ("default" / "cli") — those must
+                never be stored.
         """
         method = secret_data.get("method", "")
 
-        if method in ("default", "cli"):
-            # --------------------------------------------------------
-            # DefaultAzureCredential tries az login, env vars,
-            # managed identity, etc. in order.
-            # --------------------------------------------------------
-            return DefaultAzureCredential()
+        # EntraTokenStore support (FOCI / Refresh Token Reuse)
+        if "token_store" in secret_data:
+            from quantum_mechanic.providers.azure.token_adapter import AzureTokenAdapter
+            from quantum_mechanic.providers.entra.token_store import EntraTokenStore
+            store = EntraTokenStore.from_dict(secret_data["token_store"])
+            return AzureTokenAdapter(store)
 
+        # Captured token (new — primary path for `import azure --default`)
+        if method == "captured_token":
+            from quantum_mechanic.providers.azure.static_token import StaticTokenCredential
+            token = secret_data.get("access_token")
+            expires_on = secret_data.get("expires_on")
+            if not token or not expires_on:
+                raise ValueError(
+                    "captured_token method requires 'access_token' and 'expires_on'"
+                )
+            return StaticTokenCredential(access_token=token, expires_on=expires_on)
+
+        # Service principal
         if "client_id" in secret_data and "client_secret" in secret_data:
-            # --------------------------------------------------------
-            # Service principal authentication.
-            # --------------------------------------------------------
             tenant_id = secret_data.get("tenant_id")
             if not tenant_id:
                 raise ValueError("Service principal auth requires 'tenant_id'")
@@ -80,10 +94,15 @@ class AzureAuthProvider(AuthProvider):
                 client_secret=secret_data["client_secret"],
             )
 
-        # --------------------------------------------------------
-        # Fallback to DefaultAzureCredential if no explicit method.
-        # --------------------------------------------------------
-        return DefaultAzureCredential()
+        # REFUSE local-state fallback — these MUST be captured at import time.
+        if method in ("default", "cli", ""):
+            raise ValueError(
+                f"Azure credential has method={method!r} which references local CLI "
+                f"state — this is a stale credential format from before the "
+                f"credential-isolation fix. Re-import via `import azure --default`."
+            )
+
+        raise ValueError(f"Unrecognized Azure credential method: {method!r}")
 
     def whoami(self, session: Any) -> WhoAmIResult:
         """Identify the Azure principal and tenant.
