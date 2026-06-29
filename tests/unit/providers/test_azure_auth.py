@@ -155,3 +155,57 @@ class TestAzureWhoAmI:
         assert result.principal_id == "unknown"
         assert result.tenant_id == "unknown"
         assert result.principal_type == "unknown"
+
+
+# ================================================================
+# CANARY: Credential Isolation
+# ----------------------------------------------------------------
+# This test is the regression alarm for the silent identity-
+# substitution bug. It MUST fail until the real fix lands.
+# ================================================================
+
+
+def _fake_jwt_for(upn: str, oid: str, tid: str) -> str:
+    """Build a fake unsigned JWT with the given claims (header.payload.sig style)."""
+    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
+    claims = {"upn": upn, "oid": oid, "tid": tid}
+    payload = base64.urlsafe_b64encode(
+        json.dumps(claims).encode()
+    ).rstrip(b"=").decode()
+    return f"{header}.{payload}.sig"
+
+
+def test_imported_credential_not_substituted_by_local_state():
+    """CANARY: credential imported as User-A must not be silently replaced by User-B
+    when the local az session is User-B.
+
+    This is the regression alarm for credential isolation. If this test ever fails,
+    the harness is unsafe to use against customer engagements.
+    """
+    # Operator imported credential for alice@target-org.example.
+    secret_data = {
+        "method": "captured_token",
+        "access_token": _fake_jwt_for("alice@target-org.example", "oid-A", "tid-A"),
+        "expires_on": 9999999999,  # far future
+        "captured_principal": "alice@target-org.example",
+    }
+
+    # Local az session is mbrenner — if isolation breaks, this would win.
+    impostor_token = MagicMock(token=_fake_jwt_for("mbrenner-adm@hawkins588.com", "oid-B", "tid-B"))
+    with patch(
+        "quantum_mechanic.providers.azure.auth.DefaultAzureCredential"
+    ) as mock_default:
+        mock_default.return_value.get_token.return_value = impostor_token
+
+        provider = AzureAuthProvider()
+        credential = provider.authenticate(secret_data)
+        result = provider.whoami(credential)
+
+    assert result.friendly_name == "alice@target-org.example", (
+        f"Expected alice@target-org.example, got {result.friendly_name!r} — "
+        "credential isolation is broken: stored credential was replaced "
+        "by local az session at use time."
+    )
+    assert result.tenant_id == "tid-A", f"Tenant must match stored cred, got {result.tenant_id!r}"
+    # DefaultAzureCredential MUST NOT have been called — that's the bug signature
+    mock_default.assert_not_called()
