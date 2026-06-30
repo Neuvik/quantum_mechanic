@@ -310,21 +310,37 @@ def _cmd_import(extra_args: list[str], args: argparse.Namespace, workspace_dir: 
                 obtained_via="agent import",
             )
         elif provider == "azure":
-            secret = json.dumps({"method": "default"})
-            friendly = "DefaultAzureCredential"
+            from quantum_mechanic.shell.commands import _capture_azure_token
+            try:
+                secret_dict = _capture_azure_token()
+            except Exception as e:
+                logger.error("Agent failed to capture Azure credential: %s", e)
+                _error_out(f"Failed to capture Azure credential: {e}")
+                return
+            secret = json.dumps(secret_dict)
+            friendly = secret_dict["captured_principal"]
             cred_id = ws.add_credential(
                 provider="azure",
-                credential_type="access_key",
+                credential_type="captured_token",
                 secret_data=secret,
                 friendly_name=friendly,
                 obtained_via="agent import",
             )
         elif provider == "gcp":
-            secret = json.dumps({"method": "default"})
-            friendly = "ApplicationDefaultCredentials"
+            from quantum_mechanic.shell.commands import _capture_gcp_token
+            try:
+                secret_dict = _capture_gcp_token()
+            except Exception as e:
+                logger.error("Agent failed to capture GCP credential: %s", e)
+                _error_out(f"Failed to capture GCP credential: {e}")
+                return
+            if not secret_dict.get("project_id") and opts.get("project"):
+                secret_dict["project_id"] = opts["project"]
+            secret = json.dumps(secret_dict)
+            friendly = secret_dict["captured_principal"]
             cred_id = ws.add_credential(
                 provider="gcp",
-                credential_type="service_account",
+                credential_type="captured_token",
                 secret_data=secret,
                 friendly_name=friendly,
                 obtained_via="agent import",

@@ -351,26 +351,11 @@ def _import_gcp(state: ShellState, opts: dict[str, str]) -> None:
     else:
         # --default path: capture token from ADC once.
         try:
-            import google.auth
-            from google.auth.transport.requests import Request
-
             console.print("  [dim]Capturing GCP credential from local ADC state...[/dim]")
-            live, project = google.auth.default(
-                scopes=["https://www.googleapis.com/auth/cloud-platform"]
-            )
-            live.refresh(Request())
-            captured_principal = (
-                getattr(live, "service_account_email", None)
-                or getattr(live, "_account", None)
-                or "unknown"
-            )
-            secret = {
-                "method": "captured_token",
-                "access_token": live.token,
-                "captured_principal": captured_principal,
-                "project_id": project or opts.get("project", ""),
-            }
-            friendly = captured_principal
+            secret = _capture_gcp_token()
+            if not secret.get("project_id") and opts.get("project"):
+                secret["project_id"] = opts["project"]
+            friendly = secret["captured_principal"]
             cred_type = "captured_token"
         except Exception as e:
             console.print(f"  [red]✗[/red] Failed to capture GCP credential: {e}")
@@ -2430,6 +2415,37 @@ def _capture_azure_token() -> dict[str, Any]:
         "expires_on": token.expires_on,
         "captured_principal": captured_upn,
         "captured_tenant": claims.get("tid", "unknown"),
+    }
+
+
+def _capture_gcp_token() -> dict[str, Any]:
+    """Capture a GCP access token from local ADC state.
+
+    Returns a secret_data dict with method=captured_token. Raises on failure.
+
+    This is the ONLY place in production code that constructs
+    google.auth.default(). It runs at import time, by explicit operator
+    consent, captured once. The result is persisted to the workspace as
+    a static token — at use time, the provider returns ONLY that stored
+    token, never re-resolving against local ADC state.
+    """
+    import google.auth
+    from google.auth.transport.requests import Request
+
+    live, project = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    live.refresh(Request())
+    captured_principal = (
+        getattr(live, "service_account_email", None)
+        or getattr(live, "_account", None)
+        or "unknown"
+    )
+    return {
+        "method": "captured_token",
+        "access_token": live.token,
+        "captured_principal": captured_principal,
+        "project_id": project or "",
     }
 
 
