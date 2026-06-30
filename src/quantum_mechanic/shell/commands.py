@@ -29,6 +29,7 @@ from quantum_mechanic.core.transport import LocalTransport, Transport
 from quantum_mechanic.core.workspace import Workspace
 from quantum_mechanic.providers.base import ProviderRegistry
 from quantum_mechanic.shell import formatters
+from quantum_mechanic.shell.command_help import CommandHelp, FlagHelp, SubcommandHelp
 from quantum_mechanic.shell.commands_entra import acquire_entra, export_entra, import_entra
 
 console = Console()
@@ -2479,6 +2480,332 @@ COMMANDS: dict[str, Any] = {
     "export": cmd_export,
     "help": cmd_help,
     "info": cmd_help,        # alias: `info escalation/assume_role_chain`
+}
+
+
+# ================================================================
+# Structured help registry
+# ================================================================
+#
+# Source of truth for both `help <command>` in-shell output and the
+# auto-generated docs/wiki/Commands.md page. Adding a new command
+# without a CommandHelp record fails the
+# test_every_shell_command_has_help_record test.
+# ================================================================
+COMMAND_HELP: dict[str, CommandHelp] = {
+    # --- workspaces ---
+    "workspace": CommandHelp(
+        name="workspace",
+        category="workspaces",
+        synopsis="Create, load, list, or delete engagement workspaces",
+        description=(
+            "An engagement workspace is a SQLite database that stores "
+            "credentials, discovered resources, evidence, and findings. "
+            "Each engagement lives in its own workspace."
+        ),
+        subcommands=[
+            SubcommandHelp(
+                name="create",
+                synopsis="Create a new workspace",
+                args="<name>",
+                example="workspace create acme-q4",
+            ),
+            SubcommandHelp(
+                name="load",
+                synopsis="Open an existing workspace",
+                args="<name>",
+                example="workspace load acme-q4",
+            ),
+            SubcommandHelp(name="list", synopsis="List all workspaces"),
+            SubcommandHelp(name="delete", synopsis="Delete a workspace", args="<name>"),
+        ],
+        examples=[
+            "workspace create test",
+            "workspace load test",
+        ],
+    ),
+
+    # --- credentials ---
+    "import": CommandHelp(
+        name="import",
+        category="credentials",
+        synopsis="Import a credential into the active workspace",
+        description=(
+            "Imports cloud credentials. For Azure/GCP --default flows, captures "
+            "the access token at import time (the credential is then isolated "
+            "from later CLI session changes — see docs/architecture/spec.md §5.3)."
+        ),
+        subcommands=[
+            SubcommandHelp(
+                name="aws",
+                synopsis="Import AWS credential",
+                args="--profile <name> | --access-key <key> --secret-key <s>",
+            ),
+            SubcommandHelp(
+                name="azure",
+                synopsis="Import Azure credential",
+                args="--default | --client-id <id> --client-secret <s> --tenant-id <t>",
+            ),
+            SubcommandHelp(
+                name="gcp",
+                synopsis="Import GCP credential",
+                args="--default | --key-file <path>",
+            ),
+            SubcommandHelp(name="oci", synopsis="Import OCI credential", args="--default"),
+            SubcommandHelp(
+                name="entra",
+                synopsis="Import Entra ID tokens",
+                args="browserdump <path> | roadtools <path> | refresh_token <tok>",
+            ),
+        ],
+        examples=[
+            "import aws --profile default",
+            "import azure --default",
+            "import gcp --default --project my-project",
+        ],
+    ),
+    "creds": CommandHelp(
+        name="creds",
+        category="credentials",
+        synopsis="List or manage workspace credentials",
+        description="Shows imported credentials and lets you delete them by ID.",
+        subcommands=[
+            SubcommandHelp(
+                name="delete",
+                synopsis="Remove a credential by ID",
+                args="<id>",
+                example="creds delete 2",
+            ),
+        ],
+        flags=[
+            FlagHelp(name="--provider", value="<name>", synopsis="Filter by provider"),
+            FlagHelp(name="--active", synopsis="Show only active credentials"),
+        ],
+        examples=["creds", "creds --provider aws", "creds delete 2"],
+    ),
+    "use": CommandHelp(
+        name="use",
+        category="credentials",
+        synopsis="Activate a credential for subsequent commands",
+        description="Sets the active credential by ID. Pass `none` to clear.",
+        examples=["use 1", "use none"],
+    ),
+    "raw": CommandHelp(
+        name="raw",
+        category="credentials",
+        synopsis="Show raw JSON for a credential or principal",
+        description="Reveals the underlying credential record stored in the workspace.",
+        examples=["raw 1"],
+    ),
+    "acquire": CommandHelp(
+        name="acquire",
+        category="credentials",
+        synopsis="Acquire a new Entra credential interactively",
+        description="Drives device-code or browser flows to obtain Entra tokens.",
+        subcommands=[
+            SubcommandHelp(
+                name="entra device_code",
+                synopsis="Interactive device-code login",
+            ),
+            SubcommandHelp(
+                name="entra arm",
+                synopsis="Pivot Entra credential into Azure ARM (FOCI)",
+            ),
+        ],
+    ),
+    "export": CommandHelp(
+        name="export",
+        category="credentials",
+        synopsis="Export credential material for offline use",
+        description="Prints raw tokens or decoded JWT claims for an imported Entra credential.",
+        subcommands=[
+            SubcommandHelp(name="entra token", synopsis="Print raw access token"),
+            SubcommandHelp(name="entra describe", synopsis="Decode and display JWT claims"),
+        ],
+    ),
+
+    # --- techniques ---
+    "techniques": CommandHelp(
+        name="techniques",
+        category="techniques",
+        synopsis="List discovery, escalation, lateral, and exfil techniques",
+        description=(
+            "Lists techniques available for the active credential's provider. "
+            "Supports filtering by tactic / provider / safe flag, and positional "
+            "substring search against id and description."
+        ),
+        flags=[
+            FlagHelp(name="--all", synopsis="Show all techniques regardless of active provider"),
+            FlagHelp(
+                name="--tactic",
+                value="<name>",
+                synopsis="Filter by ATT&CK tactic (discovery, escalation, etc.)",
+            ),
+            FlagHelp(
+                name="--provider",
+                value="<name>",
+                synopsis="Filter by provider (aws, azure, gcp, oci, entra)",
+            ),
+            FlagHelp(name="--safe", synopsis="Only safe (read-only) techniques"),
+            FlagHelp(name="--unsafe", synopsis="Only state-changing techniques"),
+        ],
+        examples=[
+            "techniques",
+            "techniques --tactic discovery",
+            "techniques --provider azure --safe",
+            "techniques whoami     # positional substring search",
+        ],
+    ),
+    "run": CommandHelp(
+        name="run",
+        category="techniques",
+        synopsis="Execute a technique by ID",
+        description="Runs the named technique against the active credential.",
+        flags=[
+            FlagHelp(
+                name="--dry-run",
+                synopsis="Simulate without making changes (where supported)",
+            ),
+            FlagHelp(
+                name="--param",
+                value="key=value",
+                synopsis="Pass a parameter to the technique",
+            ),
+        ],
+        examples=[
+            "run discovery/whoami",
+            "run discovery/enum_compute --param target=vm-name",
+        ],
+    ),
+    "reload": CommandHelp(
+        name="reload",
+        category="techniques",
+        synopsis="Hot-reload technique modules without restarting qm",
+        description=(
+            "Re-imports every technique module from disk so newly added or "
+            "edited techniques become available in the current shell session."
+        ),
+        examples=["reload"],
+    ),
+
+    # --- playbooks ---
+    "playbook": CommandHelp(
+        name="playbook",
+        category="playbooks",
+        synopsis="Manage and run YAML playbooks",
+        description=(
+            "Playbooks are YAML files in src/quantum_mechanic/playbooks/ that "
+            "chain techniques together. `playbook list` enumerates available "
+            "playbooks; `playbook run <name>` executes one against the active "
+            "credential."
+        ),
+        subcommands=[
+            SubcommandHelp(name="list", synopsis="List available playbooks"),
+            SubcommandHelp(
+                name="run",
+                synopsis="Run a playbook by name",
+                args="<name>",
+                example="playbook run aws_quick_recon",
+            ),
+        ],
+        examples=["playbook list", "playbook run aws_quick_recon"],
+    ),
+
+    # --- evidence / reporting ---
+    "loot": CommandHelp(
+        name="loot",
+        category="evidence",
+        synopsis="Display saved loot from previous technique runs",
+        description=(
+            "Loot files are CSV/JSON artifacts dropped by techniques into the "
+            "workspace's loot directory. With no args, lists all loot. Pass a "
+            "technique ID to render just that technique's loot."
+        ),
+        examples=["loot", "loot discovery/whoami"],
+    ),
+    "activity": CommandHelp(
+        name="activity",
+        category="evidence",
+        synopsis="View the workspace activity log",
+        description=(
+            "Shows the chronological log of technique runs, errors, and "
+            "workspace mutations. Filter by technique ID, log level, or "
+            "row count."
+        ),
+        flags=[
+            FlagHelp(
+                name="--level",
+                value="<LEVEL>",
+                synopsis="Filter by log level (INFO, WARNING, ERROR)",
+            ),
+            FlagHelp(
+                name="--limit",
+                value="<N>",
+                synopsis="Limit the number of rows shown (default 50)",
+            ),
+        ],
+        examples=[
+            "activity",
+            "activity discovery/whoami",
+            "activity --level ERROR --limit 20",
+        ],
+    ),
+    "report": CommandHelp(
+        name="report",
+        category="reporting",
+        synopsis="Render an engagement narrative",
+        description="Prints the credential chain, technique timeline, and findings inline.",
+    ),
+
+    # --- advanced ---
+    "ask": CommandHelp(
+        name="ask",
+        category="advanced",
+        synopsis="Ask the Quantum Mechanic RAG agent for advice",
+        description=(
+            "Sends a natural-language question to the RAG agent, which reasons "
+            "over the current workspace's evidence and findings. Requires the "
+            "optional `[agent]` install extra."
+        ),
+        examples=[
+            "ask what should I run next?",
+            "ask any privesc paths from my current creds?",
+        ],
+    ),
+    "check-ca-bypasses": CommandHelp(
+        name="check-ca-bypasses",
+        category="advanced",
+        synopsis="Analyze Entra Conditional Access policies for bypass opportunities",
+        description=(
+            "Reads stored Conditional Access policy evidence (from "
+            "discovery/entra_enum_conditional_access_policies) and highlights "
+            "policies that can be bypassed via excluded users/apps, named "
+            "locations, or device-state assumptions."
+        ),
+        examples=["check-ca-bypasses"],
+    ),
+
+    # --- shell / meta ---
+    "help": CommandHelp(
+        name="help",
+        category="shell",
+        synopsis="Show command help or technique documentation",
+        description=(
+            "With no args, lists all commands. With a name, "
+            "shows that command's full help."
+        ),
+        examples=["help", "help creds", "help discovery/whoami"],
+    ),
+    "info": CommandHelp(
+        name="info",
+        category="shell",
+        synopsis="Alias for `help` — show command or technique documentation",
+        description=(
+            "Same as `help`. Convenient when the operator thinks 'info "
+            "<technique>' instead of 'help <technique>'."
+        ),
+        examples=["info escalation/assume_role_chain"],
+    ),
 }
 
 

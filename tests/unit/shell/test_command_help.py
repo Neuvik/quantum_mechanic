@@ -60,3 +60,17 @@ def test_command_help_categories_constrained():
             name="x", category="invalid-category-xyz",
             synopsis="x", description="y",
         )
+
+
+def test_every_shell_command_has_help_record():
+    """OUTCOME: every entry in COMMANDS has a CommandHelp in COMMAND_HELP.
+
+    Forces future contributors to provide structured help when adding commands.
+    """
+    from quantum_mechanic.shell.commands import COMMAND_HELP, COMMANDS
+
+    missing = set(COMMANDS) - set(COMMAND_HELP)
+    assert not missing, (
+        f"These commands have no CommandHelp record: {sorted(missing)}. "
+        "Add a CommandHelp() entry to COMMAND_HELP for each."
+    )
