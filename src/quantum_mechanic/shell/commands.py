@@ -26,7 +26,7 @@ from quantum_mechanic.core.loader import TechniqueLoader
 from quantum_mechanic.core.playbook import PlaybookRunner
 from quantum_mechanic.core.runner import TechniqueRunner
 from quantum_mechanic.core.transport import LocalTransport, Transport
-from quantum_mechanic.core.workspace import Workspace
+from quantum_mechanic.core.workspace import CredentialMismatchError, Workspace
 from quantum_mechanic.providers.base import ProviderRegistry
 from quantum_mechanic.shell import formatters
 from quantum_mechanic.shell.command_help import CommandHelp, FlagHelp, SubcommandHelp
@@ -603,29 +603,40 @@ def cmd_use(state: ShellState, args: list[str]) -> None:
 
     try:
         cred_id = int(args[0])
-        creds = state.transport.list_credentials()
-        cred = next((c for c in creds if c.get("id") == cred_id), None)
-        if cred:
-            state.active_credential_id = cred_id
-            state._extra_providers = []
-            if state.workspace:
-                state.workspace.active_credential_id = cred_id
-
-            provider = cred.get('provider', 'unknown')
-            identity = cred.get("friendly_name") or cred.get("credential_type", "unknown")
-            # Use friendly_name directly — it already encodes the provider context.
-            state.active_credential_label = identity
-
-            console.print(
-                f"  [green]✓[/green] Active: {provider.upper()} {identity} (#{cred_id})"
-            )
-
-            if provider == "entra":
-                _try_restore_arm_pivot(state)
-        else:
-            console.print(f"  [red]✗[/red] Credential #{cred_id} not found")
     except ValueError:
         console.print(f"  [red]✗[/red] Invalid credential ID: {args[0]}")
+        return
+
+    creds = state.transport.list_credentials()
+    cred = next((c for c in creds if c.get("id") == cred_id), None)
+    if not cred:
+        console.print(f"  [red]✗[/red] Credential #{cred_id} not found")
+        return
+
+    # Attempt workspace activation FIRST — if this raises, shell state stays
+    # untouched so the prompt indicator doesn't lie about an active credential.
+    if state.workspace:
+        try:
+            state.workspace.active_credential_id = cred_id
+        except CredentialMismatchError as e:
+            console.print(f"  [red]✗[/red] {e}")
+            return  # do NOT mirror to shell state
+
+    # Workspace setter succeeded (or no workspace) — safe to mirror.
+    state.active_credential_id = cred_id
+    state._extra_providers = []
+
+    provider = cred.get('provider', 'unknown')
+    identity = cred.get("friendly_name") or cred.get("credential_type", "unknown")
+    # Use friendly_name directly — it already encodes the provider context.
+    state.active_credential_label = identity
+
+    console.print(
+        f"  [green]✓[/green] Active: {provider.upper()} {identity} (#{cred_id})"
+    )
+
+    if provider == "entra":
+        _try_restore_arm_pivot(state)
 
 
 # ── Loot-backed interactive pickers ──────────────────────────────────────────
