@@ -148,6 +148,12 @@ def cmd_workspace(state: ShellState, args: list[str]) -> None:
             console.print("  No active workspace. Run 'workspace create <name>'", style="dim")
         return
 
+    # Subcommand validation — print suggestion if unknown
+    err = _check_subcommand("workspace", args)
+    if err:
+        console.print(err)
+        return
+
     subcmd = args[0]
 
     if subcmd == "create":
@@ -190,6 +196,12 @@ def cmd_import(state: ShellState, args: list[str]) -> None:
     """Import credentials: import <provider> [options]."""
     if state.transport is None:
         console.print("  [red]✗[/red] No active workspace/connection. Run 'workspace create <name>' first.")
+        return
+
+    # Subcommand validation — print suggestion if unknown
+    err = _check_subcommand("import", args)
+    if err:
+        console.print(err)
         return
 
     if not args:
@@ -271,6 +283,43 @@ def _validate_and_import(
     )
     console.print(
         f"  [green]✓[/green] Imported {provider.upper()} credential #{cred_id}: {friendly}"
+    )
+
+
+def _check_subcommand(command_name: str, args: list[str]) -> str | None:
+    """If args[0] looks like a subcommand but isn't valid, return a friendly error message.
+
+    Returns None if args is empty, args[0] is a flag, or args[0] is a recognized
+    subcommand. Returns a multi-line suggestion string when args[0] is an
+    unknown subcommand.
+    """
+    if not args:
+        return None
+    first = args[0]
+    if first.startswith("--"):
+        return None  # flags are handled elsewhere
+
+    help_rec = COMMAND_HELP.get(command_name)
+    if not help_rec or not help_rec.subcommands:
+        return None  # no subcommands declared; positional args mean something else
+
+    known = [s.name for s in help_rec.subcommands]
+    # Match against the full subcommand name OR its first word — for commands
+    # like `acquire entra device_code`, args[0]="entra" should match the
+    # subcommand "entra device_code".
+    known_first_words = {name.split()[0] for name in known if name}
+    if first in known or first in known_first_words:
+        return None
+
+    import difflib
+    matches = difflib.get_close_matches(first, known, n=2, cutoff=0.4)
+    suggestion = matches[0] if matches else known[0]
+    available = ", ".join(known)
+    return (
+        f"  [red]✗[/red] Unknown subcommand: '{first}'. "
+        f"Did you mean: [bold]{command_name} {suggestion}[/bold]?\n"
+        f"  Available subcommands: {available}\n"
+        f"  Try `help {command_name}` for full usage."
     )
 
 
@@ -404,6 +453,12 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
     """List or delete credentials: creds, creds delete <id>."""
     if state.transport is None:
         console.print("  [red]✗[/red] No active workspace.")
+        return
+
+    # Subcommand validation — print suggestion if unknown
+    err = _check_subcommand("creds", args)
+    if err:
+        console.print(err)
         return
 
     # Handle subcommands
@@ -2434,6 +2489,12 @@ def cmd_playbook(state: ShellState, args: list[str]) -> None:
 
 def cmd_acquire(state: ShellState, args: list[str]) -> None:
     """Acquire tokens interactively: acquire <provider> <method> [options]."""
+    # Subcommand validation — print suggestion if unknown
+    err = _check_subcommand("acquire", args)
+    if err:
+        console.print(err)
+        return
+
     if not args:
         console.print("  Usage: acquire <provider> <method> [options]", style="yellow")
         console.print("    acquire entra device_code [--tenant <tid>] [--client <id>] [--resource <url>]")
@@ -2451,6 +2512,12 @@ def cmd_acquire(state: ShellState, args: list[str]) -> None:
 
 def cmd_export(state: ShellState, args: list[str]) -> None:
     """Export token material: export <provider> <format> [options]."""
+    # Subcommand validation — print suggestion if unknown
+    err = _check_subcommand("export", args)
+    if err:
+        console.print(err)
+        return
+
     if not args:
         console.print("  Usage: export <provider> <format> [options]", style="yellow")
         console.print("    export entra roadtools [--out /path/to/.roadtools_auth]")

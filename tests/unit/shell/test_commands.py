@@ -133,7 +133,10 @@ class TestCmdImport:
 
     def test_unknown_provider(self, state_with_ws, mock_console):
         cmd_import(state_with_ws, ["unknown"])
-        assert "Unsupported provider" in str(mock_console.call_args[0][0])
+        # New behavior: unknown subcommands print a suggestion + available list
+        msg = str(mock_console.call_args[0][0])
+        assert "Unknown subcommand" in msg
+        assert "unknown" in msg
 
     @patch("quantum_mechanic.providers.aws.auth.AWSAuthProvider.authenticate")
     def test_import_aws_profile(self, mock_auth, state_with_ws, mock_console):
