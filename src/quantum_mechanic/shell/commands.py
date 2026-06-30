@@ -931,51 +931,89 @@ def cmd_run(state: ShellState, args: list[str]) -> None:
 
 
 def cmd_techniques(state: ShellState, args: list[str]) -> None:
-    """List available techniques, filtered by the active credential's provider."""
-    # --------------------------------------------------------
-    # Determine active provider for filtered listing.
-    # --------------------------------------------------------
+    """List available techniques, with filtering and search.
+
+    Flags:
+        --all                 Ignore active-provider filtering
+        --tactic <name>       Filter by ATT&CK tactic (discovery, escalation, etc.)
+        --provider <name>     Override active provider (aws, azure, gcp, oci, entra)
+        --safe / --unsafe     Filter by safety classification
+        <substring> [...]     Positional substring search across id and description
+                              (AND semantics — all substrings must match)
+    """
+    # Parse flags
+    show_all = "--all" in args
+    safe_only = "--safe" in args
+    unsafe_only = "--unsafe" in args
+
+    tactic_filter: str | None = None
+    provider_override: str | None = None
+    substring_terms: list[str] = []
+
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--tactic" and i + 1 < len(args):
+            tactic_filter = args[i + 1]
+            i += 2
+            continue
+        if a == "--provider" and i + 1 < len(args):
+            provider_override = args[i + 1]
+            i += 2
+            continue
+        if a in ("--all", "--safe", "--unsafe"):
+            i += 1
+            continue
+        if a.startswith("--"):
+            console.print(f"  [yellow]Unknown flag: {a}[/yellow] — see `help techniques`")
+            i += 1
+            continue
+        # positional → substring search term
+        substring_terms.append(a.lower())
+        i += 1
+
+    # Resolve which provider to filter by
     active_provider = None
-    if state.transport and state.active_credential_id:
+    if (
+        not show_all
+        and provider_override is None
+        and state.transport
+        and state.active_credential_id
+    ):
         creds = state.transport.list_credentials()
         cred = next((c for c in creds if c.get("id") == state.active_credential_id), None)
         if cred:
             active_provider = cred.get("provider")
 
+    effective_provider = provider_override or (None if show_all else active_provider)
+
     if state.transport is not None:
-        from quantum_mechanic.core.loader import RegisteredTechnique
-
-        extra = state._extra_providers
-        if extra:
-            # Multiple providers unlocked — fetch all and filter client-side.
-            all_providers = ({active_provider} if active_provider else set()) | set(extra)
-            all_techniques = list(state.transport.list_techniques(provider=None))
-            techniques = [
-                m for m in all_techniques
-                if any(p in all_providers for p in m.providers)
-            ]
-            label = ", ".join(sorted(all_providers))
-            console.print(
-                f"  [dim]Filtering techniques for active providers: [bold]{label}[/bold][/dim]"
-            )
-        else:
-            techniques = list(state.transport.list_techniques(provider=active_provider))
-            if active_provider:
-                console.print(
-                    f"  [dim]Filtering techniques for active provider: "
-                    f"[bold]{active_provider}[/bold][/dim]"
-                )
-
-        # list_techniques returns TechniqueMetadata; formatters expect RegisteredTechnique.
-        wrapped = [
-            RegisteredTechnique(metadata=m, function=lambda _: None, module_path="")
-            for m in techniques
-        ]
-        formatters.format_techniques_list(wrapped)
+        all_techniques = list(state.transport.list_techniques(provider=effective_provider))
     else:
-        # No workspace / transport — show all loaded techniques.
-        techniques_all = state.loader.list_all()
-        formatters.format_techniques_list(techniques_all)
+        all_techniques = [r.metadata for r in state.loader.list_all()]
+
+    # Apply secondary filters (tactic, safe/unsafe, substring) client-side
+    def keep(m) -> bool:
+        if tactic_filter and m.tactic != tactic_filter:
+            return False
+        if safe_only and not m.safe:
+            return False
+        if unsafe_only and m.safe:
+            return False
+        if substring_terms:
+            haystack = f"{m.id} {m.description}".lower()
+            if not all(term in haystack for term in substring_terms):
+                return False
+        return True
+
+    filtered = [m for m in all_techniques if keep(m)]
+
+    from quantum_mechanic.core.loader import RegisteredTechnique
+    wrapped = [
+        RegisteredTechnique(metadata=m, function=lambda _: None, module_path="")
+        for m in filtered
+    ]
+    formatters.format_techniques_list(wrapped)
 
 
 def cmd_loot(state: ShellState, args: list[str]) -> None:
