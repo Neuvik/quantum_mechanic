@@ -407,7 +407,10 @@ class TestCmdRawAndHelp:
         state.loader.get = MagicMock(return_value=None)
 
         cmd_help(state, ["discovery/fake"])
-        assert "not found" in str(mock_console.call_args[0][0])
+        # Updated to match new error message after Task 3 wired cmd_help to
+        # the COMMAND_HELP registry: unknown names now report "neither a
+        # shell command nor a registered technique".
+        assert "neither" in str(mock_console.call_args[0][0])
 
 
 class TestShellState:

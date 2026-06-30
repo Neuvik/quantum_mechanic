@@ -225,7 +225,7 @@ def format_raw(data: str | None) -> None:
         console.print(data)
 
 
-def format_help_menu(commands: dict | None = None) -> None:
+def format_help_menu(commands: dict | None = None, command_help_registry=None) -> None:
     """Display the categorized shell help menu.
 
     Args:
@@ -233,8 +233,16 @@ def format_help_menu(commands: dict | None = None) -> None:
                   Private / Advanced panel is only shown if the private
                   commands (exploits, payloads) are registered — i.e. the
                   private build. In the public build they are absent.
+        command_help_registry: When provided, renders from the CommandHelp
+                  registry (the new path) instead of the hardcoded layout.
     """
     console.print()
+
+    if command_help_registry is not None:
+        _format_help_from_registry(command_help_registry)
+        return
+
+    # --- Legacy hardcoded layout preserved below ---
 
     # Workspace Commands
     workspace_table = Table(box=box.SIMPLE, border_style="dim", show_header=False)
@@ -286,6 +294,7 @@ def format_help_menu(commands: dict | None = None) -> None:
     report_table.add_column("Command", style="bold cyan", width=40)
     report_table.add_column("Description")
     report_table.add_row("report", "Show the ATTACK_PATH.md engagement narrative")
+    report_table.add_row("check-ca-bypasses", "Show aggregated bypass vectors for Conditional Access policies")
     report_table.add_row("ask <question>", "Ask the autonomous RAG Agent for advice")
     console.print(Panel(report_table, title="[bold]Report & Agent[/bold]", title_align="left", border_style="cyan"))
 
@@ -310,3 +319,43 @@ def format_help_menu(commands: dict | None = None) -> None:
     gen_table.add_row("exit / quit", "Exit QM")
     console.print(Panel(gen_table, title="[bold]General[/bold]", title_align="left", border_style="white"))
     console.print()
+
+
+def _format_help_from_registry(registry) -> None:
+    """Render shell help by walking the CommandHelp registry, grouped by category."""
+    by_cat: dict[str, list] = {}
+    for help_rec in registry.values():
+        by_cat.setdefault(help_rec.category, []).append(help_rec)
+
+    category_titles = {
+        "workspaces": "Workspaces",
+        "credentials": "Credentials",
+        "techniques": "Techniques",
+        "playbooks": "Playbooks",
+        "evidence": "Evidence",
+        "reporting": "Reporting",
+        "shell": "Shell",
+        "advanced": "Advanced",
+    }
+
+    for cat_key in [
+        "workspaces", "credentials", "techniques", "playbooks",
+        "evidence", "reporting", "shell", "advanced",
+    ]:
+        records = by_cat.get(cat_key, [])
+        if not records:
+            continue
+        tbl = Table(box=box.SIMPLE, border_style="dim", show_header=False)
+        tbl.add_column("Command", style="bold cyan", width=20)
+        tbl.add_column("Description")
+        for rec in records:
+            tbl.add_row(rec.name, rec.synopsis)
+        console.print(Panel(
+            tbl,
+            title=f"[bold]{category_titles[cat_key]}[/bold]",
+            title_align="left",
+            border_style="blue",
+        ))
+
+    console.print("\n  [dim]Use `help <command>` for full details on any command.[/dim]")
+    console.print("  [dim]Use `techniques` to list runnable techniques.[/dim]\n")

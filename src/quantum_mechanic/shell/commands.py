@@ -1978,101 +1978,144 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
     import importlib
     import inspect
 
-    if args:
-        tech_id = args[0].strip("/")
-
-        # ── Built-in command documentation ───────────────────────────────
-        if tech_id == "check-ca-bypasses":
-            _show_check_ca_bypasses_help()
-            return
-
-        registered = state.loader.get(tech_id)
-
-        if registered is None:
-            console.print(
-                f"  [red]✗[/red] Technique '{tech_id}' not found. "
-                "Use 'techniques' to list available modules."
-            )
-            return
-
-        m = registered.metadata
-        safe_label = "[green]Safe (Read-Only)[/green]" if m.safe else "[red]Impact (Modifies State)[/red]"
-
-        console.print(f"\n[bold white]MODULE: {m.id}[/bold white]")
-        console.print(f"  [dim]{m.description}[/dim]\n")
-
-        intel = [
-            f"[bold cyan]Tactic:[/bold cyan]    {m.tactic}",
-            f"[bold cyan]MITRE ID:[/bold cyan]  {m.mitre_id or '—'}",
-            f"[bold cyan]Providers:[/bold cyan] {', '.join(m.providers)}",
-            f"[bold cyan]Severity:[/bold cyan]  {m.severity.upper()}",
-            f"[bold cyan]Risk Profile:[/bold cyan] {safe_label}"
-        ]
-        for line in intel:
-            console.print(f"  {line}")
-
-        console.print()
-
-        if m.parameters:
-            from rich.table import Table
-            param_table = Table(box=None, padding=(0, 2), show_header=True)
-            param_table.add_column("Option", style="bold yellow")
-            param_table.add_column("Format", style="dim")
-            param_table.add_column("Req", style="red")
-            param_table.add_column("Description")
-
-            for p in m.parameters:
-                req_star = "*" if p.required else " "
-                param_table.add_row(p.name, p.type.label, req_star, p.description)
-
-            console.print("  [bold white]Operational Options:[/bold white]")
-            console.print(param_table)
-            console.print()
-
-            console.print("  [bold white]Usage Examples:[/bold white]")
-            console.print(f"    qm> run {m.id}")
-            example_parts = [f"{p.name}={p.example}" for p in m.parameters if p.example]
-            if example_parts:
-                console.print(f"    qm> run {m.id} {' '.join(example_parts)}")
-            console.print()
-
-        try:
-            mod = importlib.import_module(registered.module_path)
-            src = inspect.getsource(mod)
-
-            def _extract_block(src: str, start_marker: str) -> list[str]:
-                idx = src.find(start_marker)
-                if idx == -1:
-                    return []
-                end = src.find("\n#\n", idx)
-                block = src[idx:end if end != -1 else idx + 800]
-                lines = []
-                for ln in block.splitlines():
-                    stripped = ln.lstrip("# ").rstrip()
-                    lines.append(stripped)
-                return lines
-
-            params_lines = _extract_block(src, "# PARAMETERS")
-            if params_lines and not m.parameters:
-                console.print("[bold]Parameters (via --param key=value):[/bold]")
-                for ln in params_lines[1:]:
-                    console.print(f"  {ln}")
-                console.print()
-
-            usage_lines = _extract_block(src, "# USAGE (interactive shell):")
-            if usage_lines:
-                console.print("[bold]Usage examples:[/bold]")
-                for ln in usage_lines:
-                    if ln:
-                        console.print(f"  [dim]{ln}[/dim]")
-                console.print()
-        except Exception:
-            pass
-
+    # No args → list commands from registry.
+    if not args:
+        from quantum_mechanic.shell import formatters
+        formatters.format_help_menu(COMMANDS, command_help_registry=COMMAND_HELP)
         return
 
-    from quantum_mechanic.shell import formatters
-    formatters.format_help_menu(COMMANDS)
+    target = args[0].strip("/")
+
+    # 1. Resolve as a shell command first.
+    if target in COMMAND_HELP:
+        _render_command_help(COMMAND_HELP[target])
+        return
+
+    # 2. Built-in command documentation.
+    if target == "check-ca-bypasses":
+        _show_check_ca_bypasses_help()
+        return
+
+    # 3. Fall through to technique lookup.
+    registered = state.loader.get(target)
+    if registered is None:
+        console.print(
+            f"  [red]✗[/red] '{target}' is neither a shell command nor a registered technique. "
+            "Try `help` for the command list or `techniques` for the technique list."
+        )
+        return
+
+    # --- Existing technique-rendering code preserved verbatim below ---
+    m = registered.metadata
+    safe_label = "[green]Safe (Read-Only)[/green]" if m.safe else "[red]Impact (Modifies State)[/red]"
+
+    console.print(f"\n[bold white]MODULE: {m.id}[/bold white]")
+    console.print(f"  [dim]{m.description}[/dim]\n")
+
+    intel = [
+        f"[bold cyan]Tactic:[/bold cyan]    {m.tactic}",
+        f"[bold cyan]MITRE ID:[/bold cyan]  {m.mitre_id or '—'}",
+        f"[bold cyan]Providers:[/bold cyan] {', '.join(m.providers)}",
+        f"[bold cyan]Severity:[/bold cyan]  {m.severity.upper()}",
+        f"[bold cyan]Risk Profile:[/bold cyan] {safe_label}"
+    ]
+    for line in intel:
+        console.print(f"  {line}")
+
+    console.print()
+
+    if m.parameters:
+        from rich.table import Table
+        param_table = Table(box=None, padding=(0, 2), show_header=True)
+        param_table.add_column("Option", style="bold yellow")
+        param_table.add_column("Format", style="dim")
+        param_table.add_column("Req", style="red")
+        param_table.add_column("Description")
+
+        for p in m.parameters:
+            req_star = "*" if p.required else " "
+            param_table.add_row(p.name, p.type.label, req_star, p.description)
+
+        console.print("  [bold white]Operational Options:[/bold white]")
+        console.print(param_table)
+        console.print()
+
+        console.print("  [bold white]Usage Examples:[/bold white]")
+        console.print(f"    qm> run {m.id}")
+        example_parts = [f"{p.name}={p.example}" for p in m.parameters if p.example]
+        if example_parts:
+            console.print(f"    qm> run {m.id} {' '.join(example_parts)}")
+        console.print()
+
+    try:
+        mod = importlib.import_module(registered.module_path)
+        src = inspect.getsource(mod)
+
+        def _extract_block(src: str, start_marker: str) -> list[str]:
+            idx = src.find(start_marker)
+            if idx == -1:
+                return []
+            end = src.find("\n#\n", idx)
+            block = src[idx:end if end != -1 else idx + 800]
+            lines = []
+            for ln in block.splitlines():
+                stripped = ln.lstrip("# ").rstrip()
+                lines.append(stripped)
+            return lines
+
+        params_lines = _extract_block(src, "# PARAMETERS")
+        if params_lines and not m.parameters:
+            console.print("[bold]Parameters (via --param key=value):[/bold]")
+            for ln in params_lines[1:]:
+                console.print(f"  {ln}")
+            console.print()
+
+        usage_lines = _extract_block(src, "# USAGE (interactive shell):")
+        if usage_lines:
+            console.print("[bold]Usage examples:[/bold]")
+            for ln in usage_lines:
+                if ln:
+                    console.print(f"  [dim]{ln}[/dim]")
+            console.print()
+    except Exception:
+        pass
+
+
+def _render_command_help(h: CommandHelp) -> None:
+    """Render a CommandHelp record as Rich output for `help <command>`."""
+    from rich.table import Table
+
+    console.print(f"\n[bold white]COMMAND: {h.name}[/bold white]")
+    console.print(f"  [dim]{h.synopsis}[/dim]\n")
+    console.print(f"  {h.description}\n")
+
+    if h.subcommands:
+        tbl = Table(box=None, padding=(0, 2), show_header=True)
+        tbl.add_column("Subcommand", style="bold cyan")
+        tbl.add_column("Args", style="dim")
+        tbl.add_column("Description")
+        for s in h.subcommands:
+            tbl.add_row(s.name, s.args or "—", s.synopsis)
+        console.print("  [bold]Subcommands:[/bold]")
+        console.print(tbl)
+        console.print()
+
+    if h.flags:
+        tbl = Table(box=None, padding=(0, 2), show_header=True)
+        tbl.add_column("Flag", style="bold yellow")
+        tbl.add_column("Value", style="dim")
+        tbl.add_column("Description")
+        for f in h.flags:
+            tbl.add_row(f.name, f.value or "—", f.synopsis)
+        console.print("  [bold]Flags:[/bold]")
+        console.print(tbl)
+        console.print()
+
+    if h.examples:
+        console.print("  [bold]Examples:[/bold]")
+        for ex in h.examples:
+            console.print(f"    qm> {ex}")
+        console.print()
 
 
 def cmd_report(state: ShellState, args: list[str]) -> None:
