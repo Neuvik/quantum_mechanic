@@ -50,6 +50,8 @@ _ACQUIRE_USAGE = """\
 
   Subcommands:
     device_code  [--client <id>] [--resource <res>] [--tenant <id>]
+    interactive  [--tenant <id>] [--client <id>] [--resource <res>]
+                 [--timeout <secs>]
     ropc         --username <upn> --password <pass> --tenant <id>
                  [--resource <res>]
     refresh      [--resource <res>] [--client <id>]
@@ -373,6 +375,8 @@ def acquire_entra(state: ShellState, args: list[str]) -> None:
 
     if sub == "device_code":
         _acquire_device_code(state, opts)
+    elif sub == "interactive":
+        _acquire_interactive(state, opts)
     elif sub == "ropc":
         _acquire_ropc(state, opts)
     elif sub == "refresh":
@@ -424,6 +428,51 @@ def _acquire_device_code(state: ShellState, opts: dict[str, str]) -> None:
         resource=resource,
         interval=interval,
         timeout=expires_in,
+    )
+
+    if "error" in resp:
+        guidance = _cap_guidance(resp.get("error_description", ""))
+        if guidance:
+            console.print(guidance)
+        else:
+            console.print(f"  [red]✗[/red] {resp.get('error_description', resp['error'])}")
+        return
+
+    store = _store_from_response(resp, tenant_id=tenant, resource=resource, client_id=client_id)
+    cred_id = _persist_store(state, store)
+    if cred_id:
+        _set_active(state, cred_id, store)
+        _print_import_summary(store, cred_id)
+
+
+def _acquire_interactive(state: ShellState, opts: dict[str, str]) -> None:
+    """OAuth authorization-code + PKCE flow (browser).
+
+    Use when Conditional Access blocks the device_code grant type. Opens
+    the operator's default browser to the Entra sign-in page; captures
+    the redirect on a localhost ephemeral port; exchanges the auth code
+    for tokens; persists via the standard EntraTokenStore pipeline.
+    """
+    from quantum_mechanic.providers.entra.exchange import interactive_authorize
+    from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
+
+    tenant = opts.get("tenant", "common")
+    client_id = opts.get("client", FOCI_DEFAULT_CLIENT)
+    resource = opts.get("resource", _GRAPH)
+    timeout = int(opts.get("timeout", "300"))
+
+    console.print("  Opening browser for interactive sign-in...")
+    console.print(
+        f"  [dim]Tenant: {tenant}   Client: {client_id[:8]}...   "
+        f"Resource: {resource}[/dim]"
+    )
+    console.print(f"  [dim]Waiting up to {timeout}s for callback...[/dim]")
+
+    resp = interactive_authorize(
+        tenant_id=tenant,
+        client_id=client_id,
+        resource=resource,
+        timeout=timeout,
     )
 
     if "error" in resp:
