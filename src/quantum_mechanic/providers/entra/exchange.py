@@ -22,8 +22,14 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
+import secrets
 import time
+import urllib.parse
+import webbrowser
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
 import httpx
@@ -184,6 +190,184 @@ def poll_device_code(
     finally:
         if owned:
             client.close()
+
+
+# ================================================================
+# OAuth 2.0 Authorization Code + PKCE flow (interactive browser)
+# ----------------------------------------------------------------
+# Used by `acquire entra interactive` for tenants where Conditional
+# Access blocks the device-code grant type. Uses the standard
+# authorization_code grant_type that Microsoft's own tooling uses.
+# ================================================================
+
+AUTH_EP = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize"
+
+
+def _pkce_pair() -> tuple[str, str]:
+    """Generate a PKCE (verifier, challenge) pair per RFC 7636 §4.1.
+
+    Verifier is 64 bytes of URL-safe base64 (no padding). Challenge is
+    base64url(SHA256(verifier)) without padding.
+    """
+    verifier = base64.urlsafe_b64encode(secrets.token_bytes(64)).rstrip(b"=").decode("ascii")
+    challenge_bytes = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(challenge_bytes).rstrip(b"=").decode("ascii")
+    return verifier, challenge
+
+
+class _CallbackHandler(BaseHTTPRequestHandler):
+    """One-shot HTTP handler that captures ?code= and ?state= from the redirect."""
+
+    def do_GET(self) -> None:  # noqa: N802
+        parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
+        self.server.captured_code = params.get("code", [None])[0]
+        self.server.captured_state = params.get("state", [None])[0]
+        self.server.captured_error = params.get("error", [None])[0]
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        body = (
+            b"<html><body><h2>You may close this window.</h2>"
+            b"<p>QM has captured the authorization code.</p></body></html>"
+        )
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args) -> None:  # noqa: A002
+        """Suppress default stderr access log."""
+
+
+class _CallbackServer(HTTPServer):
+    """HTTPServer subclass that exposes captured_code/state via attributes."""
+
+    def __init__(self, port: int) -> None:
+        super().__init__(("127.0.0.1", port), _CallbackHandler)
+        self.captured_code: str | None = None
+        self.captured_state: str | None = None
+        self.captured_error: str | None = None
+        self.expected_state: str = ""
+        self.port: int = port
+
+
+def _default_server_factory(port: int) -> _CallbackServer:
+    return _CallbackServer(port)
+
+
+def _pick_free_port() -> int:
+    """Pick an ephemeral port by binding-and-releasing a socket."""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def interactive_authorize(
+    *,
+    tenant_id: str,
+    client_id: str,
+    resource: str,
+    timeout: int = 300,
+    opener=None,
+    server_factory=None,
+) -> dict[str, Any]:
+    """Run the OAuth 2.0 Authorization Code + PKCE flow interactively.
+
+    Spins up a localhost HTTP listener on an ephemeral port, opens the
+    operator's default browser to the authorization URL, blocks until
+    the callback fires (or timeout), then exchanges the auth code for
+    tokens at the /token endpoint.
+
+    Args:
+        tenant_id: Entra tenant ID (or "common").
+        client_id: OAuth client ID (FOCI default for az-CLI-equivalent flow).
+        resource: Resource URL (e.g. "https://graph.microsoft.com").
+        timeout: Seconds to wait for the user to complete sign-in in browser.
+        opener: Callable(url) → bool. Defaults to webbrowser.open.
+        server_factory: Callable(port) → _CallbackServer. Defaults to a real
+            HTTPServer on 127.0.0.1. Injectable for testing.
+
+    Returns: dict matching the standard token response shape (access_token,
+        refresh_token, expires_in, token_type) or {"error": ..., "error_description": ...}.
+    """
+    if opener is None:
+        opener = webbrowser.open
+    if server_factory is None:
+        port = _pick_free_port()
+        server = _default_server_factory(port)
+    else:
+        server = server_factory(0)
+        port = server.port
+
+    verifier, challenge = _pkce_pair()
+    state = secrets.token_urlsafe(16)
+    server.expected_state = state
+
+    redirect_uri = f"http://localhost:{port}/callback"
+    scope = resource.rstrip("/") + "/.default openid offline_access"
+    params = {
+        "client_id": client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": scope,
+        "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }
+    auth_url = AUTH_EP.format(tenant=tenant_id) + "?" + urllib.parse.urlencode(params)
+
+    opener(auth_url)
+
+    # In production, the server handle_request blocks until the callback fires.
+    # In tests, the fake server has captured_code pre-set and lacks handle_request.
+    if hasattr(server, "handle_request"):
+        import threading
+        done = threading.Event()
+        def _serve():
+            try:
+                server.handle_request()
+            finally:
+                done.set()
+        threading.Thread(target=_serve, daemon=True).start()
+        if not done.wait(timeout=timeout):
+            return {
+                "error": "expired_token",
+                "error_description": "Interactive auth timed out (no browser callback)",
+            }
+
+    code = server.captured_code
+    captured_state = server.captured_state
+    captured_error = server.captured_error
+
+    if captured_error:
+        return {"error": captured_error, "error_description": captured_error}
+    if not code:
+        return {
+            "error": "expired_token",
+            "error_description": "Interactive auth timed out (no code captured)",
+        }
+    if captured_state != state:
+        return {
+            "error": "state_mismatch",
+            "error_description": "OAuth state parameter did not match (possible CSRF)",
+        }
+
+    # Exchange code for tokens.
+    url = TOKEN_EP.format(tenant=tenant_id)
+    data = {
+        "client_id": client_id,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "code_verifier": verifier,
+        "scope": scope,
+    }
+    try:
+        with httpx.Client(timeout=_DEFAULT_TIMEOUT) as client:
+            resp = client.post(url, data=data)
+            return resp.json()
+    except httpx.HTTPError as e:
+        return {"error": "http_error", "error_description": str(e)}
 
 
 def exchange_refresh_token(
