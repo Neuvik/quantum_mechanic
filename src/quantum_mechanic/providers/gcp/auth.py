@@ -23,7 +23,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import google.auth
+import google.auth  # noqa: F401 — kept for test patch path stability
 from google.auth.credentials import Credentials
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
@@ -50,53 +50,51 @@ class GCPAuthProvider(AuthProvider):
 
         Args:
             secret_data: Must contain one of:
-                - {"method": "default"}  — Application Default Credentials
+                - {"method": "captured_token",
+                   "access_token": "ya29...."} — token captured at import time
                 - {"method": "service_account_file",
                    "key_file": "/path/to/key.json"}
                 - {"method": "service_account_info",
                    "service_account_info": {...}}  — inline SA JSON
+                - {"method": "access_token",
+                   "access_token": "ya29...."}
+
+        NOTE: {"method": "default"} is REFUSED. That value referenced local
+        gcloud ADC state at use-time and silently substituted whoever was
+        currently logged in — a credential-isolation bug. Re-import via
+        `import gcp --default` to capture the token at import time.
 
         Returns:
             Google auth Credentials object.
 
         Raises:
-            ValueError: If required fields are missing.
-            google.auth.exceptions.DefaultCredentialsError:
-                If default credentials can't be found.
+            ValueError: If required fields are missing, the method references
+                local gcloud state, or the method is unknown.
         """
-        method = secret_data.get("method", "default")
+        method = secret_data.get("method", "")
 
         if method == "default":
-            import logging
-            import warnings
+            raise ValueError(
+                "GCP credential has method='default' which references local "
+                "gcloud ADC state. Re-import via `import gcp --default` to "
+                "capture the token at import time."
+            )
 
-            # --------------------------------------------------------
-            # Application Default Credentials — tries:
-            #   1. GOOGLE_APPLICATION_CREDENTIALS env var
-            #   2. gcloud auth application-default login
-            #   3. GCE/Cloud Run metadata server
-            # --------------------------------------------------------
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
+        if method == "":
+            raise ValueError(
+                "GCP credential has no method set — this is a stale credential "
+                "format from before the credential-isolation fix. "
+                "Re-import via `import gcp --default`."
+            )
 
-                # Silence google.auth logger to avoid stderr spam about missing project IDs
-                google_logger = logging.getLogger("google.auth")
-                old_level = google_logger.level
-                google_logger.setLevel(logging.ERROR)
-
-                try:
-                    credentials, project = google.auth.default(
-                        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-                    )
-                finally:
-                    google_logger.setLevel(old_level)
-
+        if method == "captured_token":
+            token = secret_data.get("access_token")
+            if not token:
+                raise ValueError("GCP captured_token method requires 'access_token'")
+            cred = TokenCredentials(token)
             if "project_id" in secret_data:
-                credentials.project_id = secret_data["project_id"]
-            elif project:
-                credentials.project_id = project
-
-            return credentials
+                cred._project_id = secret_data["project_id"]  # noqa: SLF001
+            return cred
 
         if method == "service_account_file":
             key_file = secret_data.get("key_file")

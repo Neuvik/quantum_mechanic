@@ -349,11 +349,35 @@ def _import_gcp(state: ShellState, opts: dict[str, str]) -> None:
         friendly = f"SA:{opts['key-file'].split('/')[-1]}"
         cred_type = "service_account"
     else:
-        secret = {"method": "default"}
-        friendly = "ApplicationDefaultCredentials"
-        cred_type = "service_account"
+        # --default path: capture token from ADC once.
+        try:
+            import google.auth
+            from google.auth.transport.requests import Request
 
-    if "project" in opts:
+            console.print("  [dim]Capturing GCP credential from local ADC state...[/dim]")
+            live, project = google.auth.default(
+                scopes=["https://www.googleapis.com/auth/cloud-platform"]
+            )
+            live.refresh(Request())
+            captured_principal = (
+                getattr(live, "service_account_email", None)
+                or getattr(live, "_account", None)
+                or "unknown"
+            )
+            secret = {
+                "method": "captured_token",
+                "access_token": live.token,
+                "captured_principal": captured_principal,
+                "project_id": project or opts.get("project", ""),
+            }
+            friendly = captured_principal
+            cred_type = "captured_token"
+        except Exception as e:
+            console.print(f"  [red]✗[/red] Failed to capture GCP credential: {e}")
+            console.print("  [dim]Ensure: `gcloud auth application-default login`[/dim]")
+            return
+
+    if "project" in opts and "project_id" not in secret:
         secret["project_id"] = opts["project"]
 
     _validate_and_import(state, "gcp", cred_type, secret, friendly)

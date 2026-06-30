@@ -155,10 +155,30 @@ class TestCmdImport:
         cmd_import(state_with_ws, ["aws", "--access-key", "AKIA"])
         assert "requires --profile or --access-key + --secret-key" in str(mock_console.call_args[0][0])
 
+    @patch("azure.identity.DefaultAzureCredential")
     @patch("quantum_mechanic.providers.azure.auth.AzureAuthProvider.authenticate")
-    def test_import_azure_default(self, mock_auth, state_with_ws, mock_console):
+    def test_import_azure_default(self, mock_auth, mock_cred, state_with_ws, mock_console):
+        import base64
+        import json as _json
+
+        header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
+        claims = {"upn": "alice@contoso.com", "oid": "oid-1", "tid": "tid-1"}
+        payload = base64.urlsafe_b64encode(_json.dumps(claims).encode()).rstrip(b"=").decode()
+        fake_jwt = f"{header}.{payload}.sig"
+
+        fake_token = MagicMock()
+        fake_token.token = fake_jwt
+        fake_token.expires_on = 9999999999
+        mock_cred.return_value.get_token.return_value = fake_token
+
         cmd_import(state_with_ws, ["azure", "--default"])
-        mock_auth.assert_called_once_with({"method": "default"})
+
+        mock_auth.assert_called_once()
+        secret = mock_auth.call_args.args[0]
+        assert secret["method"] == "captured_token"
+        assert secret["access_token"] == fake_jwt
+        assert secret["captured_principal"] == "alice@contoso.com"
+        assert secret["captured_tenant"] == "tid-1"
 
     @patch("quantum_mechanic.providers.azure.auth.AzureAuthProvider.authenticate")
     def test_import_azure_sp_missing(self, mock_auth, state_with_ws, mock_console):
@@ -171,10 +191,23 @@ class TestCmdImport:
         cmd_import(state_with_ws, ["azure", "--client-id", "ID", "--client-secret", "SEC", "--tenant-id", "TID"])
         mock_auth.assert_called_once_with({"tenant_id": "TID", "client_id": "ID", "client_secret": "SEC"})
 
+    @patch("google.auth.default")
     @patch("quantum_mechanic.providers.gcp.auth.GCPAuthProvider.authenticate")
-    def test_import_gcp_default(self, mock_auth, state_with_ws, mock_console):
+    def test_import_gcp_default(self, mock_auth, mock_default, state_with_ws, mock_console):
+        # google.auth.default returns (credentials, project_id)
+        fake_cred = MagicMock()
+        fake_cred.service_account_email = "alice@example.iam.gserviceaccount.com"
+        fake_cred.token = "ya29.fake-token"
+        mock_default.return_value = (fake_cred, "my-project")
+
         cmd_import(state_with_ws, ["gcp", "--default"])
-        mock_auth.assert_called_once_with({"method": "default"})
+
+        mock_auth.assert_called_once()
+        secret = mock_auth.call_args.args[0]
+        assert secret["method"] == "captured_token"
+        assert secret["access_token"] == "ya29.fake-token"
+        assert secret["captured_principal"] == "alice@example.iam.gserviceaccount.com"
+        assert secret["project_id"] == "my-project"
 
     @patch("quantum_mechanic.providers.gcp.auth.GCPAuthProvider.authenticate")
     def test_import_gcp_keyfile(self, mock_auth, state_with_ws, mock_console):
@@ -377,3 +410,62 @@ class TestShellState:
         state_with_ws.workspace.active_credential_id = cid
         
         assert state_with_ws.prompt_context == "qm[test-ws][aws:test-rob]"
+
+
+class TestCmdLoot:
+    def test_loot_no_workspace(self, state, mock_console):
+        from quantum_mechanic.shell.commands import cmd_loot
+        cmd_loot(state, [])
+        mock_console.assert_called_once()
+        assert "No active workspace" in str(mock_console.call_args[0][0])
+
+    def test_loot_empty_workspace(self, state_with_ws, mock_console):
+        from quantum_mechanic.shell.commands import cmd_loot
+        cmd_loot(state_with_ws, [])
+        assert "No loot found in this workspace" in str(mock_console.call_args[0][0])
+
+    @patch("builtins.input", side_effect=["1", ""])
+    def test_loot_interactive_ca_policies(self, mock_input, state_with_ws, mock_console):
+        from pathlib import Path
+        from quantum_mechanic.shell.commands import cmd_loot
+        import csv
+        
+        # Setup mock loot directory and CSV
+        ws = state_with_ws.workspace
+        ws_db = Path(ws.db_path)
+        loot_dir = ws_db.parent / ws_db.stem / "loot" / "discovery" / "entra_enum_conditional_access_policies"
+        loot_dir.mkdir(parents=True)
+        
+        with (loot_dir / "loot.csv").open("w", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "display_name", "state", "grant_controls", 
+                "included_users", "excluded_users", 
+                "included_groups", "excluded_groups", 
+                "included_roles", "excluded_roles", "id"
+            ])
+            writer.writerow([
+                "Block Legacy Auth", "enabled", "block",
+                "All", "Safe User, Global Admin",
+                "0", "None",
+                "None", "None", "policy-id-123"
+            ])
+
+        cmd_loot(state_with_ws, ["discovery/entra_enum_conditional_access_policies"])
+        
+        # Verify console output printed our summary and detailed panel
+        calls = [c[0][0] for c in mock_console.call_args_list]
+        assert any("discovery/entra_enum_conditional_access_policies" in str(c) for c in calls)
+        
+        # Verify the Table and Panel are printed
+        from rich.table import Table
+        from rich.panel import Panel
+
+        table = [c for c in calls if isinstance(c, Table)][0]
+        assert table.columns[1].header == "Policy Name"
+        
+        panel = [c for c in calls if isinstance(c, Panel)][0]
+        assert "Block Legacy Auth" in str(panel.title)
+
+
+

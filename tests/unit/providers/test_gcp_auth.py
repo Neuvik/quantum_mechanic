@@ -16,15 +16,23 @@ def provider() -> GCPAuthProvider:
 
 
 class TestGCPAuthenticate:
-    @patch("quantum_mechanic.providers.gcp.auth.google.auth.default")
-    def test_authenticate_default(self, mock_default: MagicMock, provider: GCPAuthProvider) -> None:
-        """Test default credential loading."""
-        mock_creds = MagicMock()
-        mock_default.return_value = (mock_creds, "my-project")
-        
-        creds = provider.authenticate({"method": "default"})
-        assert creds is mock_creds
-        mock_default.assert_called_once()
+    def test_authenticate_captured_token(self, provider: GCPAuthProvider) -> None:
+        """Test authentication with captured_token method."""
+        creds = provider.authenticate({
+            "method": "captured_token",
+            "access_token": "ya29.fake-token",
+            "captured_principal": "alice@example.iam.gserviceaccount.com",
+            "project_id": "my-project",
+        })
+        # TokenCredentials stores the bearer token on .token
+        assert getattr(creds, "token", None) == "ya29.fake-token"
+
+    def test_authenticate_captured_token_missing_access_token(
+        self, provider: GCPAuthProvider
+    ) -> None:
+        """captured_token requires access_token."""
+        with pytest.raises(ValueError, match="captured_token method requires"):
+            provider.authenticate({"method": "captured_token"})
 
     @patch("quantum_mechanic.providers.gcp.auth.Path.exists")
     @patch("quantum_mechanic.providers.gcp.auth.service_account.Credentials.from_service_account_file")
@@ -101,6 +109,47 @@ class TestGCPAuthenticate:
         """Test unknown method raises ValueError."""
         with pytest.raises(ValueError, match="Unknown GCP auth method"):
             provider.authenticate({"method": "invalid"})
+
+
+# ================================================================
+# CANARY: GCP Credential Isolation
+# ----------------------------------------------------------------
+# Mirror of the Azure canary. This is the regression alarm for the
+# silent identity-substitution bug in GCP. It MUST fail until the
+# real fix lands.
+# ================================================================
+
+
+def test_imported_gcp_credential_not_substituted_by_local_adc():
+    """CANARY: GCP credential imported for SA-A must not be replaced by local ADC SA-B."""
+    secret_data = {
+        "method": "captured_token",
+        "access_token": "ya29.fake-token-for-alice",
+        "captured_principal": "alice@example.iam.gserviceaccount.com",
+    }
+
+    # local google.auth.default would return a different identity
+    impostor_cred = MagicMock()
+    impostor_cred.service_account_email = "impostor@example.iam.gserviceaccount.com"
+    with patch("google.auth.default", return_value=(impostor_cred, "impostor-project")):
+        provider = GCPAuthProvider()
+        cred = provider.authenticate(secret_data)
+        # The returned credential must carry the alice token, not impostor's identity
+        assert getattr(cred, "token", None) == "ya29.fake-token-for-alice"
+
+
+def test_gcp_method_default_in_stored_secret_raises():
+    """OUTCOME: stored {'method': 'default'} raises — same refusal as Azure."""
+    provider = GCPAuthProvider()
+    with pytest.raises(ValueError, match="references local"):
+        provider.authenticate({"method": "default"})
+
+
+def test_gcp_unknown_method_raises():
+    """OUTCOME: An unknown method raises, never silently calls google.auth.default."""
+    provider = GCPAuthProvider()
+    with pytest.raises(ValueError):
+        provider.authenticate({"method": "wat"})
 
 
 class TestGCPWhoAmI:
