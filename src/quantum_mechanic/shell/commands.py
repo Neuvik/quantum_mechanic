@@ -14,7 +14,9 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -300,28 +302,39 @@ def _import_aws(state: ShellState, opts: dict[str, str]) -> None:
 
 
 def _import_azure(state: ShellState, opts: dict[str, str]) -> None:
-    """Import Azure credentials."""
-    if "default" in opts or not opts:
-        secret: dict = {"method": "default"}
-        friendly = "DefaultAzureCredential"
-        cred_type = "access_key"
-    elif "client-id" in opts:
-        if "client-secret" not in opts or "tenant-id" not in opts:
+    """Import Azure credentials.
+
+    For --default: captures a Management access token from local state ONCE,
+    persists it. The credential is then isolated from later az login changes.
+
+    For --client-id/--client-secret: persists service-principal creds.
+    """
+    if "client-id" in opts:
+        if not all(k in opts for k in ["client-id", "client-secret", "tenant-id"]):
             console.print(
                 "  [red]✗[/red] SP auth requires --client-id, --client-secret, and --tenant-id"
             )
             return
-        secret = {
+        secret: dict = {
             "tenant_id": opts["tenant-id"],
             "client_id": opts["client-id"],
             "client_secret": opts["client-secret"],
         }
-        friendly = f"SP:{opts['client-id'][:8]}..."
+        friendly = opts.get("friendly", f"SP:{opts['client-id'][:8]}")
         cred_type = "service_principal"
-    else:
-        secret = {"method": "default"}
-        friendly = "DefaultAzureCredential"
-        cred_type = "access_key"
+        _validate_and_import(state, "azure", cred_type, secret, friendly)
+        return
+
+    # --default path: capture token once at import time.
+    try:
+        console.print("  [dim]Capturing Azure credential from local state...[/dim]")
+        secret = _capture_azure_token()
+        friendly = secret["captured_principal"]
+        cred_type = "captured_token"
+    except Exception as e:
+        console.print(f"  [red]✗[/red] Failed to capture Azure credential: {e}")
+        console.print("  [dim]Ensure you are logged in: `az login`[/dim]")
+        return
 
     _validate_and_import(state, "azure", cred_type, secret, friendly)
 
@@ -980,7 +993,13 @@ def cmd_loot(state: ShellState, args: list[str]) -> None:
         if not loot_dir.exists():
             console.print(f"  [red]✗[/red] No loot for '{target_id}'.")
             return
-        with console.pager(styles=True):
+        
+        if target_id == "discovery/entra_enum_conditional_access_policies":
+            _interactive_ca_policies_viewer(loot_dir, state.workspace)
+            return
+
+        pager_ctx = console.pager(styles=True) if os.environ.get("TERM") != "dumb" else nullcontext()
+        with pager_ctx:
             _render_loot_dir(loot_dir, target_id)
         return
 
@@ -1022,6 +1041,7 @@ def _render_loot_dir(loot_dir, tech_id: str) -> None:
 
     csv_path = Path(loot_dir) / "loot.csv"
     if not csv_path.exists():
+        console.print(f"  [yellow]⚠[/yellow] Loot directory exists but 'loot.csv' is missing for {tech_id}")
         return
 
     try:
@@ -1069,6 +1089,666 @@ def _render_loot_dir(loot_dir, tech_id: str) -> None:
     console.print(table)
 
 
+def _interactive_ca_policies_viewer(loot_dir, workspace: Workspace | Path | None = None) -> None:
+    """Render an interactive menu to inspect Conditional Access policies from loot."""
+    import csv
+    from pathlib import Path
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.console import Group
+    from rich import box
+    from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import load_loot_mappings
+
+    csv_path = Path(loot_dir) / "loot.csv"
+    if not csv_path.exists():
+        console.print("  [red]✗[/red] loot.csv not found.")
+        return
+
+    try:
+        with csv_path.open(newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+    except Exception as e:
+        console.print(f"  [red]✗[/red] Failed to read loot.csv: {e}")
+        return
+
+    if not rows:
+        console.print("  [dim]No policies in loot.[/dim]")
+        return
+
+    # Load mapping for on-the-fly GUID resolution
+    mapping = load_loot_mappings(workspace) if workspace else {}
+
+    console.print(f"  [bold cyan]discovery/entra_enum_conditional_access_policies[/bold cyan] [dim]({len(rows)} policies)[/dim]\n")
+    
+    def render_summary_table():
+        summary = Table(box=box.ROUNDED, border_style="dim")
+        summary.add_column("#", style="bold cyan", width=4)
+        summary.add_column("Policy Name", style="bold white")
+        summary.add_column("State", style="bold")
+        summary.add_column("Access Controls", style="yellow")
+        
+        for i, row in enumerate(rows, 1):
+            state = row.get("state", "unknown")
+            state_style = "green" if state == "enabled" else ("yellow" if "report" in state.lower() else "dim")
+            summary.add_row(
+                str(i),
+                row.get("display_name", "—"),
+                f"[{state_style}]{state}[/{state_style}]",
+                row.get("grant_controls", "—")
+            )
+        console.print(summary)
+
+    render_summary_table()
+    
+    while True:
+        try:
+            choice = input("\n  Select a policy number to view detailed rules & bypass guidance (or type 'list' to show table, press Enter to exit) > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print()
+            break
+            
+        if not choice:
+            break
+            
+        if choice.lower() in ["list", "l", "table", "show", "help", "?", "h"]:
+            render_summary_table()
+            continue
+
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(rows):
+                p = rows[idx]
+                
+                # Helper to clean and resolve GUIDs in a value
+                def clean_val(val_str):
+                    if not val_str or val_str == "None":
+                        return "None"
+                    parts = [x.strip() for x in val_str.split(",") if x.strip()]
+                    resolved = []
+                    for pt in parts:
+                        resolved.append(mapping.get(pt.lower(), mapping.get(pt, pt)))
+                    return ", ".join(resolved)
+
+                # Format detailed inclusions & exclusions
+                incls = []
+                inc_users = clean_val(p.get("included_users"))
+                inc_groups = clean_val(p.get("included_groups"))
+                inc_roles = clean_val(p.get("included_roles"))
+                inc_apps = clean_val(p.get("included_apps"))
+                inc_platforms = clean_val(p.get("included_platforms"))
+                inc_locations = clean_val(p.get("included_locations"))
+                client_apps_str = clean_val(p.get("client_app_types"))
+
+                if inc_users != "None":
+                    incls.append(f"[bold]Users:[/bold] {inc_users}")
+                if inc_groups != "None" and inc_groups != "0":
+                    incls.append(f"[bold]Groups:[/bold] {inc_groups}")
+                if inc_roles != "None":
+                    incls.append(f"[bold]Roles:[/bold] {inc_roles}")
+                if inc_apps != "None" and inc_apps != "0":
+                    incls.append(f"[bold]Applications:[/bold] {inc_apps}")
+                if inc_platforms != "None" and inc_platforms != "All":
+                    incls.append(f"[bold]Platforms:[/bold] {inc_platforms}")
+                if inc_locations != "None" and inc_locations != "All":
+                    incls.append(f"[bold]Locations:[/bold] {inc_locations}")
+                if client_apps_str != "None" and client_apps_str != "All":
+                    incls.append(f"[bold]Client Apps:[/bold] {client_apps_str}")
+                
+                excls = []
+                exc_users = clean_val(p.get("excluded_users"))
+                exc_groups = clean_val(p.get("excluded_groups"))
+                exc_roles = clean_val(p.get("excluded_roles"))
+                exc_apps = clean_val(p.get("excluded_apps"))
+                exc_platforms = clean_val(p.get("exclude_platforms"))
+                exc_locations = clean_val(p.get("excluded_locations"))
+
+                if exc_users != "None":
+                    excls.append(f"[bold]Users:[/bold] {exc_users}")
+                if exc_groups != "None":
+                    excls.append(f"[bold]Groups:[/bold] {exc_groups}")
+                if exc_roles != "None":
+                    excls.append(f"[bold]Roles:[/bold] {exc_roles}")
+                if exc_apps != "None":
+                    excls.append(f"[bold]Applications:[/bold] {exc_apps}")
+                if exc_platforms != "None":
+                    excls.append(f"[bold]Platforms:[/bold] {exc_platforms}")
+                if exc_locations != "None":
+                    excls.append(f"[bold]Locations:[/bold] {exc_locations}")
+                
+                # Analyze policy for bypass opportunities
+                bypass_tips = []
+                state_val = p.get("state", "")
+                controls = p.get("grant_controls", "")
+                
+                if state_val == "disabled":
+                    bypass_tips.append(f"[bold yellow]• Policy is disabled.[/bold yellow] The configured controls ({controls}) are not active.")
+                elif "report" in state_val.lower():
+                    bypass_tips.append(f"[bold yellow]• Policy is in Report-Only mode.[/bold yellow] Its controls ({controls}) are not enforced.")
+                
+                # Specific exclusions (resolving names at display time)
+                for u in [x.strip() for x in p.get("excluded_users", "").split(",") if x.strip() and x.strip() != "None"]:
+                    u_res = mapping.get(u.lower(), mapping.get(u, u))
+                    bypass_tips.append(f"[bold red]• Excluded User:[/bold red] User '{u_res}' is excluded. Authenticating as this user bypasses controls ({controls}).")
+                for g in [x.strip() for x in p.get("excluded_groups", "").split(",") if x.strip() and x.strip() != "None"]:
+                    g_res = mapping.get(g.lower(), mapping.get(g, g))
+                    bypass_tips.append(f"[bold red]• Excluded Group:[/bold red] Group '{g_res}' is excluded. Members bypass controls ({controls}). Target group members or add compromised users to this group.")
+                for r in [x.strip() for x in p.get("excluded_roles", "").split(",") if x.strip() and x.strip() != "None"]:
+                    r_res = mapping.get(r.lower(), mapping.get(r, r))
+                    bypass_tips.append(f"[bold red]• Excluded Role:[/bold red] Role '{r_res}' is excluded. Principals with this role bypass controls ({controls}).")
+                for a in [x.strip() for x in p.get("excluded_apps", "").split(",") if x.strip() and x.strip() != "None"]:
+                    a_res = mapping.get(a.lower(), mapping.get(a, a))
+                    bypass_tips.append(f"[bold red]• Excluded App:[/bold red] App '{a_res}' is excluded. Access via this app bypasses controls ({controls}).")
+                for pl in [x.strip() for x in p.get("exclude_platforms", "").split(",") if x.strip() and x.strip() != "None"]:
+                    pl_res = mapping.get(pl.lower(), mapping.get(pl, pl))
+                    bypass_tips.append(f"[bold red]• Excluded Platform:[/bold red] Platform '{pl_res}' is excluded. Spoofing User-Agent to this platform bypasses controls ({controls}).")
+                for loc in [x.strip() for x in p.get("excluded_locations", "").split(",") if x.strip() and x.strip() != "None"]:
+                    loc_res = mapping.get(loc.lower(), mapping.get(loc, loc))
+                    bypass_tips.append(f"[bold red]• Excluded Location:[/bold red] Location '{loc_res}' is excluded. Access from this network bypasses controls ({controls}).")
+
+                client_apps = [x.strip().lower() for x in p.get("client_app_types", "").split(",") if x.strip()]
+                if "exchangeactivesync" in client_apps or "other" in client_apps:
+                    legacy = [c for c in client_apps if c in ["exchangeactivesync", "other"]]
+                    bypass_tips.append(f"[bold yellow]• Legacy Auth Allowed:[/bold yellow] Legacy client type ({', '.join(legacy)}) allowed. Bypasses modern MFA.")
+                
+                guidance_tips = list(bypass_tips)
+                from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import explain_controls
+                for exp in explain_controls(controls):
+                    guidance_tips.append(f"[bold cyan]• Control Explanation:[/bold cyan] {exp}")
+                
+                guidance_str = "\n".join(guidance_tips) if guidance_tips else "No direct exclusion bypasses identified."
+                
+                detail_group = Group(
+                    f"[bold white]State:[/bold white] {p.get('state', 'unknown')}",
+                    f"[bold white]Access Controls:[/bold white] {controls}",
+                    "",
+                    "[bold cyan]Inclusions:[/bold cyan]",
+                    *([f"  {line}" for line in incls] if incls else ["  None"]),
+                    "",
+                    "[bold red]Exclusions:[/bold red]",
+                    *([f"  {line}" for line in excls] if excls else ["  None"]),
+                    "",
+                    "[bold yellow]Bypass & Penetration Testing Guidance:[/bold yellow]",
+                    guidance_str
+                )
+                
+                console.print(Panel(
+                    detail_group,
+                    title=f"[bold white]Policy: {p.get('display_name', '—')}[/bold white]",
+                    border_style="cyan",
+                    box=box.DOUBLE
+                ))
+            else:
+                console.print(f"  [red]✗[/red] Invalid policy number (must be 1-{len(rows)}).")
+        except ValueError:
+            console.print("  [red]✗[/red] Please enter a valid number.")
+
+
+def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
+    """Analyze Conditional Access policy database evidence/loot for bypass opportunities: check-ca-bypasses"""
+    import csv
+    import json
+    from pathlib import Path
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich import box
+
+    if state.workspace is None:
+        console.print("  [red]✗[/red] No active workspace.")
+        return
+
+    policies = []
+
+    # 1. Try fetching from SQLite Evidence table first (newest record)
+    try:
+        evidence_list = state.workspace.list_evidence()
+        # Find the latest evidence row for the CA policy enum technique
+        ca_evidence = None
+        for ev in reversed(evidence_list):
+            if ev.get("technique_id") == "discovery/entra_enum_conditional_access_policies":
+                ca_evidence = ev
+                break
+        
+        if ca_evidence and ca_evidence.get("output_json"):
+            payload = json.loads(ca_evidence["output_json"])
+            policies = payload.get("policies", [])
+    except Exception as e:
+        logger.debug("Failed to fetch CA policies from DB evidence: %s", e)
+
+    # 2. Fall back to loot.csv if DB evidence was empty/unavailable
+    if not policies:
+        ws_db = Path(state.workspace.db_path)
+        loot_dir = ws_db.parent / ws_db.stem / "loot" / "discovery" / "entra_enum_conditional_access_policies"
+        csv_path = loot_dir / "loot.csv"
+        
+        if csv_path.exists():
+            try:
+                with csv_path.open(newline="", encoding="utf-8") as fh:
+                    policies = list(csv.DictReader(fh))
+            except Exception as e:
+                console.print(f"  [red]✗[/red] Failed to read loot.csv: {e}")
+                return
+
+    if not policies:
+        console.print("  [red]✗[/red] No Conditional Access policy data found in database or loot.")
+        console.print("    Please run the discovery technique first: [cyan]run discovery/entra_enum_conditional_access_policies[/cyan]")
+        return
+
+    # Load mapping for on-the-fly GUID resolution
+    from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import load_loot_mappings
+    mapping = load_loot_mappings(state.workspace) if state.workspace else {}
+
+    # Helper to coerce list or comma-separated string
+    def get_list(val: Any) -> list[str]:
+        if not val:
+            return []
+        if isinstance(val, list):
+            return [str(x) for x in val if x]
+        if isinstance(val, str):
+            return [x.strip() for x in val.split(",") if x.strip() and x.strip() != "None"]
+        return []
+
+    # Bypasses to aggregate
+    excluded_identities: dict[str, list[tuple[str, str]]] = {}
+    app_exclusions: dict[str, list[tuple[str, str]]] = {}
+    platform_exclusions: dict[str, list[tuple[str, str]]] = {}
+    location_exclusions: dict[str, list[tuple[str, str]]] = {}
+    legacy_auth_policies: list[tuple[str, list[str], str]] = []
+    disabled_policies: list[tuple[str, str, str]] = []
+
+    for p in policies:
+        name = p.get("display_name") or p.get("displayName") or "Untitled"
+        p_state = p.get("state")
+        controls = p.get("grant_controls") or p.get("grantControls") or "None"
+        if isinstance(controls, list):
+            controls = ", ".join(controls)
+        
+        # Inactive policies
+        if p_state == "disabled" or "report" in str(p_state).lower():
+            disabled_policies.append((name, str(p_state), controls))
+            continue
+
+        # Aggregation 1: Excluded Identities
+        for u in get_list(p.get("excluded_users")):
+            u_res = mapping.get(u.lower(), mapping.get(u, u))
+            excluded_identities.setdefault(u_res, []).append((name, controls))
+        for g in get_list(p.get("excluded_groups")):
+            g_res = mapping.get(g.lower(), mapping.get(g, g))
+            excluded_identities.setdefault(f"Group: {g_res}", []).append((name, controls))
+        for r in get_list(p.get("excluded_roles")):
+            r_res = mapping.get(r.lower(), mapping.get(r, r))
+            excluded_identities.setdefault(f"Role: {r_res}", []).append((name, controls))
+
+        # Aggregation 2: Application Exclusions
+        for a in get_list(p.get("excluded_apps") or p.get("excludedApplications")):
+            a_res = mapping.get(a.lower(), mapping.get(a, a))
+            app_exclusions.setdefault(a_res, []).append((name, controls))
+
+        # Aggregation 3: Platform Exclusions
+        for pl in get_list(p.get("exclude_platforms") or p.get("excludePlatforms")):
+            pl_res = mapping.get(pl.lower(), mapping.get(pl, pl))
+            platform_exclusions.setdefault(pl_res, []).append((name, controls))
+
+        # Aggregation 4: Location Exclusions
+        for loc in get_list(p.get("excluded_locations") or p.get("excludedLocations")):
+            loc_res = mapping.get(loc.lower(), mapping.get(loc, loc))
+            location_exclusions.setdefault(loc_res, []).append((name, controls))
+
+        # Aggregation 5: Legacy Authentication Allowed
+        client_apps = [x.lower() for x in get_list(p.get("client_app_types") or p.get("clientAppTypes"))]
+        if "exchangeactivesync" in client_apps or "other" in client_apps:
+            legacy = [c for c in client_apps if c in ["exchangeactivesync", "other"]]
+            legacy_auth_policies.append((name, legacy, controls))
+
+    # Display results!
+    console.print("\n[bold yellow]================================================================[/bold yellow]")
+    console.print("[bold yellow]       CONDITIONAL ACCESS AGGREGATED BYPASS OPPORTUNITIES       [/bold yellow]")
+    console.print("[bold yellow]================================================================[/bold yellow]")
+
+    # 1. Identity Exclusions
+    if excluded_identities:
+        tbl = Table(title="Exclusions by Identity (Users / Groups / Roles)", box=box.ROUNDED, border_style="red")
+        tbl.add_column("Excluded Identity", style="bold white")
+        tbl.add_column("Bypassed Policies & Controls", style="cyan")
+        for ident, bypasses in sorted(excluded_identities.items()):
+            b_strs = [f"'{p_name}' ({ctrls})" for p_name, ctrls in bypasses]
+            tbl.add_row(ident, "\n".join(b_strs))
+        console.print(tbl)
+    else:
+        console.print("\n  [green]✓[/green] No active user/group/role exclusions identified.")
+
+    # 2. Location Exclusions
+    if location_exclusions:
+        tbl = Table(title="Exclusions by Named Location / IP Range", box=box.ROUNDED, border_style="yellow")
+        tbl.add_column("Excluded Location", style="bold white")
+        tbl.add_column("Bypassed Policies & Controls", style="cyan")
+        for loc, bypasses in sorted(location_exclusions.items()):
+            b_strs = [f"'{p_name}' ({ctrls})" for p_name, ctrls in bypasses]
+            tbl.add_row(loc, "\n".join(b_strs))
+        console.print(tbl)
+
+    # 3. Platform Exclusions
+    if platform_exclusions:
+        tbl = Table(title="Exclusions by Device Platform", box=box.ROUNDED, border_style="yellow")
+        tbl.add_column("Excluded OS Platform", style="bold white")
+        tbl.add_column("Bypassed Policies & Controls", style="cyan")
+        for pl, bypasses in sorted(platform_exclusions.items()):
+            b_strs = [f"'{p_name}' ({ctrls})" for p_name, ctrls in bypasses]
+            tbl.add_row(pl, "\n".join(b_strs))
+        console.print(tbl)
+
+    # 4. App Exclusions
+    if app_exclusions:
+        tbl = Table(title="Exclusions by Cloud Application", box=box.ROUNDED, border_style="red")
+        tbl.add_column("Excluded Application", style="bold white")
+        tbl.add_column("Bypassed Policies & Controls", style="cyan")
+        for app, bypasses in sorted(app_exclusions.items()):
+            b_strs = [f"'{p_name}' ({ctrls})" for p_name, ctrls in bypasses]
+            tbl.add_row(app, "\n".join(b_strs))
+        console.print(tbl)
+
+    # 5. Legacy Auth Allowed
+    if legacy_auth_policies:
+        tbl = Table(title="Legacy Authentication Protocol Gaps", box=box.ROUNDED, border_style="red")
+        tbl.add_column("Policy Name", style="bold white")
+        tbl.add_column("Allowed Legacy Protocols", style="bold yellow")
+        tbl.add_column("Grant Controls", style="cyan")
+        for name, legacy, ctrls in legacy_auth_policies:
+            tbl.add_row(name, ", ".join(legacy), ctrls)
+        console.print(tbl)
+
+    # 5.1 Rule-Based Bypass Detectors
+    from quantum_mechanic.shell.ca_bypass_detectors import run_all_detectors
+    
+    detector_findings = run_all_detectors(policies)
+
+    if detector_findings:
+        tbl = Table(title="Known Bypass Pattern Detection", box=box.ROUNDED, border_style="magenta bold")
+        tbl.add_column("Severity", style="bold white")
+        tbl.add_column("Vulnerability Type", style="bold red")
+        tbl.add_column("Affected Policies", style="cyan")
+        tbl.add_column("Description", style="yellow")
+        
+        for f in detector_findings:
+            sev_color = "red" if f.severity in ("CRITICAL", "HIGH") else "yellow" if f.severity == "MEDIUM" else "dim"
+            tbl.add_row(f"[{sev_color}]{f.severity}[/{sev_color}]", f.title, ", ".join(f.affected_policies), f.description)
+        console.print(tbl)
+
+    # 5.5 Cartesian Policy Sweep (MFA Bypass Matrix Analysis)
+    # We build small representative domains from values referenced in policies
+    # and run a Cartesian product sweep to find sign-in contexts allowed without MFA.
+    import itertools
+
+    def build_domain(key_inc: str, key_exc: str, default_val: str) -> list[str]:
+        items = set()
+        for p_dict in policies:
+            raw_inc = p_dict.get(key_inc) or p_dict.get(key_inc.replace("included", "include")) or p_dict.get(key_inc.replace("_", ""))
+            raw_exc = p_dict.get(key_exc) or p_dict.get(key_exc.replace("excluded", "exclude")) or p_dict.get(key_exc.replace("_", ""))
+            for x in get_list(raw_inc):
+                if x not in ["All", "None", "AllTrusted", "all"]:
+                    items.add(x)
+            for x in get_list(raw_exc):
+                if x not in ["All", "None", "AllTrusted", "all"]:
+                    items.add(x)
+        res_list = sorted(list(items))
+        if default_val not in res_list:
+            res_list.append(default_val)
+        return res_list
+
+    domain_users = build_domain("included_users", "excluded_users", "generic_user@tenant.com")
+    if "guest_user" not in domain_users:
+        domain_users.append("guest_user")
+        
+    domain_groups = build_domain("included_groups", "excluded_groups", "None")
+    domain_roles = build_domain("included_roles", "excluded_roles", "None")
+    domain_apps = build_domain("included_apps", "excluded_apps", "generic_app")
+    domain_platforms = ["windows", "macos", "ios", "android", "linux", "unknown"]
+    domain_locations = build_domain("included_locations", "excluded_locations", "untrusted_ip")
+    domain_clients = ["browser", "mobileAppsAndDesktopClients", "exchangeActiveSync", "other"]
+    
+    # New domains
+    domain_sign_in_risk = ["none", "low", "medium", "high"]
+    domain_user_risk = ["none", "low", "medium", "high"]
+    domain_auth_flow = ["normal", "deviceCodeFlow", "authenticationTransfer"]
+
+    def matches_val(val: str, includes: list[str], excludes: list[str]) -> bool:
+        if "All" in excludes or val in excludes:
+            return False
+        if not includes or "None" in includes:
+            return False
+        if "All" in includes or val in includes:
+            return True
+        return False
+
+    def matches_loc(val: str, includes: list[str], excludes: list[str]) -> bool:
+        if "All" in excludes or val in excludes:
+            return False
+        for excl in excludes:
+            if excl.split(" (")[0] in val:
+                return False
+        if not includes or "None" in includes:
+            return False
+        if "All" in includes:
+            return True
+        for incl in includes:
+            if incl.split(" (")[0] in val:
+                return True
+        return False
+
+    def matches_policy(p_dict: dict, u: str, g: str, r: str, app: str, platform: str, loc: str, client: str, sign_in_risk: str, user_risk: str, auth_flow: str) -> bool:
+        # Resolve fields flexibly
+        inc_u = get_list(p_dict.get("included_users") or p_dict.get("includeUsers"))
+        exc_u = get_list(p_dict.get("excluded_users") or p_dict.get("excludeUsers"))
+        inc_g = get_list(p_dict.get("included_groups") or p_dict.get("includeGroups"))
+        exc_g = get_list(p_dict.get("excluded_groups") or p_dict.get("excludeGroups"))
+        inc_r = get_list(p_dict.get("included_roles") or p_dict.get("includeRoles"))
+        exc_r = get_list(p_dict.get("excluded_roles") or p_dict.get("excludeRoles"))
+
+        # Exclusion is absolute
+        if u in exc_u or g in exc_g or r in exc_r:
+            return False
+
+        user_matched = False
+        if "All" in inc_u or u in inc_u or g in inc_g or r in inc_r:
+            user_matched = True
+            
+        # Handle guest users
+        if u == "guest_user":
+            inc_guests = p_dict.get("include_guest_types", "")
+            exc_guests = p_dict.get("exclude_guest_types", "")
+            if exc_guests and exc_guests != "None":
+                return False
+            if inc_guests and inc_guests != "None":
+                user_matched = True
+
+        if not user_matched:
+            return False
+
+        inc_a = get_list(p_dict.get("included_apps") or p_dict.get("includeApplications") or p_dict.get("includedApplications"))
+        exc_a = get_list(p_dict.get("excluded_apps") or p_dict.get("excludeApplications") or p_dict.get("excludedApplications"))
+        
+        # Expand Office365 to individual apps if targeted
+        # Exchange Online, SharePoint Online, Teams, etc.
+        o365_apps = ["00000002-0000-0ff1-ce00-000000000000", "00000003-0000-0ff1-ce00-000000000000"]
+        if "Office365" in inc_a and app in o365_apps:
+            inc_a.append(app)
+            
+        if not matches_val(app, inc_a, exc_a):
+            return False
+
+        inc_p = [x.lower() for x in get_list(p_dict.get("included_platforms") or p_dict.get("includePlatforms") or p_dict.get("includedPlatforms"))]
+        if not inc_p:
+            inc_p = ["all"]
+        exc_p = [x.lower() for x in get_list(p_dict.get("exclude_platforms") or p_dict.get("excludePlatforms") or p_dict.get("excludedPlatforms"))]
+        if not matches_val(platform.lower(), inc_p, exc_p):
+            return False
+
+        inc_l = get_list(p_dict.get("included_locations") or p_dict.get("includeLocations") or p_dict.get("includedLocations"))
+        if not inc_l:
+            inc_l = ["All"]
+        exc_l = get_list(p_dict.get("excluded_locations") or p_dict.get("excludeLocations") or p_dict.get("excludedLocations"))
+        if not matches_loc(loc, inc_l, exc_l):
+            return False
+
+        inc_c = [x.lower() for x in get_list(p_dict.get("client_app_types") or p_dict.get("clientAppTypes"))]
+        if not inc_c:
+            inc_c = ["all"]
+        if "all" not in inc_c and client.lower() not in inc_c:
+            return False
+            
+        # Risk levels
+        p_sign_in_risk = [x.lower() for x in get_list(p_dict.get("sign_in_risk_levels"))]
+        if p_sign_in_risk and p_sign_in_risk != ["none"]:
+            if sign_in_risk not in p_sign_in_risk:
+                return False
+                
+        p_user_risk = [x.lower() for x in get_list(p_dict.get("user_risk_levels"))]
+        if p_user_risk and p_user_risk != ["none"]:
+            if user_risk not in p_user_risk:
+                return False
+
+        # Auth flows
+        p_auth_flow = p_dict.get("auth_flows", "").lower()
+        if p_auth_flow:
+            if auth_flow not in p_auth_flow:
+                return False
+
+        return True
+
+    sweep_gaps = []
+    MAX_SWEEP = 500_000
+    space_size = 1
+    for d in [domain_users, domain_groups, domain_roles, domain_apps, domain_platforms, domain_locations, domain_clients, domain_sign_in_risk, domain_user_risk, domain_auth_flow]:
+        space_size *= len(d)
+
+    capped = space_size > MAX_SWEEP
+    if capped:
+        console.print(f"  [yellow]⚠[/yellow] Cartesian space is {space_size:,} combinations — capping sweep at {MAX_SWEEP:,} for performance.")
+
+    evaluated = 0
+    for combo in itertools.product(domain_users, domain_groups, domain_roles, domain_apps, domain_platforms, domain_locations, domain_clients, domain_sign_in_risk, domain_user_risk, domain_auth_flow):
+        if evaluated >= MAX_SWEEP:
+            break
+        evaluated += 1
+        u, g, r, app, platform, loc, client, sign_in_risk, user_risk, auth_flow = combo
+        is_blocked = False
+        matching_policies = []
+        active_grants = []
+
+        for p_dict in policies:
+            p_state = p_dict.get("state")
+            if p_state != "enabled":
+                continue
+
+            if matches_policy(p_dict, u, g, r, app, platform, loc, client, sign_in_risk, user_risk, auth_flow):
+                p_name = p_dict.get("display_name") or p_dict.get("displayName") or "Untitled"
+                matching_policies.append(p_name)
+                controls = p_dict.get("grant_controls") or p_dict.get("grantControls") or "None"
+                grant_op = str(p_dict.get("grant_operator") or "OR").upper()
+                if isinstance(controls, list):
+                    controls = ", ".join(controls)
+                controls_list = [x.strip() for x in controls.split(",") if x.strip()]
+
+                if "block" in [c.lower() for c in controls_list]:
+                    is_blocked = True
+                    break
+                active_grants.append((grant_op, controls_list))
+
+        if not is_blocked:
+            mfa_enforced = False
+            for grant_op, controls_list in active_grants:
+                mfa_in_policy = any("mfa" in c.lower() or "authstrength" in c.lower() for c in controls_list)
+                if grant_op == "OR":
+                    if mfa_in_policy and len(controls_list) == 1:
+                        mfa_enforced = True
+                        break
+                elif grant_op == "AND":
+                    if mfa_in_policy:
+                        mfa_enforced = True
+                        break
+            
+            if not mfa_enforced:
+                sweep_gaps.append({
+                    "user": u, "group": g, "role": r,
+                    "app": app, "platform": platform, "location": loc, "client": client,
+                    "sign_in_risk": sign_in_risk, "user_risk": user_risk, "auth_flow": auth_flow,
+                    "matching_policies": matching_policies
+                })
+
+    if sweep_gaps:
+        tbl = Table(title="MFA-Bypass Attack Paths (Matrix Sweep)", box=box.ROUNDED, border_style="red bold")
+        tbl.add_column("Target Identity (User/Group/Role)", style="bold white")
+        tbl.add_column("Access Context (App / OS / Loc / Client)", style="yellow")
+        tbl.add_column("Matching Policies (No MFA Enforced)", style="cyan")
+
+        shown_unique = set()
+        count = 0
+        for gap in sweep_gaps:
+            u_res = mapping.get(gap["user"].lower(), mapping.get(gap["user"], gap["user"]))
+            g_res = mapping.get(gap["group"].lower(), mapping.get(gap["group"], gap["group"]))
+            r_res = mapping.get(gap["role"].lower(), mapping.get(gap["role"], gap["role"]))
+
+            ident_str = f"{u_res}"
+            if g_res != "None":
+                ident_str += f"\nGroup: {g_res}"
+            if r_res != "None":
+                ident_str += f"\nRole: {r_res}"
+
+            ctx_str = f"App: {gap['app']}\nOS: {gap['platform']}\nLoc: {gap['location'].split(' (')[0]}\nClient: {gap['client']}"
+            p_strs = ", ".join(gap["matching_policies"]) if gap["matching_policies"] else "None"
+
+            unique_key = (ident_str, gap["app"], gap["platform"], gap["client"])
+            if unique_key not in shown_unique:
+                shown_unique.add(unique_key)
+                tbl.add_row(ident_str, ctx_str, p_strs)
+                count += 1
+                if count >= 10:
+                    break
+
+        console.print(tbl)
+        console.print(f"  [red]⚠️[/red] Discovered [bold red]{len(sweep_gaps)}[/bold red] total path combinations allowed without MFA (evaluated {evaluated:,} of {space_size:,}).\n")
+    else:
+        console.print(f"\n  [green]✓[/green] No MFA-bypass paths identified via Cartesian sweep ({evaluated:,} combinations evaluated).\n")
+
+    # 6. Disabled or Report-Only Policies
+    if disabled_policies:
+        tbl = Table(title="Inactive / Non-Enforced Policies", box=box.ROUNDED, border_style="dim")
+        tbl.add_column("Policy Name", style="bold white")
+        tbl.add_column("State", style="bold yellow")
+        tbl.add_column("Configured Controls", style="cyan")
+        for name, state, ctrls in disabled_policies:
+            tbl.add_row(name, state, ctrls)
+        console.print(tbl)
+
+    # ── Executive Summary ────────────────────────────────────────────────────
+    from rich.panel import Panel
+    n_critical = sum(1 for f in detector_findings if f.severity == "CRITICAL")
+    n_high = sum(1 for f in detector_findings if f.severity == "HIGH")
+    n_medium = sum(1 for f in detector_findings if f.severity == "MEDIUM")
+    n_low = sum(1 for f in detector_findings if f.severity == "LOW")
+    n_info = sum(1 for f in detector_findings if f.severity == "INFO")
+    n_sweep = len(sweep_gaps)
+    n_disabled = len(disabled_policies)
+
+    summary_lines = [
+        f"[red]CRITICAL:[/red] {n_critical}  [bold red]HIGH:[/bold red] {n_high}  [yellow]MEDIUM:[/yellow] {n_medium}  [dim]LOW:[/dim] {n_low}  [dim]INFO:[/dim] {n_info}",
+        f"[red]MFA Bypass Paths:[/red] {n_sweep:,}  [dim]| Combinations Evaluated:[/dim] {evaluated:,} of {space_size:,}",
+        f"[yellow]Inactive Policies:[/yellow] {n_disabled}  [dim]| Total Policies:[/dim] {len(policies)}",
+    ]
+
+    if n_critical > 0 or n_high > 0:
+        summary_lines.append("")
+        summary_lines.append("[bold red]⚠ ACTION REQUIRED:[/bold red] Critical or High findings detected. Run [cyan]info check-ca-bypasses[/cyan] for remediation workflow.")
+
+    console.print(Panel(
+        "\n".join(summary_lines),
+        title="[bold white]CA Gap Analysis — Executive Summary[/bold white]",
+        border_style="bold green",
+        padding=(1, 2),
+    ))
+
+    console.print("\n[bold green]✓[/bold green] Analysis complete. Target these exclusions during credential mapping and lateral movement.")
+
+
 def cmd_raw(state: ShellState, args: list[str]) -> None:
     """Show raw JSON data for an entity: raw <credential_id>."""
     # Only available in local mode for now since RemoteTransport doesn't expose raw data yet.
@@ -1114,7 +1794,7 @@ def cmd_ask(state: ShellState, args: list[str]) -> None:
         from rich.markdown import Markdown
         from quantum_mechanic.agent.orchestrator import AgentOrchestrator
     except ImportError:
-        console.print("\\n[red]✗ Agent Dependencies Missing[/red]")
+        console.print("\n[red]✗ Agent Dependencies Missing[/red]")
         console.print("  The RAG Agent is an optional feature.")
         console.print("  To enable it, install the AI dependencies:")
         console.print("  [bold cyan]pip install quantum-mechanic[agent][/bold cyan]")
@@ -1126,15 +1806,161 @@ def cmd_ask(state: ShellState, args: list[str]) -> None:
             response = agent.ask(question)
         except Exception as e:
             if "api key" in str(e).lower() or "anthropic" in str(e).lower():
-                console.print("\\n[red]✗ Anthropic API Key Missing[/red]")
+                console.print("\n[red]✗ Anthropic API Key Missing[/red]")
                 console.print("  Please set the [bold cyan]ANTHROPIC_API_KEY[/bold cyan] environment variable.")
                 return
-            console.print(f"\\n[red]✗ Agent Error:[/red] {e}")
+            console.print(f"\n[red]✗ Agent Error:[/red] {e}")
             return
 
-    console.print("\\n[bold cyan]🧠 Quantum Mechanic Agent[/bold cyan]")
+    console.print("\n[bold cyan]🧠 Quantum Mechanic Agent[/bold cyan]")
     console.print(Markdown(response))
     console.print()
+
+
+def cmd_activity(state: ShellState, args: list[str]) -> None:
+    """View the workspace activity log: activity [technique_id] [--level LEVEL] [--limit N]"""
+    if state.workspace is None:
+        console.print("  [red]✗[/red] No active workspace.")
+        return
+
+    opts = _parse_opts(args)
+    limit = int(opts.get("limit", 50))
+    level = opts.get("level")
+    
+    # Filter by tech ID if provided (first positional arg)
+    tech_id = None
+    if args and not args[0].startswith("--"):
+        tech_id = args[0]
+
+    logs = state.workspace.list_activity_log(
+        technique_id=tech_id,
+        level=level,
+        limit=limit
+    )
+
+    if not logs:
+        console.print("  [dim]No activity log entries found.[/dim]")
+        return
+
+    from rich.table import Table
+    from rich import box
+
+    pager_ctx = console.pager(styles=True) if os.environ.get("TERM") != "dumb" else nullcontext()
+    with pager_ctx:
+        tbl = Table(
+            title=f"Activity Log - {state.workspace.name}",
+            box=box.SIMPLE,
+            header_style="bold cyan"
+        )
+        tbl.add_column("Timestamp", style="dim")
+        tbl.add_column("Technique", style="cyan")
+        tbl.add_column("Level")
+        tbl.add_column("Message")
+
+        _LEVEL_STYLES = {
+            "DEBUG":   "dim",
+            "INFO":    "white",
+            "SUCCESS": "bold green",
+            "WARNING": "bold yellow",
+            "ERROR":   "bold red",
+        }
+
+        # Reverse to show chronological order in the pager
+        for log in reversed(logs):
+            lvl = log["level"].upper()
+            style = _LEVEL_STYLES.get(lvl, "white")
+            ts = log["timestamp"][11:19] # Show HH:MM:SS
+            
+            tbl.add_row(
+                ts,
+                log["technique_id"],
+                f"[{style}]{lvl}[/{style}]",
+                log["message"]
+            )
+        
+        console.print(tbl)
+
+
+def _show_check_ca_bypasses_help() -> None:
+    """Display comprehensive help for the check-ca-bypasses command."""
+    from rich import box
+    from rich.panel import Panel
+    from rich.table import Table
+
+    console.print("\n[bold white]COMMAND: check-ca-bypasses[/bold white]")
+    console.print("  [dim]Analyze Conditional Access policy database for bypass opportunities.[/dim]\n")
+
+    intel = [
+        "[bold cyan]Category:[/bold cyan]   Post-Exploitation Analysis",
+        "[bold cyan]Provider:[/bold cyan]   Entra ID (Azure AD)",
+        "[bold cyan]Prereq:[/bold cyan]     run discovery/entra_enum_conditional_access_policies",
+        "[bold cyan]MITRE ID:[/bold cyan]   T1556.006 (Modify Authentication Process: Conditional Access)",
+    ]
+    for line in intel:
+        console.print(f"  {line}")
+    console.print()
+
+    console.print("[bold white]WORKFLOW[/bold white]")
+    console.print("""
+  [bold cyan]1.[/bold cyan] Enumerate policies (collects 25+ fields per policy from Graph API):
+     [yellow]qm> run discovery/entra_enum_conditional_access_policies[/yellow]
+
+  [bold cyan]2.[/bold cyan] Run the bypass analyzer:
+     [yellow]qm> check-ca-bypasses[/yellow]
+
+  [bold cyan]3.[/bold cyan] Review the output sections:
+     • [bold white]Flat Exclusion Analysis[/bold white]  — Which users/groups/locations bypass each policy
+     • [bold magenta]Known Bypass Pattern Detection[/bold magenta]  — 14 heuristic detectors (CRITICAL → INFO)
+     • [bold red]MFA-Bypass Attack Paths[/bold red]  — Cartesian sweep of sign-in contexts without MFA
+     • [dim]Inactive Policies[/dim]  — Report-only or disabled policies
+     • [bold green]Executive Summary[/bold green]  — Finding counts by severity
+""")
+
+    console.print("[bold white]BYPASS DETECTORS (14 checks)[/bold white]\n")
+    det_tbl = Table(box=box.SIMPLE, padding=(0, 2))
+    det_tbl.add_column("Severity", style="bold")
+    det_tbl.add_column("Detector", style="cyan")
+    det_tbl.add_column("What It Catches")
+
+    detectors = [
+        ("CRITICAL", "Legacy Auth Allowed", "Policies allowing ExchangeActiveSync/Other without blocking"),
+        ("HIGH", "Device Code Flow Not Blocked", "No policy blocks deviceCodeFlow — phishing via device code"),
+        ("HIGH", "FOCI App Exclusion", "Excluded apps share token families with protected apps"),
+        ("HIGH", "Break-Glass Over-Exclusion", "Accounts excluded from ALL enabled policies"),
+        ("HIGH", "Vulnerable 'OR' Grant", "MFA + weaker control with OR operator — attacker picks the weak path"),
+        ("MEDIUM", "Weak MFA Strength", "Generic MFA instead of phishing-resistant Authentication Strength"),
+        ("MEDIUM", "Platform Gaps", "Policies targeting specific platforms — bypass via User-Agent spoofing"),
+        ("MEDIUM", "No Workload Identity CA", "No CA policies protect Service Principals"),
+        ("MEDIUM", "Guest Coverage Gap", "All Users policy excludes guests without fallback"),
+        ("MEDIUM", "Session Hijack Risk", "Persistent Browser: always without Token Protection"),
+        ("MEDIUM", "Token Protection Missing", "No policy enables Secure Sign-In Session"),
+        ("LOW", "Auth Transfer Not Blocked", "No policy blocks Authentication Transfer flow"),
+        ("INFO", "Report-Only Policies", "Policies logging but not enforcing controls"),
+        ("INFO", "Trusted Location Risk", "Broad 'AllTrusted' location exclusions"),
+    ]
+    for sev, name, desc in detectors:
+        sev_color = "red" if sev in ("CRITICAL", "HIGH") else "yellow" if sev == "MEDIUM" else "dim"
+        det_tbl.add_row(f"[{sev_color}]{sev}[/{sev_color}]", name, desc)
+    console.print(det_tbl)
+
+    console.print("\n[bold white]REMEDIATION PRIORITY[/bold white]")
+    console.print("""
+  [bold red]1. CRITICAL/HIGH:[/bold red] Fix immediately — these represent direct MFA bypass paths.
+     • Block legacy auth globally with a dedicated CA policy
+     • Block Device Code Flow via authentication flow conditions
+     • Change 'OR' grant operators to 'AND' (Require ALL selected controls)
+     • Audit break-glass account exclusions
+
+  [bold yellow]2. MEDIUM:[/bold yellow] Fix in next sprint — these weaken the security posture.
+     • Upgrade generic MFA to phishing-resistant Authentication Strength
+     • Target 'Any device' instead of specific platforms
+     • Enable Token Protection for critical apps
+     • Create dedicated guest/external user policies
+
+  [dim]3. LOW/INFO:[/dim] Track and review — informational findings.
+     • Evaluate report-only policies for production readiness
+     • Audit trusted location CIDR ranges
+""")
 
 
 def cmd_help(state: ShellState, args: list[str]) -> None:
@@ -1144,6 +1970,12 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
 
     if args:
         tech_id = args[0].strip("/")
+
+        # ── Built-in command documentation ───────────────────────────────
+        if tech_id == "check-ca-bypasses":
+            _show_check_ca_bypasses_help()
+            return
+
         registered = state.loader.get(tech_id)
 
         if registered is None:
@@ -1156,8 +1988,8 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
         m = registered.metadata
         safe_label = "[green]Safe (Read-Only)[/green]" if m.safe else "[red]Impact (Modifies State)[/red]"
 
-        console.print(f"\\n[bold white]MODULE: {m.id}[/bold white]")
-        console.print(f"  [dim]{m.description}[/dim]\\n")
+        console.print(f"\n[bold white]MODULE: {m.id}[/bold white]")
+        console.print(f"  [dim]{m.description}[/dim]\n")
 
         intel = [
             f"[bold cyan]Tactic:[/bold cyan]    {m.tactic}",
@@ -1202,7 +2034,7 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
                 idx = src.find(start_marker)
                 if idx == -1:
                     return []
-                end = src.find("\\n#\\n", idx)
+                end = src.find("\n#\n", idx)
                 block = src[idx:end if end != -1 else idx + 800]
                 lines = []
                 for ln in block.splitlines():
@@ -1244,7 +2076,8 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
         console.print("  [red]✗[/red] No active workspace/connection. Load one first.")
         return
 
-    with console.pager(styles=True):
+    pager_ctx = console.pager(styles=True) if os.environ.get("TERM") != "dumb" else nullcontext()
+    with pager_ctx:
         transport = state.transport
         info = transport.workspace_info()
         ws_name = info.get("name", "Unknown Workspace")
@@ -1255,13 +2088,13 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
         providers = ", ".join(sorted({c.get("provider", "unknown").upper() for c in creds_all})) or "none"
         
         console.print(Panel(
-            f"[bold white]Attack Path — {ws_name}[/bold white]\\n"
+            f"[bold white]Attack Path — {ws_name}[/bold white]\n"
             f"[dim]Updated: {now_str}   Providers: {providers}[/dim]",
             style="blue",
         ))
 
-        console.print("\\n[bold cyan]Credential Chain[/bold cyan]")
-        console.print("[dim]How each identity was obtained:[/dim]\\n")
+        console.print("\n[bold cyan]Credential Chain[/bold cyan]")
+        console.print("[dim]How each identity was obtained:[/dim]\n")
         if not creds_all:
             console.print("  [dim]No credentials loaded.[/dim]")
         else:
@@ -1289,10 +2122,10 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
             _render_tree(root_tree, None)
             console.print(root_tree)
 
-        console.print("\\n[bold cyan]Technique Timeline[/bold cyan]")
+        console.print("\n[bold cyan]Technique Timeline[/bold cyan]")
         evidence_rows = transport.list_evidence()
         if not evidence_rows:
-            console.print("  [dim]No techniques have been run yet.[/dim]")
+            console.print("  [dim]No activity recorded.[/dim]")
         else:
             tbl = Table(show_header=True, header_style="bold", box=None, padding=(0, 1))
             tbl.add_column("#", style="dim", width=4)
@@ -1300,6 +2133,12 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
             tbl.add_column("Technique")
             tbl.add_column("Provider", width=8)
             tbl.add_column("Principal")
+
+            # --------------------------------------------------------
+            # Build a credential lookup map to resolve the principal
+            # name when the technique output does not store it.
+            # --------------------------------------------------------
+            cred_map = {c.get("id"): c for c in creds_all if c.get("id") is not None}
 
             for i, row in enumerate(evidence_rows, 1):
                 ts = str(row.get("timestamp", ""))[:16]
@@ -1309,19 +2148,32 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
                 try:
                     data = json.loads(row.get("output_json", "{}"))
                     provider = (data.get("provider") or "?").upper()
-                    principal = (
+                    
+                    # --------------------------------------------------------
+                    # Extract principal identity from evidence output JSON,
+                    # defaulting to credential metadata if not present.
+                    # --------------------------------------------------------
+                    raw_principal = (
                         data.get("principal")
                         or data.get("friendly_name")
-                        or data.get("starting_principal", "?").split("/")[-1]
-                        or "?"
+                        or data.get("starting_principal")
                     )
+                    if not raw_principal or raw_principal == "?":
+                        c = cred_map.get(row.get("credential_id"))
+                        if c:
+                            raw_principal = c.get("friendly_name") or c.get("principal_id")
+
+                    if raw_principal:
+                        principal = str(raw_principal).split("/")[-1]
+                    else:
+                        principal = "?"
                 except Exception:
                     pass
                 tbl.add_row(str(i), ts, tech, provider, principal)
 
             console.print(tbl)
 
-        console.print("\\n[bold cyan]Findings[/bold cyan]")
+        console.print("\n[bold cyan]Findings[/bold cyan]")
         findings = transport.list_findings()
         if not findings:
             console.print("  [dim]No findings recorded yet.[/dim]")
@@ -1522,6 +2374,41 @@ def cmd_export(state: ShellState, args: list[str]) -> None:
         console.print(f"  [red]✗[/red] Unsupported provider: {provider}. Use: entra")
 
 
+def _capture_azure_token() -> dict[str, Any]:
+    """Capture an Azure access token from local DefaultAzureCredential state.
+
+    Returns a secret_data dict with method=captured_token. Raises on failure.
+
+    This is the ONLY place in production code that constructs
+    DefaultAzureCredential. It runs at import time, by explicit operator
+    consent, captured once. The result is persisted to the workspace as
+    a static token — at use time, the provider returns ONLY that stored
+    token, never re-resolving against local state.
+    """
+    import base64
+    import json as _json
+
+    from azure.identity import DefaultAzureCredential
+
+    live = DefaultAzureCredential()
+    token = live.get_token("https://management.azure.com/.default")
+
+    parts = token.token.split(".")
+    if len(parts) < 2:
+        raise RuntimeError("Could not parse captured token as JWT")
+    payload = parts[1] + "=" * (4 - len(parts[1]) % 4)
+    claims = _json.loads(base64.urlsafe_b64decode(payload))
+    captured_upn = claims.get("upn") or claims.get("appid") or claims.get("sub", "unknown")
+
+    return {
+        "method": "captured_token",
+        "access_token": token.token,
+        "expires_on": token.expires_on,
+        "captured_principal": captured_upn,
+        "captured_tenant": claims.get("tid", "unknown"),
+    }
+
+
 # ================================================================
 # Private commands (exploits, payloads, connect, disconnect, lois)
 # are in shell/commands_private.py — NOT shipped in the public build.
@@ -1544,8 +2431,10 @@ COMMANDS: dict[str, Any] = {
     "techniques": cmd_techniques,
     "loot": cmd_loot,
     "report": cmd_report,
+    "activity": cmd_activity,
     "raw": cmd_raw,
     "ask": cmd_ask,
+    "check-ca-bypasses": cmd_check_ca_bypasses,
     "acquire": cmd_acquire,
     "export": cmd_export,
     "help": cmd_help,
