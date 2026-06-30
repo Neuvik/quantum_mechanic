@@ -266,7 +266,13 @@ class TestCmdCredsAndUse:
         cmd_use(state_with_ws, [])
         assert "Usage" in str(mock_console.call_args[0][0])
 
-    def test_use_success(self, state_with_ws, mock_console):
+    def test_use_success(self, state_with_ws, mock_console, monkeypatch):
+        # Bypass defense-in-depth whoami verification: this test exercises the
+        # shell-command code path, not credential identity verification.
+        monkeypatch.setattr(
+            "quantum_mechanic.core.workspace.Workspace._verify_credential_identity",
+            lambda self, cred_id: None,
+        )
         cid = state_with_ws.workspace.add_credential("aws", "ak", "{}", "my-key")
         cmd_use(state_with_ws, [str(cid)])
         assert state_with_ws.workspace.active_credential_id == cid
@@ -319,7 +325,10 @@ class TestCmdRunAndTechniques:
         cid = state_with_ws.workspace.add_credential(
             "aws", "access_key",
             '{"profile_name": "test"}',
-            friendly_name="test-key",
+            # friendly_name must match the mocked whoami above so the
+            # defense-in-depth identity verification on the active-credential
+            # setter accepts this credential.
+            friendly_name="op",
         )
         state_with_ws.workspace.active_credential_id = cid
 
@@ -404,11 +413,13 @@ class TestCmdRawAndHelp:
 class TestShellState:
     def test_prompt_context(self, state_with_ws):
         assert state_with_ws.prompt_context == "qm[test-ws]"
-        
-        # Add credential and set active
+
+        # Add credential and set active. Use private bypass — this test is
+        # about the prompt-rendering logic, not credential identity
+        # verification (covered separately in test_workspace_active_cred.py).
         cid = state_with_ws.workspace.add_credential("aws", "ak", "{}", "test-rob")
-        state_with_ws.workspace.active_credential_id = cid
-        
+        state_with_ws.workspace._active_credential_id = cid
+
         assert state_with_ws.prompt_context == "qm[test-ws][aws:test-rob]"
 
 

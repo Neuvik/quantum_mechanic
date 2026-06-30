@@ -33,7 +33,10 @@ def workspace(tmp_path):
         secret_data=json.dumps({"profile_name": "test"}),
         friendly_name="test-key",
     )
-    ws.active_credential_id = 1
+    # Private bypass: tests in this module mock the provider registry, so the
+    # real whoami verification can't run. Identity verification is covered by
+    # tests/unit/core/test_workspace_active_cred.py.
+    ws._active_credential_id = 1
     yield ws
     ws.close()
 
@@ -103,7 +106,9 @@ class TestTechniqueRunner:
             credential_type="api_key",
             secret_data="{}",
         )
-        ws.active_credential_id = 1
+        # Private bypass: this test exercises the runner's no-provider path,
+        # not credential identity verification.
+        ws._active_credential_id = 1
 
         registry = ProviderRegistry()
         # No OCI provider registered

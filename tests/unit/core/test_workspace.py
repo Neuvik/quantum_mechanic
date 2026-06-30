@@ -165,8 +165,14 @@ class TestWorkspaceCredentials:
         assert child.derived_from_id == parent_id
         assert "assumed from" in child.obtained_via
 
-    def test_active_credential_setter(self, workspace):
+    def test_active_credential_setter(self, workspace, monkeypatch):
         """Setting active credential validates the ID exists."""
+        # Bypass defense-in-depth whoami verification; this test exercises the
+        # ID-existence validation, not identity verification.
+        monkeypatch.setattr(
+            "quantum_mechanic.core.workspace.Workspace._verify_credential_identity",
+            lambda self, cred_id: None,
+        )
         cred_id = workspace.add_credential(
             provider="aws",
             credential_type="access_key",

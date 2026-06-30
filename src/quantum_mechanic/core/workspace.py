@@ -18,6 +18,7 @@ from typing import Any
 
 from quantum_mechanic.core.database import Database
 from quantum_mechanic.core.store.accounts import AccountStore
+from quantum_mechanic.core.store.activity import ActivityStore
 from quantum_mechanic.core.store.agents import AgentStore
 from quantum_mechanic.core.store.assets import AssetStore
 from quantum_mechanic.core.store.credentials import CredentialStore
@@ -38,6 +39,14 @@ from quantum_mechanic.core.store.models import (  # noqa: F401 — re-exported f
 )
 
 
+class CredentialMismatchError(RuntimeError):
+    """Raised when a stored credential's identity doesn't match live whoami.
+
+    Defense-in-depth check for credential-isolation regressions.
+    """
+    pass
+
+
 class Workspace:
     """High-level workspace operations.
 
@@ -51,7 +60,9 @@ class Workspace:
 
         # Load the UUID id assigned during Database._init_workspace
         row = self.db.fetchone("SELECT id FROM workspace WHERE name = ?", (name,))
-        self.id = row["id"] if row else name
+        if not row:
+            raise RuntimeError(f"Workspace metadata for '{name}' not found in database.")
+        self.id = row["id"]
 
         self._active_credential_id: int | None = None
 
@@ -61,6 +72,7 @@ class Workspace:
         # the ORM migration (AR-3) domain-by-domain.
         # --------------------------------------------------------
         self._accounts    = AccountStore(db, self.id)
+        self._activity    = ActivityStore(db, self.id)
         self._agents      = AgentStore(db, self.id)
         self._assets      = AssetStore(db, self.id)
         self._credentials = CredentialStore(db, self.id)
@@ -71,6 +83,22 @@ class Workspace:
     def on_agent_update(self, cb) -> None:
         """Register a callback for agent updates (used by SSE)."""
         self._agents.on_update(cb)
+
+    # ================================================================
+    # Activity Log
+    # ================================================================
+
+    def add_activity_log(
+        self, technique_id: str, level: str, message: str, data: dict | None = None
+    ) -> int:
+        """Record a structured log event in the workspace activity log."""
+        return self._activity.add(technique_id, level, message, data)
+
+    def list_activity_log(
+        self, technique_id: str | None = None, level: str | None = None, limit: int = 100
+    ) -> list[dict]:
+        """Return activity log entries."""
+        return self._activity.list(technique_id=technique_id, level=level, limit=limit)
 
 
     @classmethod
@@ -97,12 +125,72 @@ class Workspace:
 
     @active_credential_id.setter
     def active_credential_id(self, cred_id: int | None) -> None:
-        """Set the active credential by ID."""
-        if cred_id is not None:
-            row = self.db.fetchone("SELECT id FROM credentials WHERE id = ?", (cred_id,))
-            if row is None:
-                raise ValueError(f"Credential #{cred_id} not found")
+        """Set the active credential by ID.
+
+        Runs ``provider.whoami()`` against the stored credential and raises
+        :class:`CredentialMismatchError` if the live identity doesn't match the
+        stored ``friendly_name``. Defense-in-depth against any path that
+        smuggles local state into stored credentials.
+        """
+        if cred_id is None:
+            self._active_credential_id = None
+            return
+
+        row = self.db.fetchone("SELECT id FROM credentials WHERE id = ?", (cred_id,))
+        if row is None:
+            raise ValueError(f"Credential #{cred_id} not found")
+
+        self._verify_credential_identity(cred_id)
         self._active_credential_id = cred_id
+
+    def _verify_credential_identity(self, cred_id: int) -> None:
+        """Run provider.whoami against the stored credential; fail if it doesn't match."""
+        import json as _json
+
+        from quantum_mechanic.providers.aws.auth import AWSAuthProvider
+        from quantum_mechanic.providers.azure.auth import AzureAuthProvider
+        from quantum_mechanic.providers.entra.auth import EntraAuthProvider
+        from quantum_mechanic.providers.gcp.auth import GCPAuthProvider
+        from quantum_mechanic.providers.oci.auth import OCIAuthProvider
+
+        cred = self.get_credential(cred_id)
+        if cred is None:
+            raise ValueError(f"Credential id={cred_id} not found in workspace")
+
+        expected = cred.friendly_name
+
+        providers = {
+            "aws": AWSAuthProvider(),
+            "azure": AzureAuthProvider(),
+            "gcp": GCPAuthProvider(),
+            "oci": OCIAuthProvider(),
+            "entra": EntraAuthProvider(),
+        }
+        provider = providers.get(cred.provider)
+        if provider is None:
+            raise ValueError(f"Unknown provider for cred {cred_id}: {cred.provider}")
+
+        secret_str = self.get_credential_secret(cred_id) or "{}"
+        try:
+            secret_data = _json.loads(secret_str)
+        except _json.JSONDecodeError:
+            secret_data = {}
+
+        try:
+            session = provider.authenticate(secret_data)
+            result = provider.whoami(session)
+        except Exception as e:
+            raise CredentialMismatchError(
+                f"Credential id={cred_id} ({cred.provider}, {expected!r}) "
+                f"could not be loaded for verification: {e}"
+            ) from e
+
+        if result.friendly_name != expected:
+            raise CredentialMismatchError(
+                f"Credential id={cred_id} stored as {expected!r} but live whoami "
+                f"returned {result.friendly_name!r}. Refusing to substitute identity. "
+                "Re-import the credential or check for stale local CLI sessions."
+            )
 
     # ================================================================
     # Agent operations — delegates to AgentStore
@@ -182,6 +270,10 @@ class Workspace:
     def get_principal(self, provider: str, principal_id: str) -> Principal | None:
         """Retrieve a principal by provider and ID."""
         return self._principals.get(provider, principal_id)
+
+    def list_principals(self, *, provider: str | None = None) -> list[Principal]:
+        """List all principals, optionally filtered by provider."""
+        return self._principals.list(provider=provider)
 
     def add_credential(
         self,
@@ -314,6 +406,10 @@ class Workspace:
             evidence=evidence, mitre_id=mitre_id,
         )
 
+    def clear_findings(self, technique_id: str) -> None:
+        """Delete all findings for the given technique in the current workspace."""
+        self._findings.clear(technique_id)
+
     # ================================================================
     # Assets — delegates to AssetStore
     # ================================================================
@@ -369,6 +465,7 @@ class Workspace:
     def close(self) -> None:
         """Close the workspace database connection and all domain stores."""
         self._accounts.close()
+        self._activity.close()
         self._agents.close()
         self._assets.close()
         self._credentials.close()

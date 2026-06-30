@@ -54,7 +54,9 @@ def workspace(tmp_path):
         secret_data=json.dumps({"profile_name": "test"}),
         friendly_name="test-key",
     )
-    ws.active_credential_id = 1
+    # Private bypass: this contract harness mocks providers; identity
+    # verification is covered by tests/unit/core/test_workspace_active_cred.py.
+    ws._active_credential_id = 1
     yield ws
     ws.close()
 

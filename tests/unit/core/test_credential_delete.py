@@ -99,7 +99,9 @@ class TestCredentialDeleteWithLinkedData:
     def test_active_cred_cleared_on_delete(self, workspace_with_linked_data):
         """Active credential is cleared if the deleted one was active."""
         ws, cred_id = workspace_with_linked_data
-        ws.active_credential_id = cred_id
+        # Private bypass: this test isn't about identity verification, just
+        # about delete-clears-active-cred behavior.
+        ws._active_credential_id = cred_id
         assert ws.active_credential_id == cred_id
 
         ws.delete_credential(cred_id)
