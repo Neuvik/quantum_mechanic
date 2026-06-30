@@ -2767,6 +2767,12 @@ COMMAND_HELP: dict[str, CommandHelp] = {
                 synopsis="Interactive device-code login",
             ),
             SubcommandHelp(
+                name="entra interactive",
+                synopsis="Browser-based OAuth login (auth code + PKCE)",
+                args="[--tenant <id>] [--client <id>] [--resource <url>] [--timeout <secs>]",
+                example="acquire entra interactive --tenant contoso.onmicrosoft.com",
+            ),
+            SubcommandHelp(
                 name="entra arm",
                 synopsis="Pivot Entra credential into Azure ARM (FOCI)",
             ),
