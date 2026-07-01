@@ -4,9 +4,9 @@
 # TACTIC:    Collection (TA0009)
 # TECHNIQUE: T1213 — Data from Information Repositories
 #
-# PURPOSE:   Export Entra ID discovery data (users, groups, apps,
-#            role assignments) into BloodHound OpenGraph JSON so
-#            blue teams can visualize cloud attack paths alongside
+# PURPOSE:   Export Entra ID BULK ENUMERATION data (users, groups,
+#            apps, role assignments) into BloodHound OpenGraph JSON
+#            so blue teams can visualize cloud attack paths alongside
 #            their on-prem AD graphs.
 #
 # PROVIDERS: Entra
@@ -16,16 +16,29 @@
 #   technique runs (entra_enum_users, entra_enum_groups,
 #   entra_enum_apps, entra_enum_privileged_roles,
 #   entra_enum_group_members). Transforms each entity into a
-#   BloodHound OpenGraph node/edge and writes the result as
-#   `bloodhound.json` in the workspace loot directory.
+#   BloodHound OpenGraph node/edge and writes `bloodhound.json` in
+#   the workspace directory (~/.quantum_mechanic/workspaces/<name>/).
 #
-#   No live Graph calls. Purely transforms data already collected.
+#   Purely transforms data already collected — no live Graph calls.
+#   The operator must have run the bulk enumeration techniques FIRST
+#   before this export produces useful output. `discovery/whoami`
+#   and `discovery/entra_whoami` are deliberately EXCLUDED — they
+#   capture session context, not enumerated environment state.
+#
+# LIMITATIONS vs. AzureHound (SpecterOps):
+#   - No Azure RBAC (Owner/Contributor at subscription/RG level) —
+#     we cover directory roles only.
+#   - No cross-tenant sync or B2B trust edges.
+#   - No compute-specific edges (AzExecuteCommand, AzVMContributor).
+#   - No key vault / storage account node kinds.
+#   - Fewer AZUser properties (no manager, department, etc.).
+#   See `docs/wiki/BloodHound-Export.md` for the full comparison.
 #
 # DETECTION (Blue Team):
 #   N/A — fully offline transformation of locally-stored evidence.
 #
 # OPSEC:     None — local file write only.
-# SAFE:      Yes — read-only from workspace; writes to loot dir.
+# SAFE:      Yes — read-only from workspace; writes to workspace dir.
 # ================================================================
 
 from __future__ import annotations
@@ -209,8 +222,15 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         }
     }
 
-    out_dir = getattr(ctx.workspace, "workspace_dir", Path("."))
-    out_dir = Path(out_dir)
+    # Resolve the per-workspace directory. Mirror the convention used by
+    # core/loot.py (`<db_path.parent>/<db_path.stem>/`) so exports land
+    # next to loot instead of the shared workspaces/ parent.
+    try:
+        db_path = Path(ctx.workspace.db.db_path)
+        out_dir = db_path.parent / db_path.stem
+    except (AttributeError, TypeError, ValueError):
+        # Fallback for test fixtures without a real db attribute.
+        out_dir = Path(getattr(ctx.workspace, "workspace_dir", "."))
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "bloodhound.json"
 
@@ -220,9 +240,24 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         logger.warning("Failed to write bloodhound.json: %s", e)
         return {"error": str(e)}
 
-    return {
+    # Operator guidance: if the export is empty, explain why so it
+    # doesn't look like a broken tool.
+    guidance = None
+    if len(nodes) == 0 and len(edges) == 0:
+        guidance = (
+            "No enumeration evidence found. Run one or more bulk enum "
+            "techniques first (e.g. discovery/entra_enum_users, "
+            "discovery/entra_enum_privileged_roles) so this export has "
+            "data to transform. Session-context techniques like "
+            "discovery/whoami are intentionally excluded."
+        )
+
+    result = {
         "status": "success",
         "output_path": str(out_path),
         "node_count": len(nodes),
         "edge_count": len(edges),
     }
+    if guidance:
+        result["guidance"] = guidance
+    return result

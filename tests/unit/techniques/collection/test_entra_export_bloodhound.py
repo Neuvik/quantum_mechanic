@@ -13,8 +13,42 @@ def _make_ctx(tmpdir: Path, evidence_rows: list[dict]) -> MagicMock:
     ctx.provider_name = "entra"
     ctx.workspace = MagicMock()
     ctx.workspace.list_evidence.return_value = evidence_rows
-    ctx.workspace.workspace_dir = tmpdir
+    # Simulate a real workspace on-disk layout: tmpdir/ws.db lives alongside
+    # tmpdir/ws/ which is where per-workspace artifacts (loot, exports) go.
+    ctx.workspace.db.db_path = tmpdir / "ws.db"
+    ctx.workspace.workspace_dir = tmpdir  # legacy attribute, fallback path
     return ctx
+
+
+def test_empty_workspace_produces_guidance_message():
+    """OUTCOME: An empty export includes a 'guidance' field pointing to bulk enum.
+
+    ANTI-GAMIFICATION: We assert on the exact keyword 'discovery/entra_enum_users'
+    — if the guidance drops that reference the operator can't discover the fix.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        ctx = _make_ctx(tmp, [])
+        result = execute(ctx)
+        assert "guidance" in result
+        assert "discovery/entra_enum_users" in result["guidance"]
+
+
+def test_output_path_lands_in_per_workspace_directory():
+    """OUTCOME: bloodhound.json lands next to the loot dir (tmpdir/ws/), NOT
+    in the shared workspaces/ parent.
+
+    ANTI-GAMIFICATION: If someone reintroduces the workspace_dir bug where
+    the file lands in the parent directory, this test fails immediately.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        ctx = _make_ctx(tmp, [])
+        result = execute(ctx)
+        out_path = Path(result["output_path"])
+        # Must be inside a per-workspace subdir, not the tmp parent itself.
+        assert out_path.parent.name == "ws"
+        assert out_path.parent.parent == tmp
 
 
 def test_empty_workspace_produces_empty_graph():
