@@ -28,7 +28,12 @@ import httpx
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 from quantum_mechanic.providers.entra.foci import foci_expand
-from quantum_mechanic.providers.entra.graph import graph_list, _graph_call
+from quantum_mechanic.providers.entra.graph import (
+    GraphError,
+    _graph_call,
+    graph_error_to_result,
+    graph_list,
+)
 from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
 
 logger = logging.getLogger(__name__)
@@ -113,7 +118,12 @@ LOOT_SCHEMA = [
 ]
 
 def get_list(val: Any) -> list[str]:
-    """Coerce a value (list or comma-separated string) into a list of strings."""
+    """Coerce a value (list or comma-separated string) into a list of strings.
+
+    NOTE: When the caller has a policy dict, prefer `get_list_from_policy()`
+    which reads the structured `_list` field so entries with embedded commas
+    (e.g. named locations with CIDR lists) survive intact.
+    """
     if not val:
         return []
     if isinstance(val, list):
@@ -122,6 +132,16 @@ def get_list(val: Any) -> list[str]:
         return [x.strip() for x in val.split(",") if x.strip() and x.strip() != "None"]
     return []
 
+
+def get_list_from_policy(policy: dict, key: str) -> list[str]:
+    """Structured accessor: prefer `<key>_list` if present, fall back to
+    `get_list(policy[key])`. This is the CIDR-comma-safe path.
+    """
+    struct_key = f"{key}_list"
+    if isinstance(policy.get(struct_key), list):
+        return [str(x) for x in policy[struct_key] if x]
+    return get_list(policy.get(key))
+
 def format_conditional_access_policies_result(result: Any) -> None:
     """Formatter for Entra CA Policy enumeration results."""
     from rich.table import Table
@@ -129,13 +149,30 @@ def format_conditional_access_policies_result(result: Any) -> None:
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
+    status = data.get("status", "success" if "error" not in data else "error")
+    if status in ("denied", "error"):
+        console.print(f"  [red]✗[/red] {data.get('error', 'Unknown error')}")
+        if data.get("required_scope"):
+            console.print(f"    [dim]Required scope: {data['required_scope']}[/dim]")
+        return
     policies = data.get("policies", [])
-    
+
     if not policies:
-        console.print("  [dim]No Conditional Access policies found (or access denied).[/dim]")
+        console.print("  [dim]No Conditional Access policies found.[/dim]")
         return
 
     console.print(f"  [bold green]✓[/bold green] Discovered [bold cyan]{len(policies)}[/bold cyan] CA policy/policies")
+    # OR-across-categories semantics banner. A user is exempted from a CA
+    # policy if ANY single exclusion category matches — this is the
+    # attacker-useful mental model that isn't obvious from the raw JSON.
+    console.print(
+        "  [dim]Exclusion semantics: a subject is exempted if ANY single "
+        "exclusion category matches — user OR group OR role OR location OR app.[/dim]"
+    )
+    console.print(
+        "  [dim]Use `run discovery/entra_enum_ca_policy --name <policy>` or "
+        "`--id <id>` for full per-policy detail.[/dim]"
+    )
     
     tbl = Table(box=box.ROUNDED, border_style="dim")
     tbl.add_column("Policy Name", style="bold cyan")
@@ -217,7 +254,7 @@ def format_conditional_access_policies_result(result: Any) -> None:
         for pl in ex_platforms:
             bypass_tips.append(f"  • [bold red]Excluded Platform:[/bold red] Platform [white]'{pl}'[/white] is excluded from [cyan]'{name}'[/cyan]. Spoofing User-Agent bypasses controls ({controls}).")
 
-        ex_locations = get_list(p.get("excluded_locations"))
+        ex_locations = get_list_from_policy(p, "excluded_locations")
         for loc in ex_locations:
             bypass_tips.append(f"  • [bold red]Excluded Location:[/bold red] Location [white]'{loc}'[/white] is excluded from [cyan]'{name}'[/cyan]. Access from this network bypasses controls ({controls}).")
 
@@ -266,8 +303,8 @@ def tbl_data(policies: list[dict[str, Any]]) -> list[dict[str, Any]]:
         excl_platforms = ", ".join(exc_pl) if exc_pl else "None"
 
         # Location inclusions/exclusions
-        inc_loc = get_list(p.get("included_locations"))
-        exc_loc = get_list(p.get("excluded_locations"))
+        inc_loc = get_list_from_policy(p, "included_locations")
+        exc_loc = get_list_from_policy(p, "excluded_locations")
         incl_locations = ", ".join(inc_loc) if inc_loc else "All"
         excl_locations = ", ".join(exc_loc) if exc_loc else "None"
 
@@ -896,7 +933,10 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
     with httpx.Client(timeout=30) as http:
         ctx.info("Enumerating Conditional Access policies...")
-        policies = graph_list(http, "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies", headers)
+        try:
+            policies = graph_list(http, "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies", headers)
+        except GraphError as e:
+            return graph_error_to_result(e, parsed_policies=[])
         
         # Collect all unique GUIDs referenced in policy targets
         guids = set()
@@ -1211,6 +1251,11 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                 "exclude_platforms": ", ".join(exclude_platforms) if exclude_platforms else "None",
                 "included_locations": ", ".join(resolved_inc_loc) if resolved_inc_loc else "All",
                 "excluded_locations": ", ".join(resolved_exc_loc) if resolved_exc_loc else "None",
+                # Structured lists preserve entries containing CIDR commas — see B3.
+                # `get_list()` prefers these fields when present so callers no
+                # longer split a single "IPs (a, b)" string into three entries.
+                "included_locations_list": list(resolved_inc_loc) if resolved_inc_loc else [],
+                "excluded_locations_list": list(resolved_exc_loc) if resolved_exc_loc else [],
                 "client_app_types": ", ".join(client_apps) if client_apps else "All",
                 "sign_in_risk_levels": ", ".join(sign_in_risk_levels) if sign_in_risk_levels else "None",
                 "user_risk_levels": ", ".join(user_risk_levels) if user_risk_levels else "None",
@@ -1294,7 +1339,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                             mitre_id="T1580"
                         )
                     # Excluded locations
-                    ex_loc = get_list(p.get("excluded_locations"))
+                    ex_loc = get_list_from_policy(p, "excluded_locations")
                     if ex_loc:
                         ctx.workspace.add_finding(
                             technique_id="discovery/entra_enum_conditional_access_policies",

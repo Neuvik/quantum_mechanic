@@ -124,6 +124,7 @@ class Database:
 
         db = cls(db_path)
         db._apply_migrations()
+        db._ensure_workspace(name)
         return db
 
     @classmethod
@@ -147,6 +148,28 @@ class Database:
                 }
             )
         return workspaces
+
+    @classmethod
+    def delete(cls, name: str, workspace_dir: Path | None = None) -> None:
+        """Delete a workspace: removes the .db file and the sibling `<name>/`
+        directory that holds loot, exports, and other artifacts.
+
+        Raises FileNotFoundError if the workspace .db doesn't exist.
+        """
+        import shutil
+
+        base_dir = workspace_dir or _default_workspace_dir()
+        db_path = base_dir / f"{name}.db"
+        if not db_path.exists():
+            raise FileNotFoundError(f"Workspace '{name}' not found at {db_path}")
+
+        db_path.unlink()
+        # Remove sibling artifact dir: workspaces/<name>/ (loot, bloodhound.json,
+        # exports). The BloodHound export + loot writer both land here per the
+        # `<db_path.parent>/<db_path.stem>/` convention (core/loot.py:155).
+        artifact_dir = base_dir / name
+        if artifact_dir.exists() and artifact_dir.is_dir():
+            shutil.rmtree(artifact_dir)
 
     def execute(self, sql: str, params: tuple[Any, ...] | dict[str, Any] = ()) -> sqlite3.Cursor:
         """Execute a parameterized SQL statement.
@@ -246,3 +269,14 @@ class Database:
             (workspace_id, name, now, now),
         )
         self.commit()
+
+    def _ensure_workspace(self, name: str) -> None:
+        """Ensure the workspace metadata row exists, creating it if missing."""
+        row = self.fetchone("SELECT id FROM workspace WHERE name = ?", (name,))
+        if not row:
+            self._init_workspace(name)
+        elif row["id"] == name:
+            # Migration: if ID was incorrectly set to name, generate a new UUID.
+            new_id = str(uuid.uuid4())
+            self.execute("UPDATE workspace SET id = ? WHERE name = ?", (new_id, name))
+            self.commit()

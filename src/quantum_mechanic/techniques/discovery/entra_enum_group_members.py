@@ -29,7 +29,11 @@ import httpx
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import Parameter, ParameterType, technique
 from quantum_mechanic.providers.entra.foci import foci_expand
-from quantum_mechanic.providers.entra.graph import graph_list
+from quantum_mechanic.providers.entra.graph import (
+    GraphError,
+    graph_error_to_result,
+    graph_list,
+)
 from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
 
 logger = logging.getLogger(__name__)
@@ -53,6 +57,12 @@ def format_group_members_result(result: Any) -> None:
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
+    status = data.get("status", "success" if "error" not in data else "error")
+    if status in ("denied", "error"):
+        console.print(f"  [red]✗[/red] {data.get('error', 'Unknown error')}")
+        if data.get("required_scope"):
+            console.print(f"    [dim]Required scope: {data['required_scope']}[/dim]")
+        return
     members = data.get("members", [])
     group_name = data.get("group_name", "Unknown Group")
 
@@ -140,7 +150,12 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         transitive = bool(ctx.get_param("transitive"))
         endpoint = "transitiveMembers" if transitive else "members"
         url = f"https://graph.microsoft.com/v1.0/groups/{group_id}/{endpoint}"
-        members = graph_list(http, url, headers)
+        try:
+            members = graph_list(http, url, headers)
+        except GraphError as e:
+            return graph_error_to_result(
+                e, group_id=group_id, group_name=group_name, members=[],
+            )
 
         for m in members:
             mtype = m.get("@odata.type", "").split(".")[-1]

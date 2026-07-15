@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 from contextlib import nullcontext
@@ -32,6 +33,7 @@ from quantum_mechanic.shell import formatters
 from quantum_mechanic.shell.command_help import CommandHelp, FlagHelp, SubcommandHelp
 from quantum_mechanic.shell.commands_entra import acquire_entra, export_entra, import_entra
 
+logger = logging.getLogger(__name__)
 console = Console()
 
 
@@ -70,16 +72,24 @@ class ShellState:
         """The active transport (Local or Remote)."""
         return self._transport
 
-    def set_workspace(self, workspace: Workspace) -> None:
-        """Update the active workspace and re-initialise the local transport."""
+    def set_workspace(self, workspace: Workspace | None) -> None:
+        """Update the active workspace and re-initialise the local transport.
+
+        Passing None clears the active workspace (e.g. after deleting it) and
+        drops the transport — subsequent commands that need a workspace will
+        prompt the operator to create one.
+        """
         self.workspace = workspace
-        self._transport = LocalTransport(self.workspace, self.loader, self.registry)
+        if workspace is None:
+            self._transport = None
+        else:
+            self._transport = LocalTransport(workspace, self.loader, self.registry)
         self.active_credential_id = None
         self.active_credential_label = None
         self._extra_providers = []
 
         # Re-register callback if one was active
-        if self._agent_update_callback:
+        if self._agent_update_callback and self.workspace is not None:
             self.workspace.on_agent_update(self._agent_update_callback)
 
     def on_agent_update(self, callback) -> None:
@@ -188,8 +198,29 @@ def cmd_workspace(state: ShellState, args: list[str]) -> None:
             for ws in workspaces:
                 console.print(f"  • {ws['name']}  [dim]({ws['modified']})[/dim]")
 
+    elif subcmd == "delete":
+        if len(args) < 2:
+            console.print("  Usage: workspace delete <name>", style="yellow")
+            return
+        name = args[1]
+        # Guard: if the workspace being deleted is the currently active one,
+        # close and clear session state first so the .db file isn't held open.
+        if state.workspace is not None and state.workspace.name == name:
+            state.workspace.close()
+            state.set_workspace(None)
+        try:
+            Workspace.delete(name, workspace_dir=state.workspace_dir)
+            console.print(f"  [green]✓[/green] Deleted workspace: [bold]{name}[/bold]")
+        except FileNotFoundError:
+            console.print(f"  [red]✗[/red] Workspace '{name}' not found", style="red")
+        except Exception as e:
+            console.print(f"  [red]✗[/red] Could not delete workspace '{name}': {e}", style="red")
+
     else:
-        console.print(f"  Unknown subcommand: {subcmd}. Use: create, load, list", style="yellow")
+        console.print(
+            f"  Unknown subcommand: {subcmd}. Use: create, load, list, delete",
+            style="yellow",
+        )
 
 
 def cmd_import(state: ShellState, args: list[str]) -> None:
@@ -266,11 +297,33 @@ def _validate_and_import(
         return
 
     try:
-        provider_impl.authenticate(secret)
+        session = provider_impl.authenticate(secret)
     except Exception as e:
         friendly_msg = _friendly_error(e, provider)
         console.print(f"  [red]✗[/red] {friendly_msg}")
         return
+
+    # --------------------------------------------------------
+    # Capture the stable identity claim (principal_id, e.g. the ARN
+    # for AWS) via whoami so the isolation guard has something to
+    # verify against later. Failure here shouldn't block import —
+    # the credential authenticated fine and whoami quirks are their
+    # own class of problem; skip identity capture and note it.
+    # --------------------------------------------------------
+    principal_id: str | None = None
+    try:
+        who = provider_impl.whoami(session)
+        candidate = getattr(who, "principal_id", None)
+        # Only accept a real string — a MagicMock or other object here means
+        # whoami was mocked-away in tests, or the provider's whoami didn't
+        # populate the field. In either case we treat identity as unknown
+        # and fall through to the backward-compat verification path.
+        if isinstance(candidate, str) and candidate:
+            principal_id = candidate
+    except Exception as e:
+        # Non-fatal — cred still stores, just without a stable identity.
+        # verify_credential_identity will recover it on first use.
+        logger.debug("whoami at import failed for %s: %s", provider, e)
 
     # --------------------------------------------------------
     # Credentials are valid — store them.
@@ -280,6 +333,7 @@ def _validate_and_import(
         credential_type=credential_type,
         secret_data=json.dumps(secret),
         friendly_name=friendly,
+        principal_id=principal_id,
     )
     console.print(
         f"  [green]✓[/green] Imported {provider.upper()} credential #{cred_id}: {friendly}"
@@ -449,8 +503,45 @@ def _import_oci(state: ShellState, opts: dict[str, str]) -> None:
     _validate_and_import(state, "oci", "api_key", secret, friendly)
 
 
+def _cmd_creds_detail(state: ShellState, cred_id: int) -> None:
+    """Show per-token detail for one credential (expirations, scopes, roles).
+
+    Entra token_store creds get full per-token breakdown; other providers
+    render as a simple key/value block since they have no multi-token
+    substructure to unfold.
+    """
+    if state.workspace is None:
+        console.print("  [red]✗[/red] No active workspace.")
+        return
+    creds = state.transport.list_credentials() if state.transport else []
+    cred = next((c for c in creds if c.get("id") == cred_id), None)
+    if cred is None:
+        console.print(f"  [red]✗[/red] Credential #{cred_id} not found")
+        return
+
+    provider = cred.get("provider")
+    ctype = cred.get("credential_type")
+
+    if provider == "entra" and ctype == "token_store":
+        import json as _json
+        from quantum_mechanic.providers.entra.token_store import EntraTokenStore as _ETS
+        try:
+            raw = state.workspace.get_credential_secret(cred_id)
+            data = _json.loads(raw) if raw else {}
+            store = _ETS.from_dict(data.get("token_store", data))
+            details = store.token_details()
+        except Exception as e:
+            console.print(f"  [red]✗[/red] Failed to load token store: {e}")
+            return
+        formatters.format_credential_detail(cred, details)
+        return
+
+    # Non-entra fallback: dump the row fields the operator can act on.
+    formatters.format_credential_detail(cred, [])
+
+
 def cmd_creds(state: ShellState, args: list[str]) -> None:
-    """List or delete credentials: creds, creds delete <id>."""
+    """List or delete credentials: creds, creds <id>, creds delete <id>."""
     if state.transport is None:
         console.print("  [red]✗[/red] No active workspace.")
         return
@@ -459,6 +550,12 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
     err = _check_subcommand("creds", args)
     if err:
         console.print(err)
+        return
+
+    # `creds <id>` — bare int arg → detail view for one credential.
+    if args and args[0].isdigit():
+        cred_id = int(args[0])
+        _cmd_creds_detail(state, cred_id)
         return
 
     # Handle subcommands
@@ -505,7 +602,21 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
                         continue
                     data = _json.loads(raw)
                     store = _ETS.from_dict(data.get("token_store", data))
-                    cred["_token_summary"] = store.token_summary()
+                    # Compact summary + soonest-expiring AT so the operator
+                    # knows at a glance how much time is left on the active
+                    # working token. Full breakdown via `creds <id>`.
+                    summary = store.token_summary()
+                    ats = [
+                        d for d in store.token_details()
+                        if d.get("token_type") == "access_token"
+                        and not d.get("is_expired")
+                        and d.get("minutes_remaining") is not None
+                    ]
+                    if ats:
+                        soonest = min(ats, key=lambda d: d["minutes_remaining"])
+                        mins = int(soonest["minutes_remaining"])
+                        summary = f"{summary}  ({soonest['kind'].split()[0]} {mins}m)"
+                    cred["_token_summary"] = summary
                     # Recover identity from token claims if stored name is generic.
                     current_name = cred.get("friendly_name", "")
                     import re as _re
@@ -822,6 +933,111 @@ def _prompt_param(name: str, example: str | None = None) -> str | None:
         return None
 
 
+def _maybe_offer_scope_retry(state: "ShellState", result, technique_id: str, params: dict):
+    """If `result` is a scope-denied Entra technique with a FOCI RT available,
+    prompt the operator to attempt FOCI scope expansion and re-run once.
+
+    Returns the fresh TechniqueResult on retry (success or a new failure), or
+    None to keep the original denied result. Never raises — prompt errors,
+    non-entra creds, and missing RTs all fall through as no-ops.
+    """
+    from quantum_mechanic.core.runner import TechniqueResult
+
+    if not isinstance(result, TechniqueResult):
+        return None
+    if result.status != "denied":
+        return None
+    if not isinstance(result.data, dict):
+        return None
+    required_scope = result.data.get("required_scope")
+    if not required_scope:
+        return None
+    if state.active_credential_id is None or state.transport is None:
+        return None
+
+    # Active cred must be entra.
+    _creds = state.transport.list_credentials() if state.transport else []
+    _cred = next((c for c in _creds if c.get("id") == state.active_credential_id), None)
+    if _cred is None or _cred.get("provider") != "entra":
+        return None
+
+    # Load the store and verify it has a FOCI RT — no RT means nothing to expand.
+    try:
+        from quantum_mechanic.providers.entra.scope_exchange import try_acquire_scope
+        from quantum_mechanic.providers.entra.token_store import EntraTokenStore
+        raw = state.workspace.get_credential_secret(state.active_credential_id) if state.workspace else None
+        if not raw:
+            return None
+        data = json.loads(raw)
+        store = EntraTokenStore.from_dict(data.get("token_store", data))
+    except Exception:
+        return None
+    if store.foci_refresh_token() is None:
+        return None
+
+    # Prompt the operator. Rich's Confirm.ask blocks on stdin — safe now that
+    # the Live spinner is torn down.
+    from rich.prompt import Confirm
+    try:
+        answered_yes = Confirm.ask(
+            f"  [yellow]?[/yellow] Try FOCI scope expansion for "
+            f"[bold]{required_scope}[/bold] and re-run?",
+            default=True,
+        )
+    except (EOFError, KeyboardInterrupt):
+        return None
+    if not answered_yes:
+        return None
+
+    console.print(f"  [dim]→ Attempting FOCI expansion for {required_scope}…[/dim]")
+    exchange = try_acquire_scope(store, required_scope)
+
+    if exchange.status != "granted":
+        note_map = {
+            "consent_required": (
+                "No FOCI client has admin consent for this scope on this "
+                "tenant. Requires an app registration with the role granted."
+            ),
+            "invalid_grant": (
+                "FOCI RT is dead (expired/revoked/CA-blocked). Re-authenticate "
+                "via `acquire entra device_code` / `interactive`."
+            ),
+            "no_rt": "No FOCI RT — nothing to expand.",
+            "unknown": f"AAD returned no grant. Last error: {exchange.last_error}",
+        }
+        console.print(
+            f"  [red]✗[/red] FOCI expansion did not grant [bold]{required_scope}[/bold] "
+            f"([bold]{exchange.status}[/bold]).\n"
+            f"    [dim]{note_map.get(exchange.status, exchange.last_error)}[/dim]"
+        )
+        return None
+
+    # Grant! Persist the enriched store back to the credential, then re-run.
+    try:
+        state.transport.update_credential(
+            state.active_credential_id,
+            secret_data=json.dumps({"token_store": store.to_dict()}),
+        )
+    except Exception as e:
+        console.print(f"  [yellow]⚠[/yellow]  Scope granted but persist failed: {e}")
+
+    console.print(
+        f"  [green]✓[/green] FOCI granted [bold]{required_scope}[/bold] — "
+        "re-running technique with new scope…"
+    )
+    try:
+        return state.transport.run_technique(
+            technique_id,
+            params=params if params else None,
+            credential_id=state.active_credential_id,
+            extra_providers=state._extra_providers or None,
+            auto_scope=False,  # never chain a second retry
+        )
+    except Exception as e:
+        console.print(f"  [red]✗[/red] Re-run raised: {e}")
+        return None
+
+
 def cmd_run(state: ShellState, args: list[str]) -> None:
     """Run a technique: run <technique_id> [--param key=value ...]"""
     if state.transport is None:
@@ -842,6 +1058,9 @@ def cmd_run(state: ShellState, args: list[str]) -> None:
     # --------------------------------------------------------
     params: dict[str, str] = {}
     note = None
+    # OPSEC-sensitive engagements can disable the semi-automatic FOCI
+    # scope expansion by passing --no-auto-scope.
+    auto_scope = True
     i = 1
     while i < len(args):
         arg = args[i]
@@ -854,6 +1073,9 @@ def cmd_run(state: ShellState, args: list[str]) -> None:
         elif arg == "--note" and i + 1 < len(args):
             note = args[i + 1]
             i += 2
+        elif arg == "--no-auto-scope":
+            auto_scope = False
+            i += 1
         elif "=" in arg and not arg.startswith("-"):
             k, v = arg.split("=", 1)
             params[k.strip()] = v.strip()
@@ -991,6 +1213,19 @@ def cmd_run(state: ShellState, args: list[str]) -> None:
     worker.join()
     if _exc[0] is not None:
         raise _exc[0]
+
+    # ── Semi-automatic FOCI scope retry (Task #3) ───────────────────────────
+    # If the technique came back denied with a specific required_scope and
+    # the active cred is an entra store with a FOCI RT, offer to expand
+    # the scope and re-run once. We do this at the shell layer (rather than
+    # inside the runner's worker thread) so the Live spinner is fully torn
+    # down before we block on operator input.
+    if auto_scope:
+        retried = _maybe_offer_scope_retry(
+            state, _result[0], technique_id, params
+        )
+        if retried is not None:
+            _result[0] = retried
 
     formatters.format_technique_result(_result[0])
 

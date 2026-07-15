@@ -1,6 +1,6 @@
 [project]
 name = "quantum-mechanic"
-version = "0.1.0"
+version = "1.0-rc0"
 description = "Offensive security assessment framework"
 authors = [
     { name = "Moses Frost", email = "moses@neuvik.com" },
@@ -24,6 +24,7 @@ dependencies = [
     "fastapi[all]>=0.115.0",
     "uvicorn[standard]>=0.34.0",
     "httpx>=0.28.0",
+    "defusedxml>=0.7.1",
     "urllib3>=2.0.0",
     "rich>=14.0.0",
     "azure-mgmt-authorization>=4.0.0",

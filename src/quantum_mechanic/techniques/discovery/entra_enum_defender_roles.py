@@ -38,7 +38,11 @@ from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 from quantum_mechanic.providers.entra import eam
 from quantum_mechanic.providers.entra.foci import foci_expand
-from quantum_mechanic.providers.entra.graph import graph_list
+from quantum_mechanic.providers.entra.graph import (
+    GraphError,
+    graph_error_to_result,
+    graph_list,
+)
 from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
 
 logger = logging.getLogger(__name__)
@@ -61,9 +65,14 @@ def format_defender_roles(result: Any) -> None:
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
-    if not isinstance(data, dict) or "error" in data:
-        msg = data.get("error", "Unknown error") if isinstance(data, dict) else "Unknown error"
-        console.print(f"  [red]✗[/red] {msg}")
+    if not isinstance(data, dict):
+        console.print("  [red]✗[/red] Unknown error")
+        return
+    status = data.get("status", "success" if "error" not in data else "error")
+    if status in ("denied", "error"):
+        console.print(f"  [red]✗[/red] {data.get('error', 'Unknown error')}")
+        if data.get("required_scope"):
+            console.print(f"    [dim]Required scope: {data['required_scope']}[/dim]")
         return
 
     rows = data.get("assignments", [])
@@ -129,15 +138,53 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
     headers = {"Authorization": f"Bearer {token.value}"}
 
-    url = (
-        "https://graph.microsoft.com/v1.0/security/roleAssignments"
-        "?$expand=principal,roleDefinition"
-    )
+    # Microsoft moved this endpoint. Try in order: current /v1.0 → beta →
+    # newer identities path. First one to return 200 wins. If all fail,
+    # the technique reports 'unavailable' (a real terminal state) rather
+    # than pretending 0 results were found.
+    candidates = [
+        "https://graph.microsoft.com/v1.0/security/roleAssignments?$expand=principal,roleDefinition",
+        "https://graph.microsoft.com/beta/security/roleAssignments?$expand=principal,roleDefinition",
+        "https://graph.microsoft.com/v1.0/security/identities/roleAssignments?$expand=principal,roleDefinition",
+        "https://graph.microsoft.com/beta/security/identities/roleAssignments?$expand=principal,roleDefinition",
+    ]
 
     results: list[dict[str, Any]] = []
+    last_error: GraphError | None = None
+    working_url: str | None = None
     try:
         with httpx.Client(timeout=30) as http:
-            assignments = graph_list(http, url, headers)
+            assignments: list[dict[str, Any]] | None = None
+            for candidate in candidates:
+                try:
+                    assignments = graph_list(http, candidate, headers)
+                    working_url = candidate
+                    break
+                except GraphError as e:
+                    last_error = e
+                    # HTTP 400/404 on this endpoint means the segment doesn't
+                    # exist at this path — try the next candidate. 403 is a
+                    # real denial we surface directly.
+                    if e.status in (400, 404):
+                        continue
+                    raise
+            if assignments is None:
+                # Every candidate returned 400/404 — Graph has removed this
+                # segment for our token model. Surface 'unavailable' so
+                # operators don't confuse it with a successful zero-result.
+                return {
+                    "status": "error",
+                    "error": (
+                        "Defender roleAssignments endpoint is unavailable in "
+                        "this tenant. Microsoft has repeatedly moved the "
+                        "Graph segment for Defender XDR RBAC — see "
+                        "docs/wiki/BloodHound-Export.md and the endpoint "
+                        "audit issue in the kanban. Last Graph response: "
+                        f"{last_error!s}"
+                    ),
+                    "error_code": "EndpointUnavailable",
+                    "assignments": [],
+                }
             for a in assignments:
                 role_def = a.get("roleDefinition", {}) or {}
                 role_name = role_def.get("displayName", "Unknown Role")
@@ -160,12 +207,16 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                     "principal_type": p_type,
                     "assignment_id": a.get("id"),
                 })
+    except GraphError as e:
+        logger.info("Defender roles enumeration returned %s: %s", type(e).__name__, e)
+        return graph_error_to_result(e, assignments=[])
     except Exception as e:
         logger.warning("Defender role enumeration failed: %s", e)
-        return {"error": str(e), "assignments": []}
+        return {"status": "error", "error": str(e), "assignments": []}
 
     return {
         "status": "success",
         "tenant_id": store.tenant_id,
+        "endpoint_used": working_url,
         "assignments": results,
     }

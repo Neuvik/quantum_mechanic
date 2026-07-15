@@ -174,6 +174,8 @@ class LocalTransport(Transport):
         params: dict | None = None,
         on_event: EventCallback | None = None,
         extra_providers: list[str] | None = None,
+        auto_scope: bool = True,
+        on_prompt=None,
     ) -> TechniqueResult:
         """Execute a technique in-process via TechniqueRunner.
 
@@ -193,6 +195,8 @@ class LocalTransport(Transport):
                 params=params,
                 on_event=on_event,
                 extra_providers=extra_providers,
+                auto_scope=auto_scope,
+                on_prompt=on_prompt,
             )
         except Exception as exc:  # pragma: no cover — runner should catch all
             return TechniqueResult(
@@ -225,7 +229,7 @@ class LocalTransport(Transport):
         """Returns basic workspace metadata."""
         return {
             "name": self._workspace.name,
-            "id": self._workspace.name,
+            "id": self._workspace.id,
             "active_credential_id": self._workspace.active_credential_id,
         }
 

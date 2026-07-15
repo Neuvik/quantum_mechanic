@@ -33,7 +33,11 @@ from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 from quantum_mechanic.providers.entra import eam
 from quantum_mechanic.providers.entra.foci import foci_expand
-from quantum_mechanic.providers.entra.graph import graph_list
+from quantum_mechanic.providers.entra.graph import (
+    GraphError,
+    graph_error_to_result,
+    graph_list,
+)
 from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
 
 logger = logging.getLogger(__name__)
@@ -59,6 +63,12 @@ def format_privileged_roles(result: Any) -> None:
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
+    status = data.get("status", "success" if "error" not in data else "error")
+    if status in ("denied", "error"):
+        console.print(f"  [red]✗[/red] {data.get('error', 'Unknown error')}")
+        if data.get("required_scope"):
+            console.print(f"    [dim]Required scope: {data['required_scope']}[/dim]")
+        return
     assignments = data.get("assignments", [])
 
     if not assignments:
@@ -144,12 +154,18 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     with httpx.Client(timeout=30) as http:
         ctx.info("Resolving directory role definitions...")
         # 1. Get role definitions to map IDs
-        role_defs = graph_list(http, role_defs_url, headers)
+        try:
+            role_defs = graph_list(http, role_defs_url, headers)
+        except GraphError as e:
+            return graph_error_to_result(e, assignments=[])
         id_to_role = {rd["id"]: rd["displayName"] for rd in role_defs}
 
         ctx.info("Enumerating active role assignments...")
         # 2. Get active role assignments
-        assignments = graph_list(http, role_assignments_url, headers)
+        try:
+            assignments = graph_list(http, role_assignments_url, headers)
+        except GraphError as e:
+            return graph_error_to_result(e, assignments=[])
 
         for a in assignments:
             role_id = a.get("roleDefinitionId")
@@ -181,30 +197,31 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         try:
             ctx.info("Probing PIM eligibility schedules...")
             eligible = graph_list(http, role_eligibility_url, headers)
-            for e in eligible:
-                role_id = e.get("roleDefinitionId")
-                role_name = id_to_role.get(role_id, "Unknown Role")
-                tier = eam.classify_role_name(role_name)
+        except GraphError as ex:
+            ctx.debug(f"PIM eligibility probe denied/failed: {ex}")
+            eligible = []
+        for e in eligible:
+            role_id = e.get("roleDefinitionId")
+            role_name = id_to_role.get(role_id, "Unknown Role")
+            tier = eam.classify_role_name(role_name)
 
-                principal = e.get("principal", {})
-                p_type = principal.get("@odata.type", "").split(".")[-1] or "Unknown"
-                p_name = (
-                    principal.get("userPrincipalName")
-                    or principal.get("displayName")
-                    or e.get("principalId")
-                )
+            principal = e.get("principal", {})
+            p_type = principal.get("@odata.type", "").split(".")[-1] or "Unknown"
+            p_name = (
+                principal.get("userPrincipalName")
+                or principal.get("displayName")
+                or e.get("principalId")
+            )
 
-                results.append({
-                    "tier": tier,
-                    "role_name": role_name,
-                    "role_id": role_id,
-                    "principal_name": p_name,
-                    "principal_id": e.get("principalId"),
-                    "principal_type": p_type,
-                    "assignment_type": "Eligible (PIM)"
-                })
-        except Exception as ex:
-            ctx.debug(f"PIM eligibility probe failed (likely insufficient permissions): {ex}")
+            results.append({
+                "tier": tier,
+                "role_name": role_name,
+                "role_id": role_id,
+                "principal_name": p_name,
+                "principal_id": e.get("principalId"),
+                "principal_type": p_type,
+                "assignment_type": "Eligible (PIM)"
+            })
 
     return {
         "provider": "entra",

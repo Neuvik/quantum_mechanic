@@ -33,7 +33,11 @@ import httpx
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 from quantum_mechanic.providers.entra.foci import foci_expand
-from quantum_mechanic.providers.entra.graph import graph_list
+from quantum_mechanic.providers.entra.graph import (
+    GraphError,
+    graph_error_to_result,
+    graph_list,
+)
 from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
 
 _GROUPS_URL = (
@@ -78,8 +82,14 @@ def _format_entra_enum_groups(result: Any) -> None:
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
-    if not isinstance(data, dict) or "error" in data:
+    if not isinstance(data, dict):
+        console.print("  [red]✗[/red] Unknown error")
+        return
+    status = data.get("status", "success" if "error" not in data else "error")
+    if status in ("denied", "error"):
         console.print(f"  [red]✗[/red] {data.get('error', 'Unknown error')}")
+        if data.get("required_scope"):
+            console.print(f"    [dim]Required scope: {data['required_scope']}[/dim]")
         return
 
     groups = data.get("groups", [])
@@ -136,9 +146,11 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
     headers = {"Authorization": f"Bearer {token.value}"}
 
-    with httpx.Client(timeout=60) as http:
-        groups = graph_list(http, _GROUPS_URL, headers)
-
+    try:
+        with httpx.Client(timeout=60) as http:
+            groups = graph_list(http, _GROUPS_URL, headers)
+    except GraphError as e:
+        return graph_error_to_result(e, groups=[], total=0, by_type={})
 
     by_type: dict[str, int] = {}
     for g in groups:
@@ -147,9 +159,16 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         by_type[gtype] = by_type.get(gtype, 0) + 1
 
     return {
+        "status": "success",
         "provider": "entra",
         "tenant_id": store.tenant_id,
         "total": len(groups),
         "by_type": by_type,
         "groups": groups,
+        "next_steps": [
+            {
+                "command": "run collection/entra_export_bloodhound",
+                "reason": "Export collected groups into BloodHound OpenGraph.",
+            },
+        ] if groups else [],
     }

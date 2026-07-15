@@ -35,7 +35,7 @@ class TechniqueResult:
 
     technique_id: str
     provider: str
-    status: str  # "success", "error", "skipped"
+    status: str  # "success", "partial", "denied", "error", "skipped" — see docs/architecture/spec.md §3.6
     operator: str | None = None  # authenticated operator (audit attribution)
     data: Any = None  # Technique-specific result data
     error: str | None = None
@@ -106,8 +106,24 @@ class TechniqueRunner:
         operator: str | None = None,
         on_event: EventCallback | None = None,
         extra_providers: list[str] | None = None,
+        auto_scope: bool = True,
+        on_prompt: Callable[[str], bool] | None = None,
     ) -> TechniqueResult:
-        """Execute a technique."""
+        """Execute a technique.
+
+        auto_scope:
+            When True and the technique returns status="denied" with a
+            required_scope AND the active session has a FOCI RT AND
+            on_prompt is provided, prompt the operator to attempt scope-
+            aware FOCI expansion and re-run the technique once. Set False
+            for OPSEC-sensitive engagements where auto-token-acquisition
+            is unwanted.
+        on_prompt:
+            Callable that takes a prompt string and returns True (yes) or
+            False (no). Only wired by the interactive shell; agent/daemon
+            modes leave it None and the retry is skipped.
+        """
+        logger.debug("Runner: Starting technique %s", technique_id)
         start = time.monotonic()
 
         # 1. Resolve & Validate
@@ -169,8 +185,48 @@ class TechniqueRunner:
 
         # 3. Execute
         try:
+            # Clear previous findings to prevent duplicate or stale findings accumulation
+            self.workspace.clear_findings(technique_id)
+
             result_data = registered.function(ctx)
+
+            # --- SEMI-AUTOMATIC FOCI SCOPE EXPANSION (Task #3) ---
+            # If the technique came back denied with a specific required_scope
+            # AND the session has a FOCI RT AND we have a way to prompt the
+            # operator AND auto_scope wasn't disabled, offer to expand the
+            # scope and retry once. Retry mutates ctx.session in place so the
+            # subsequent level-up path picks up the new token automatically.
+            if auto_scope and on_prompt is not None:
+                retry_data = self._maybe_scope_retry(
+                    registered, ctx, cred, result_data, on_prompt
+                )
+                if retry_data is not None:
+                    result_data = retry_data
+
             duration_ms = int((time.monotonic() - start) * 1000)
+
+            # --- LEVEL UP CREDENTIAL ---
+            # If the session store is "dirty" (e.g. gained an ARM token during an azure pivot),
+            # save it back to the database.
+            session_to_save = ctx.session
+            # If session is wrapped (e.g. EntraTokenCredential shim), get the underlying store
+            if hasattr(session_to_save, "_store"):
+                session_to_save = session_to_save._store
+
+            if cred and hasattr(session_to_save, "_dirty") and session_to_save._dirty:
+                logger.debug("Runner: Session is dirty, updating credential #%d", cred.id)
+                try:
+                    # We only support leveling up EntraTokenStore for now
+                    if hasattr(session_to_save, "to_dict"):
+                        self.workspace.update_credential_secret(
+                            cred.id,
+                            json.dumps({"token_store": session_to_save.to_dict()})
+                        )
+                    # Reset dirty flag after successful save
+                    if hasattr(session_to_save, "_dirty"):
+                        session_to_save._dirty = False
+                except Exception as save_err:
+                    logger.warning("Credential level-up failed: %s", save_err)
 
             loot_dir = self._handle_post_execution(
                 registered, technique_id, cred, result_data, duration_ms, ctx
@@ -185,18 +241,36 @@ class TechniqueRunner:
                 data={"duration_ms": duration_ms, "api_calls": ctx.api_call_count}
             ))
 
+            # Derive TechniqueResult.status from the technique's own status
+            # field so an inner {"status": "denied"} propagates to a red ✗
+            # instead of a green ✓. Techniques predating the contract that
+            # don't set "status" are treated as "success" for backward-compat.
+            inner_status = None
+            inner_error = None
+            if isinstance(result_data, dict):
+                inner_status = result_data.get("status")
+                inner_error = result_data.get("error")
+            if inner_status in ("denied", "error", "partial", "success"):
+                outer_status = inner_status
+            elif inner_error:
+                outer_status = "error"
+            else:
+                outer_status = "success"
+
             return TechniqueResult(
                 technique_id=technique_id,
                 provider=effective_provider or (cred.provider if cred else "none"),
                 operator=operator,
-                status="success",
+                status=outer_status,
                 data=result_data,
+                error=inner_error if outer_status in ("denied", "error") else None,
                 api_calls=ctx.api_call_count,
                 duration_ms=duration_ms,
                 loot_path=loot_dir,
                 formatter_func=registered.metadata.formatter_func,
                 loot_schema=registered.metadata.loot_schema,
                 loot_items_key=registered.metadata.loot_items_key,
+                params=ctx.params,
             )
         except Exception as e:
             duration_ms = int((time.monotonic() - start) * 1000)
@@ -214,7 +288,7 @@ class TechniqueRunner:
 
             return TechniqueResult(
                 technique_id=technique_id,
-                provider=cred.provider,
+                provider=cred.provider if cred else "none",
                 operator=operator,
                 status="error",
                 error=friendly,
@@ -223,7 +297,105 @@ class TechniqueRunner:
                 formatter_func=registered.metadata.formatter_func,
                 loot_schema=registered.metadata.loot_schema,
                 loot_items_key=registered.metadata.loot_items_key,
+                params=ctx.params,
             )
+
+    def _maybe_scope_retry(
+        self,
+        registered,
+        ctx,
+        cred,
+        denied_result,
+        on_prompt: "Callable[[str], bool]",
+    ) -> dict | None:
+        """If `denied_result` is a scope-denial and the session can attempt
+        FOCI expansion, prompt the operator and (on yes) retry the technique.
+
+        Returns the fresh result dict when the retry ran, or None to keep the
+        original denied result. Never raises — a failed prompt/expansion just
+        leaves the operator with the original denial and an appended note.
+        """
+        # Only consider scope-shaped denials from Entra creds.
+        if not isinstance(denied_result, dict):
+            return None
+        if denied_result.get("status") != "denied":
+            return None
+        required_scope = denied_result.get("required_scope")
+        if not required_scope:
+            return None
+        if cred is None or cred.provider != "entra":
+            return None
+
+        # Session must be an EntraTokenStore with a FOCI RT — anything else
+        # has no material to expand.
+        session = ctx.session
+        if hasattr(session, "_store"):
+            session = session._store
+        try:
+            from quantum_mechanic.providers.entra.scope_exchange import try_acquire_scope
+            from quantum_mechanic.providers.entra.token_store import EntraTokenStore
+        except ImportError:
+            return None
+        if not isinstance(session, EntraTokenStore):
+            return None
+        if session.foci_refresh_token() is None:
+            return None
+
+        try:
+            answered_yes = bool(on_prompt(
+                f"    ↳ Try FOCI expansion for scope [bold]{required_scope}[/bold]? [Y/n]: "
+            ))
+        except Exception as e:
+            logger.debug("scope-retry prompt raised: %s", e)
+            return None
+        if not answered_yes:
+            return None
+
+        exchange = try_acquire_scope(session, required_scope)
+        if exchange.status != "granted":
+            # Annotate the original denial so the operator sees why the retry
+            # didn't help, without hiding the underlying scope error.
+            note_map = {
+                "consent_required": (
+                    "FOCI expansion attempted but no family client has admin "
+                    "consent for this scope on this tenant. Requires app "
+                    "registration with the role granted."
+                ),
+                "invalid_grant": (
+                    "FOCI RT is invalid (expired/revoked/CA-blocked). Re-authenticate "
+                    "via `acquire entra device_code` / `interactive`."
+                ),
+                "no_rt": (
+                    "No FOCI RT in the active store — nothing to expand."
+                ),
+                "unknown": (
+                    f"FOCI expansion returned no grant. Last AAD error: "
+                    f"{exchange.last_error}"
+                ),
+            }
+            note = note_map.get(exchange.status, exchange.last_error)
+            enriched = dict(denied_result)
+            enriched["scope_retry"] = {
+                "status": exchange.status,
+                "note": note,
+                "clients_tried": [c[1] for c in exchange.tried_clients],
+            }
+            return enriched
+
+        # Grant! Re-run the technique with the enriched session.
+        try:
+            fresh_result = registered.function(ctx)
+        except Exception as e:
+            logger.warning("Post-scope-retry re-run raised: %s", e)
+            enriched = dict(denied_result)
+            enriched["scope_retry"] = {
+                "status": "granted_but_rerun_failed",
+                "note": f"Scope was granted but the technique re-run raised: {e}",
+            }
+            return enriched
+        if isinstance(fresh_result, dict):
+            fresh_result.setdefault("scope_retry", {"status": "granted"})
+        return fresh_result
 
     def _resolve_all(
         self,
@@ -268,7 +440,11 @@ class TechniqueRunner:
         # matches the credential, fall back to one from extra_providers.
         allowed = set(registered.metadata.providers)
         effective_provider = cred.provider
-        if cred.provider not in allowed and extra_providers:
+
+        # Cloud Bridge: allow entra credentials to satisfy azure techniques
+        if cred.provider == "entra" and "azure" in allowed:
+            effective_provider = "azure"
+        elif cred.provider not in allowed and extra_providers:
             for ep in extra_providers:
                 if ep in allowed:
                     effective_provider = ep
@@ -304,7 +480,7 @@ class TechniqueRunner:
                 registered=registered,
                 technique_id=technique_id,
                 cred=cred,
-                cred_id=cred.id,
+                cred_id=cred.id if cred else None,
                 result_data=result_data,
                 duration_ms=duration_ms,
                 ctx=ctx,
@@ -317,7 +493,7 @@ class TechniqueRunner:
             loot_path = loot_writer.write(
                 TechniqueResult(
                     technique_id=technique_id,
-                    provider=cred.provider,
+                    provider=cred.provider if cred else "none",
                     status="success",
                     data=result_data,
                     params=ctx.params,
@@ -418,6 +594,11 @@ class TechniqueRunner:
 
         allowed = set(registered.metadata.providers)
         active_providers = {cred.provider} | set(extra_providers or [])
+
+        # Cloud Bridge: allow entra credentials to satisfy azure techniques
+        if cred.provider == "entra" and "azure" in allowed:
+            return cred, None
+
         if not (active_providers & allowed):
             supported = ", ".join(sorted(allowed))
             return None, TechniqueResult(
@@ -466,7 +647,9 @@ class TechniqueRunner:
                     status="error",
                     error=f"No secret data for credential #{cred_id}.",
                 )
+            logger.debug("Runner: Calling json.loads on secret_data (Length: %d)", len(secret_data_raw))
             secret_data = json.loads(secret_data_raw)
+            logger.debug("Runner: Calling provider.authenticate")
             session = provider.authenticate(secret_data)
 
             # When an entra credential is running an azure technique, wrap the
@@ -492,7 +675,7 @@ class TechniqueRunner:
         registered,
         technique_id: str,
         cred,
-        cred_id: int,
+        cred_id: int | None,
         result_data,
         duration_ms: int,
         ctx: ExecutionContext,
@@ -506,6 +689,8 @@ class TechniqueRunner:
           4. Structured finding rows from risk flags.
           5. Re-render of ATTACK_PATH.md from the updated DB.
         """
+        provider_name = cred.provider if cred else "none"
+
         # Normalise result to a plain dict once for all evidence paths.
         if hasattr(result_data, "__dataclass_fields__"):
             from dataclasses import asdict
@@ -525,7 +710,7 @@ class TechniqueRunner:
         )
 
         # 2. Technique-specific structured writes
-        self._write_structured_assets(technique_id, cred, dump_data)
+        self._write_structured_assets(technique_id, provider_name, dump_data)
 
         # 3. Markdown note + 4. findings rows
         from pathlib import Path as _Path
@@ -539,7 +724,7 @@ class TechniqueRunner:
         agent_summary = _sum(
             technique_id=technique_id,
             tactic=tactic,
-            provider=cred.provider,
+            provider=provider_name,
             data=dump_data,
             ok=True,
             ms=duration_ms,
@@ -548,14 +733,13 @@ class TechniqueRunner:
         principal = (
             dump_data.get("principal")
             or dump_data.get("friendly_name")
-            or cred.friendly_name
-            or "unknown"
+            or (cred.friendly_name if cred else "unauthenticated")
         )
         _wr.write_technique_note(
             workspace_dir=workspace_dir,
             technique_id=technique_id,
             tactic=tactic,
-            provider=cred.provider,
+            provider=provider_name,
             principal=principal,
             summary=agent_summary.summary,
             risk_flags=agent_summary.risk_flags,
@@ -568,7 +752,7 @@ class TechniqueRunner:
         self._write_findings(
             technique_id=technique_id,
             tactic=tactic,
-            cred=cred,
+            provider=provider_name,
             principal=principal,
             agent_summary=agent_summary,
         )
@@ -579,7 +763,7 @@ class TechniqueRunner:
     def _write_structured_assets(
         self,
         technique_id: str,
-        cred,
+        provider_name: str,
         dump_data: dict,
     ) -> None:
         """Persist structured compute / network assets for known techniques.
@@ -592,7 +776,7 @@ class TechniqueRunner:
 
         import json as _json
 
-        provider = dump_data.get("provider", cred.provider)
+        provider = dump_data.get("provider", provider_name)
         for inst in dump_data.get("instances", []):
             sgs = inst.get("security_group_ids", [])
             profile_arn = inst.get("instance_profile_arn") or inst.get("identity")
@@ -642,7 +826,7 @@ class TechniqueRunner:
         *,
         technique_id: str,
         tactic: str,
-        cred,
+        provider: str,
         principal: str,
         agent_summary,
     ) -> None:
@@ -687,7 +871,7 @@ class TechniqueRunner:
                 tactic=tactic,
                 title=human_title,
                 severity=sev,
-                provider=cred.provider,
+                provider=provider,
                 description=agent_summary.summary,
                 evidence=_json.dumps(
                     {"flag": flag, "principal": principal, "summary": agent_summary.summary},

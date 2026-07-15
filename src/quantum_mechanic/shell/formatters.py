@@ -38,16 +38,45 @@ def format_banner() -> None:
     console.print(Panel(banner, border_style="cyan", expand=False))
 
 
+def _sort_creds_by_lineage(creds: list[dict]) -> list[dict]:
+    """Return creds ordered so children follow their parent — same insertion
+    logic as before, but without depth (we no longer indent visually)."""
+    by_id: dict[int, dict] = {c["id"]: c for c in creds if c.get("id") is not None}
+    children: dict[int | None, list[dict]] = {}
+    for c in creds:
+        parent = c.get("derived_from_id")
+        if parent is not None and parent not in by_id:
+            parent = None
+        children.setdefault(parent, []).append(c)
+
+    out: list[dict] = []
+
+    def _walk(parent_id: int | None) -> None:
+        for c in children.get(parent_id, []):
+            out.append(c)
+            _walk(c.get("id"))
+
+    _walk(None)
+    return out
+
+
 def format_credentials(creds: list[dict]) -> None:
-    """Display credentials as a rich table."""
+    """Display credentials as a rich table.
+
+    Rows are ordered so children immediately follow their parent. The parent
+    link is shown as `from #N` in the Identity cell — no tree glyphs, so
+    the ID column stays a clean right-aligned single number.
+    """
     if not creds:
         console.print("  No credentials loaded. Run 'import' to add one.", style="dim")
         return
 
     has_token_summary = any(c.get("_token_summary") for c in creds)
+    any_derived = any(c.get("derived_from_id") is not None for c in creds)
+    ordered = _sort_creds_by_lineage(creds)
 
     table = Table(box=box.ROUNDED, border_style="dim")
-    table.add_column("#", style="bold cyan", width=4)
+    table.add_column("#", style="bold cyan", justify="right", width=4)
     table.add_column("Provider", style="bold")
     table.add_column("Type", style="dim")
     table.add_column("Identity", style="white")
@@ -55,7 +84,7 @@ def format_credentials(creds: list[dict]) -> None:
         table.add_column("Tokens", style="dim cyan")
     table.add_column("Status", justify="center")
 
-    for cred in creds:
+    for cred in ordered:
         status = cred.get("status", "unknown")
         status_style = {
             "active": "bold green",
@@ -65,6 +94,10 @@ def format_credentials(creds: list[dict]) -> None:
         }.get(status, "dim")
 
         identity = cred.get("friendly_name") or cred.get("principal_id") or "unknown"
+        parent_id = cred.get("derived_from_id")
+        if parent_id is not None:
+            identity = f"{identity}  [dim]from #{parent_id}[/dim]"
+
         row = [
             str(cred.get("id", "?")),
             cred.get("provider", "unknown").upper(),
@@ -77,6 +110,99 @@ def format_credentials(creds: list[dict]) -> None:
         table.add_row(*row)
 
     console.print(table)
+    hint = "  [dim]Use `creds <id>` for per-token detail (expiration, scope, roles)."
+    if any_derived:
+        hint += " `from #N` marks the parent this credential was derived from.[/dim]"
+    else:
+        hint += "[/dim]"
+    console.print(hint)
+
+
+def _fmt_minutes_remaining(minutes: float | None, is_expired: bool) -> str:
+    """Render a minutes-remaining value as a compact color-coded string."""
+    if is_expired or minutes is None or minutes <= 0:
+        return "[red]expired[/red]"
+    if minutes < 5:
+        return f"[red]{int(minutes)}m[/red]"
+    if minutes < 60:
+        return f"[yellow]{int(minutes)}m[/yellow]"
+    if minutes < 1440:  # under 24h
+        return f"[green]{int(minutes)}m[/green]"
+    days = int(minutes // 1440)
+    return f"[green]{days}d[/green]"
+
+
+def format_credential_detail(cred: dict, token_details: list[dict]) -> None:
+    """Per-credential detail view — rendered by `creds <id>`.
+
+    Shows the row's core fields, the derivation link if one exists, and a
+    per-token table for Entra credentials with expiration, resource, scopes,
+    and roles pulled from the JWT claims.
+    """
+    cred_id = cred.get("id", "?")
+    provider = cred.get("provider", "unknown").upper()
+    identity = cred.get("friendly_name") or cred.get("principal_id") or "unknown"
+    ctype = cred.get("credential_type", "unknown")
+    status = cred.get("status", "unknown")
+    parent_id = cred.get("derived_from_id")
+
+    header_lines = [
+        f"[bold cyan]#{cred_id}[/bold cyan]  [bold]{provider}[/bold]  {identity}",
+        f"  Type: [dim]{ctype}[/dim]     Status: [bold]{status}[/bold]",
+    ]
+    if parent_id is not None:
+        header_lines.append(
+            f"  Derived from: [cyan]#{parent_id}[/cyan]  "
+            "[dim](use `creds {}` to inspect the parent)[/dim]".format(parent_id)
+        )
+    for line in header_lines:
+        console.print(line)
+
+    if not token_details:
+        console.print(
+            "  [dim]No per-token detail available for this credential type.[/dim]"
+        )
+        return
+
+    tbl = Table(box=box.ROUNDED, border_style="dim", title="Tokens")
+    tbl.add_column("Kind", style="bold")
+    tbl.add_column("Resource", style="cyan")
+    tbl.add_column("Expires", justify="right")
+    tbl.add_column("Client", style="dim")
+    tbl.add_column("Scopes / Roles", style="dim")
+
+    for td in token_details:
+        # For FOCI RTs the "scopes" list is empty — show the family marker instead.
+        scope_cell = ""
+        if td.get("scopes"):
+            scopes = td["scopes"][:4]
+            more = len(td["scopes"]) - len(scopes)
+            scope_cell = "scp: " + " ".join(scopes) + (f" (+{more})" if more > 0 else "")
+        elif td.get("roles"):
+            roles = td["roles"][:3]
+            more = len(td["roles"]) - len(roles)
+            scope_cell = "roles: " + ", ".join(roles) + (f" (+{more})" if more > 0 else "")
+        elif td.get("token_type") == "refresh_token" and td.get("foci"):
+            scope_cell = "[dim]family (.default)[/dim]"
+
+        resource = td.get("resource") or ""
+        # Compact resource: strip https:// and trailing /
+        if resource.startswith("https://"):
+            resource = resource[len("https://"):]
+        resource = resource.rstrip("/")
+
+        client = td.get("client_id") or ""
+        if len(client) > 12:
+            client = client[:8] + "…"
+
+        tbl.add_row(
+            td.get("kind", "?"),
+            resource or "[dim]—[/dim]",
+            _fmt_minutes_remaining(td.get("minutes_remaining"), td.get("is_expired", False)),
+            client or "[dim]—[/dim]",
+            scope_cell or "[dim]—[/dim]",
+        )
+    console.print(tbl)
 
 
 def format_declarative_result(result: TechniqueResult) -> None:
@@ -131,9 +257,51 @@ def format_technique_result(result: TechniqueResult) -> None:
       2. result.loot_schema (Declarative pattern)
       3. Hardcoded logic below (Legacy pattern)
     """
-    if result.status == "error":
-        console.print(f"  [bold red]✗[/bold red] {result.error}")
+    if result.status in ("error", "denied"):
+        # Per docs/architecture/spec.md §3.6, both error and denied render as red ✗.
+        # If the technique has its own formatter, delegate — it can render richer
+        # detail (scope hint, response code, etc.). Otherwise print the terse line.
+        if result.formatter_func:
+            try:
+                result.formatter_func(result)
+            except Exception:
+                msg = result.error or (result.data.get("error") if isinstance(result.data, dict) else None) or "Unknown error"
+                console.print(f"  [bold red]✗[/bold red] {msg}")
+                scope = result.data.get("required_scope") if isinstance(result.data, dict) else None
+                if scope:
+                    console.print(f"    [dim]Required scope: {scope}[/dim]")
+        else:
+            msg = result.error or (result.data.get("error") if isinstance(result.data, dict) else None) or "Unknown error"
+            console.print(f"  [bold red]✗[/bold red] {msg}")
+            scope = result.data.get("required_scope") if isinstance(result.data, dict) else None
+            if scope:
+                console.print(f"    [dim]Required scope: {scope}[/dim]")
+        # Phase C2 (diagnostic): when denied AND we know a required_scope,
+        # explain what the operator is actually up against. Earlier drafts
+        # of this hint told operators to run `acquire entra arm --scope <X>`,
+        # which is architecturally wrong: ARM doesn't carry Graph scopes,
+        # FOCI expansion uses OAuth `.default` (whatever's already consented
+        # on the family client), and there is no `--scope` flag on any of
+        # the acquire subcommands. Rather than send operators down a
+        # dead-end command, be honest about the shape of the problem.
+        if result.status == "denied" and isinstance(result.data, dict):
+            scope = result.data.get("required_scope")
+            if scope:
+                console.print(
+                    f"    [dim]This scope is a Graph permission. FOCI refresh "
+                    f"tokens only re-issue with scopes already consented to "
+                    f"the family client — they cannot mint an arbitrary Graph "
+                    f"scope. To acquire {scope}: (1) use an app registration "
+                    f"that has this permission granted with admin consent, or "
+                    f"(2) verify the current session's Graph token actually "
+                    f"holds this scope (`raw <cred-id>` shows the JWT scp/roles "
+                    f"claims).[/dim]"
+                )
         return
+
+    if result.status == "partial":
+        console.print("  [bold yellow]⚠[/bold yellow] Partial results — some pages failed after first success")
+        # Fall through to render the partial data
 
     processed = False
 
@@ -175,6 +343,22 @@ def format_technique_result(result: TechniqueResult) -> None:
         if (loot_dir / "table.txt").exists():
             files += " • [bold]table.txt[/bold]"
         console.print(f"  [dim]📁 Loot → [cyan]{display}[/cyan]   {files}[/dim]")
+
+    # ── Next-steps contextual hints (Phase C1) ────────────────────────────
+    # Techniques can include `next_steps: list[dict]` in their result data.
+    # We render them as a compact suggestions panel so operators see the
+    # obvious follow-on without needing to read docs.
+    if isinstance(result.data, dict) and result.status == "success":
+        hints = result.data.get("next_steps")
+        if isinstance(hints, list) and hints:
+            console.print()
+            console.print("  [bold cyan]Suggested next steps:[/bold cyan]")
+            for h in hints:
+                if not isinstance(h, dict):
+                    continue
+                cmd = h.get("command", "")
+                reason = h.get("reason", "")
+                console.print(f"    [cyan]→[/cyan] [bold]{cmd}[/bold]  [dim]{reason}[/dim]")
 
 
 def _legacy_format_result(result: TechniqueResult) -> None:

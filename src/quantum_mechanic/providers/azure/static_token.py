@@ -30,8 +30,15 @@ class StaticTokenCredential:
         """Return the stored token. Ignores the scope argument by design."""
         if time.time() >= self._expires_on:
             raise RuntimeError(
-                "Stored Azure credential has expired. "
-                "Re-import the credential to capture a fresh token "
-                "(import azure --default) or use a service-principal credential."
+                "Stored Azure credential has expired. Captured tokens are ARM-audience "
+                "snapshots with no refresh material, so this credential cannot renew "
+                "itself. Options:\n"
+                "    (1) re-run `import azure --default` if `az login` is still valid, or\n"
+                "    (2) use `import azure --client-id … --client-secret … --tenant-id …` "
+                "for a refreshable service principal, or\n"
+                "    (3) authenticate to Entra directly with `acquire entra device_code` "
+                "/ `acquire entra interactive` — that produces a FOCI RT which can be "
+                "expanded to ARM via `acquire entra arm` (and to Graph via `acquire "
+                "entra refresh --resource https://graph.microsoft.com`)."
             )
         return AccessToken(token=self._token, expires_on=self._expires_on)

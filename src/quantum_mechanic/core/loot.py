@@ -29,11 +29,10 @@
 #   LootWriter dynamically imports the technique module to read
 #   these constants — zero coupling required at the runner level.
 #
-# CONTRACT:
-#   - write() never raises.  All errors are logged.
-#   - Existing loot is appended, not overwritten, so multiple
-#     runs accumulate in the same files.
-#   - File encoding is always UTF-8.
+#   CONTRACT:
+#     - write() never raises.  All errors are logged.
+#     - Existing loot is overwritten on every run to represent the latest state.
+#     - File encoding is always UTF-8.
 # ================================================================
 
 from __future__ import annotations
@@ -111,6 +110,14 @@ class LootWriter:
         loot_dir = self._loot_dir(workspace_db_path, result.technique_id)
         loot_dir.mkdir(parents=True, exist_ok=True)
 
+        # Non-success runs must NOT emit CSV/table artifacts — that would
+        # produce misleading empty loot dirs when the technique was actually
+        # denied or errored. Instead, drop a _status.txt sentinel so operators
+        # grepping loot dirs still see something. See spec.md §3.6.
+        if result.status not in ("success", "partial"):
+            self._write_status_sentinel(loot_dir, result)
+            return loot_dir
+
         # --------------------------------------------------------
         # Check for global run note in params (passed via result)
         # --------------------------------------------------------
@@ -122,10 +129,35 @@ class LootWriter:
         items = self._extract_items(data, items_key, result.technique_id, result.params)
         # Always write headers if they don't exist, even if items is empty
         self._write_csv(loot_dir / "loot.csv", schema, items)
-        if items:
-            self._write_table(loot_dir / "table.txt", schema, items)
+        self._write_table(loot_dir / "table.txt", schema, items)
+
+        # Partial runs get a note in the loot dir explaining why they may
+        # be incomplete — the operator should re-run to close the gap.
+        if result.status == "partial":
+            self._write_status_sentinel(loot_dir, result)
 
         return loot_dir
+
+    def _write_status_sentinel(self, loot_dir: Path, result: TechniqueResult) -> None:
+        """Drop _status.txt describing why this run did not produce loot."""
+        try:
+            data = result.data if isinstance(result.data, dict) else {}
+            lines = [
+                f"technique: {result.technique_id}",
+                f"status: {result.status}",
+                f"provider: {result.provider}",
+            ]
+            if result.error:
+                lines.append(f"error: {result.error}")
+            elif data.get("error"):
+                lines.append(f"error: {data['error']}")
+            if data.get("required_scope"):
+                lines.append(f"required_scope: {data['required_scope']}")
+            if data.get("http_status"):
+                lines.append(f"http_status: {data['http_status']}")
+            (loot_dir / "_status.txt").write_text("\n".join(lines) + "\n")
+        except Exception as exc:
+            logger.debug("Failed to write _status.txt: %s", exc)
 
     def _load_schema(
         self, technique_id: str
@@ -208,41 +240,15 @@ class LootWriter:
         schema: list[tuple],
         items: list[dict],
     ) -> None:
-        """Append rows to loot.csv, migrating the header if the schema has new columns."""
+        """Write rows to loot.csv, overwriting any existing file."""
         columns = [entry[0] for entry in schema]
 
-        existing_rows: list[dict] = []
-        existing_columns: list[str] = []
-
-        if path.exists() and path.stat().st_size > 0:
-            with path.open(newline="", encoding="utf-8") as fh:
-                reader = csv.DictReader(fh)
-                existing_columns = list(reader.fieldnames or [])
-                existing_rows = list(reader)
-
-        # If schema has grown, rewrite entire file with merged columns.
-        new_columns = [c for c in columns if c not in existing_columns]
-        if existing_rows and new_columns:
-            merged = existing_columns + new_columns
-            with path.open("w", newline="", encoding="utf-8") as fh:
-                writer = csv.DictWriter(fh, fieldnames=merged, extrasaction="ignore")
-                writer.writeheader()
-                for row in existing_rows:
-                    writer.writerow(row)
-            existing_columns = merged
-
-        # Use the column order that is actually in the file (existing_columns after any
-        # migration, or the new schema columns for a fresh file). Appending with a
-        # different fieldnames order than the header causes column misalignment.
-        write_columns = existing_columns if existing_columns else columns
-        need_header = not path.exists() or path.stat().st_size == 0
-        with path.open("a", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=write_columns, extrasaction="ignore")
-            if need_header:
-                writer.writeheader()
+        with path.open("w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
+            writer.writeheader()
             for item in items:
                 row = {key: "" if item.get(key) is None else str(item.get(key, ""))
-                       for key in write_columns}
+                       for key in columns}
                 writer.writerow(row)
 
     def _write_table(
@@ -251,7 +257,7 @@ class LootWriter:
         schema: list[tuple],
         items: list[dict],
     ) -> None:
-        """Write a plain-text Rich table to table.txt (appended per run)."""
+        """Write a plain-text Rich table to table.txt (overwriting any existing file)."""
         from rich import box
         from rich.console import Console
         from rich.table import Table
@@ -278,9 +284,8 @@ class LootWriter:
         plain_console.print(tbl)
         text = buf.getvalue()
 
-        with path.open("a", encoding="utf-8") as fh:
+        with path.open("w", encoding="utf-8") as fh:
             fh.write(text)
-            fh.write("\n")
 
 
 # Module-level singleton — callers import and use loot_writer.write(...)

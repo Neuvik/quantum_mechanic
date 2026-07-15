@@ -35,7 +35,11 @@ import httpx
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 from quantum_mechanic.providers.entra.foci import foci_expand
-from quantum_mechanic.providers.entra.graph import graph_list
+from quantum_mechanic.providers.entra.graph import (
+    GraphError,
+    graph_error_to_result,
+    graph_list,
+)
 from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
 
 _DEVICES_URL = (
@@ -71,8 +75,14 @@ def _format_entra_enum_devices(result: Any) -> None:
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
-    if not isinstance(data, dict) or "error" in data:
+    if not isinstance(data, dict):
+        console.print("  [red]✗[/red] Unknown error")
+        return
+    status = data.get("status", "success" if "error" not in data else "error")
+    if status in ("denied", "error"):
         console.print(f"  [red]✗[/red] {data.get('error', 'Unknown error')}")
+        if data.get("required_scope"):
+            console.print(f"    [dim]Required scope: {data['required_scope']}[/dim]")
         return
 
     devices = data.get("devices", [])
@@ -140,9 +150,11 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
     headers = {"Authorization": f"Bearer {token.value}"}
 
-    with httpx.Client(timeout=60) as http:
-        devices = graph_list(http, _DEVICES_URL, headers)
-
+    try:
+        with httpx.Client(timeout=60) as http:
+            devices = graph_list(http, _DEVICES_URL, headers)
+    except GraphError as e:
+        return graph_error_to_result(e, devices=[], total=0, non_compliant=0, by_trust_type={})
 
     non_compliant = sum(1 for d in devices if d.get("isCompliant") is False)
     by_trust: dict[str, int] = {}
@@ -155,6 +167,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         by_trust[raw_trust] = by_trust.get(raw_trust, 0) + 1
 
     return {
+        "status": "success",
         "provider": "entra",
         "tenant_id": store.tenant_id,
         "total": len(devices),

@@ -32,7 +32,10 @@ _ARM     = "https://management.azure.com"
 _IMPORT_USAGE = """\
   Usage: import entra <subcommand> [args]
 
-  Subcommands:
+  [bold]`import entra` is for EXISTING artifacts you already have.[/bold]
+  For fresh authentication (no artifact to hand off), use [cyan]acquire entra[/cyan] — see below.
+
+  Import subcommands:
     browserdump <path>                              Parse browserdump JSON output
     roadtools   <path>                              Import .roadtools_auth file
     access_token <jwt>                              Raw JWT access token
@@ -43,6 +46,15 @@ _IMPORT_USAGE = """\
     prt_key               --prt <val>               Raw PRT + session key (no expiry pressure)
                           --session-key <key>
                           --tenant <id>
+    help                                            Print this usage
+
+  Don't have an artifact? Get one via live authentication:
+    [cyan]acquire entra device_code[/cyan]                    Phone-verify OAuth (no local az session needed)
+    [cyan]acquire entra interactive[/cyan]                    Browser OAuth (survives Conditional Access)
+    [cyan]acquire entra ropc[/cyan] --username <u> --password <p> --tenant <t>
+                                             Username+password → FOCI RT
+    Then: [cyan]acquire entra arm[/cyan] / [cyan]acquire entra refresh --resource <res>[/cyan]
+                                             Pivot to ARM or another Graph scope
 """
 
 _ACQUIRE_USAGE = """\
@@ -84,7 +96,9 @@ def import_entra(state: ShellState, args: list[str]) -> None:
     rest = args[1:]
     opts = _parse_opts(rest)
 
-    if sub == "browserdump":
+    if sub in ("help", "--help", "-h", "?"):
+        console.print(_IMPORT_USAGE)
+    elif sub == "browserdump":
         _import_browserdump(state, rest, opts)
     elif sub == "roadtools":
         _import_roadtools(state, rest, opts)
@@ -373,7 +387,9 @@ def acquire_entra(state: ShellState, args: list[str]) -> None:
     rest = args[1:]
     opts = _parse_opts(rest)
 
-    if sub == "device_code":
+    if sub in ("help", "--help", "-h", "?"):
+        console.print(_ACQUIRE_USAGE)
+    elif sub == "device_code":
         _acquire_device_code(state, opts)
     elif sub == "interactive":
         _acquire_interactive(state, opts)
@@ -537,10 +553,7 @@ def _acquire_refresh(state: ShellState, opts: dict[str, str]) -> None:
 
     store = _active_entra_store(state)
     if store is None:
-        console.print(
-            "  [red]✗[/red] No active entra credential. "
-            "Run 'import entra' or 'acquire entra device_code' first."
-        )
+        _print_no_entra_cred_guidance(state, "refresh")
         return
 
     rt = store.refresh_token() or store.foci_refresh_token()
@@ -551,6 +564,16 @@ def _acquire_refresh(state: ShellState, opts: dict[str, str]) -> None:
     resource  = opts.get("resource", _GRAPH)
     client_id = opts.get("client", rt.client_id or FOCI_DEFAULT_CLIENT)
     tenant    = store.tenant_id or rt.tenant_id or "common"
+
+    # Was there already a live AT for this resource? If so, this is a
+    # renewal (level up in place). If not, this is a new pivot and gets
+    # its own credential row so the operator can move between them.
+    prior = store.best_token(resource)
+    is_renewal = (
+        prior is not None
+        and prior.token_type == "access_token"
+        and not prior.is_expired
+    )
 
     resp = exchange_refresh_token(
         rt.value,
@@ -565,22 +588,51 @@ def _acquire_refresh(state: ShellState, opts: dict[str, str]) -> None:
         return
 
     _apply_token_response(store, resp, resource=resource, client_id=client_id)
-    _update_store(state, store)
-    console.print(
-        f"  [green]✓[/green] Access token acquired for {resource}"
-    )
+
+    if is_renewal:
+        _update_store(state, store)
+        console.print(
+            f"  [green]✓[/green] Access token renewed for {resource}"
+        )
+    else:
+        parent_id = state.active_credential_id
+        # Compact label — strip the https:// prefix so the row stays readable.
+        label = resource.replace("https://", "").rstrip("/")
+        new_id = _mint_derived_cred(
+            state, store,
+            label_suffix=f"→ {label}",
+            obtained_via=f"acquire entra refresh --resource {resource}",
+            new_token_resource=resource,
+        )
+        if new_id is not None:
+            console.print(
+                f"  [green]✓[/green] Access token acquired for {resource} — "
+                f"stored as credential [bold cyan]#{new_id}[/bold cyan] "
+                f"(derived from #{parent_id})"
+            )
+            console.print(
+                f"  [dim]Now active. Use `use {parent_id}` to switch back.[/dim]"
+            )
+        else:
+            _update_store(state, store)
+            console.print(
+                f"  [green]✓[/green] Access token acquired for {resource}"
+            )
 
 
 def _acquire_arm(state: ShellState, opts: dict[str, str]) -> None:
-    """Expand the active FOCI refresh token to an ARM access token."""
+    """Expand the active FOCI refresh token to an ARM access token.
+
+    On success, mints a NEW credential row derived from the currently-active
+    one so operators can `use <original>` / `use <new>` to move between the
+    Graph and ARM pivots. If the current cred already has a live ARM AT, we
+    do nothing (the operator is already on the pivot they want).
+    """
     from quantum_mechanic.providers.entra.foci import foci_expand
 
     store = _active_entra_store(state)
     if store is None:
-        console.print(
-            "  [red]✗[/red] No active entra credential. "
-            "Run 'acquire entra device_code' first."
-        )
+        _print_no_entra_cred_guidance(state, "arm")
         return
 
     existing = store.best_token(_ARM)
@@ -601,15 +653,32 @@ def _acquire_arm(state: ShellState, opts: dict[str, str]) -> None:
         )
         return
 
-    _update_store(state, store)
+    parent_id = state.active_credential_id
+    new_id = _mint_derived_cred(
+        state, store,
+        label_suffix="→ ARM",
+        obtained_via="acquire entra arm",
+        new_token_resource=_ARM,
+    )
     if "azure" not in state._extra_providers:
         state._extra_providers.append("azure")
 
     mins = tok.minutes_remaining
-    console.print(
-        f"  [green]✓[/green] ARM access token acquired"
-        + (f"  ({mins:.0f}m remaining)" if mins else "")
-    )
+    exp_str = f"  ({mins:.0f}m remaining)" if mins else ""
+    if new_id is not None:
+        console.print(
+            f"  [green]✓[/green] ARM access token acquired — "
+            f"stored as credential [bold cyan]#{new_id}[/bold cyan] "
+            f"(derived from #{parent_id}){exp_str}"
+        )
+        console.print(
+            "  [dim]Now active. Use `use "
+            f"{parent_id}` to switch back to the Graph pivot.[/dim]"
+        )
+    else:
+        # Fallback: no workspace context (shouldn't happen in practice).
+        _update_store(state, store)
+        console.print(f"  [green]✓[/green] ARM access token acquired{exp_str}")
     console.print(
         "  Azure techniques now visible. Run: [cyan]techniques[/cyan]"
     )
@@ -629,7 +698,9 @@ def export_entra(state: ShellState, args: list[str]) -> None:
     rest = args[1:]
     opts = _parse_opts(rest)
 
-    if sub == "roadtools":
+    if sub in ("help", "--help", "-h", "?"):
+        console.print(_EXPORT_USAGE)
+    elif sub == "roadtools":
         _export_roadtools(state, opts)
     elif sub == "token":
         _export_token(state, opts)
@@ -643,7 +714,7 @@ def export_entra(state: ShellState, args: list[str]) -> None:
 def _export_roadtools(state: ShellState, opts: dict[str, str]) -> None:
     store = _active_entra_store(state)
     if store is None:
-        console.print("  [red]✗[/red] No active entra credential.")
+        _print_no_entra_cred_guidance(state, "export roadtools")
         return
 
     resource = opts.get("resource", _GRAPH)
@@ -662,7 +733,7 @@ def _export_roadtools(state: ShellState, opts: dict[str, str]) -> None:
 def _export_token(state: ShellState, opts: dict[str, str]) -> None:
     store = _active_entra_store(state)
     if store is None:
-        console.print("  [red]✗[/red] No active entra credential.")
+        _print_no_entra_cred_guidance(state, "export token")
         return
 
     resource = opts.get("resource", _GRAPH)
@@ -682,7 +753,7 @@ def _export_describe(state: ShellState, opts: dict[str, str]) -> None:
 
     store = _active_entra_store(state)
     if store is None:
-        console.print("  [red]✗[/red] No active entra credential.")
+        _print_no_entra_cred_guidance(state, "export describe")
         return
 
     resource = opts.get("resource", _GRAPH)
@@ -851,6 +922,60 @@ def _update_store(state: ShellState, store: EntraTokenStore) -> None:
     state.transport.update_credential(state.active_credential_id, secret_data=secret)
 
 
+def _mint_derived_cred(
+    state: ShellState,
+    store: EntraTokenStore,
+    *,
+    label_suffix: str,
+    obtained_via: str,
+    new_token_resource: str | None = None,
+) -> int | None:
+    """Create a NEW credential row derived from the currently active one.
+
+    Used when an `acquire entra <resource>` action produces a token for a
+    resource we don't already have — instead of overwriting the current
+    cred's store, we mint a new cred so the operator can `use <old>` /
+    `use <new>` to move between pivots.
+
+    Args:
+        store: The cloned/updated token store that will back the new cred.
+        label_suffix: Appended to the parent's identity for the new cred's
+                      friendly name, e.g. "→ ARM" or "→ Graph +User.Read.All".
+        obtained_via: Free-form marker recorded on the credential row for
+                      audit purposes (e.g. "acquire entra arm").
+        new_token_resource: If set, expires_at is taken from the AT for that
+                            resource on the store; otherwise None (never
+                            expires from the cred-list perspective).
+
+    Returns:
+        The new credential id, or None if the workspace isn't ready.
+    """
+    if state.workspace is None or state.active_credential_id is None:
+        return None
+    parent_id = state.active_credential_id
+    parent_name = state.active_credential_label or _entra_friendly_name(store)
+    new_name = f"{parent_name} {label_suffix}"
+    expires_at = None
+    if new_token_resource:
+        tok = store.best_token(new_token_resource)
+        if tok and tok.expires_at:
+            expires_at = tok.expires_at.isoformat()
+
+    secret = json.dumps({"token_store": store.to_dict()})
+    new_id = state.workspace.add_credential(
+        provider="entra",
+        credential_type="token_store",
+        secret_data=secret,
+        friendly_name=new_name,
+        derived_from_id=parent_id,
+        expires_at=expires_at,
+        obtained_via=obtained_via,
+    )
+    state.active_credential_id = new_id
+    state.active_credential_label = new_name
+    return new_id
+
+
 def _set_active(state: ShellState, cred_id: int, store: EntraTokenStore) -> None:
     """Set the new credential as the active one."""
     state.active_credential_id = cred_id
@@ -872,6 +997,77 @@ def _active_entra_store(state: ShellState) -> EntraTokenStore | None:
     secret = json.loads(raw)
     provider = EntraAuthProvider()
     return provider.authenticate(secret)
+
+
+def _print_no_entra_cred_guidance(state: ShellState, action: str) -> None:
+    """Print a specific guidance message when `acquire entra <action>` is invoked
+    but the active cred is either absent, on the wrong provider, or a captured
+    Azure token with no refresh material.
+
+    Beats the old generic "No active entra credential" that left operators
+    guessing which subcommand to run next.
+    """
+    # No workspace / no active cred at all.
+    if state.workspace is None or state.active_credential_id is None:
+        console.print(
+            "  [red]✗[/red] No active credential. First get one via one of:\n"
+            "    • [cyan]acquire entra device_code[/cyan]   "
+            "[dim](phone-verify, no local az session needed)[/dim]\n"
+            "    • [cyan]acquire entra interactive[/cyan]   "
+            "[dim](browser OAuth, works through Conditional Access)[/dim]\n"
+            "    • [cyan]acquire entra ropc[/cyan] --username <upn> --password <p> --tenant <t>\n"
+            "    • [cyan]import entra <format>[/cyan]       "
+            "[dim](for existing dumps/cookies/JWTs — see `import entra`)[/dim]"
+        )
+        return
+
+    cred = state.workspace.get_credential(state.active_credential_id)
+    if cred is None:
+        console.print("  [red]✗[/red] Active credential no longer exists.")
+        return
+
+    if cred.provider == "entra":
+        # Cred is Entra but store somehow couldn't authenticate — surface the
+        # generic message so we don't hide a real error behind guidance.
+        console.print(
+            f"  [red]✗[/red] Active entra credential #{cred.id} could not be "
+            f"loaded. Try `raw {cred.id}` to inspect it or re-import."
+        )
+        return
+
+    # Wrong provider — the specific case that motivated this fix.
+    if cred.provider == "azure" and cred.credential_type == "captured_token":
+        console.print(
+            f"  [red]✗[/red] Cannot `acquire entra {action}` from cred "
+            f"[bold]#{cred.id}[/bold] — it's a captured Azure ARM token with no "
+            "refresh material. Captured tokens are audience-bound snapshots "
+            "and cannot be exchanged for a Graph token.\n"
+            "  To pivot to Graph, get an RT-backed session:\n"
+            "    → [cyan]acquire entra device_code[/cyan]   "
+            "[dim](or interactive / ropc)[/dim]\n"
+            "  Then FOCI expansion works: `acquire entra refresh --resource "
+            "https://graph.microsoft.com`."
+        )
+        return
+
+    if cred.provider == "azure":
+        console.print(
+            f"  [red]✗[/red] Cannot `acquire entra {action}` from cred "
+            f"[bold]#{cred.id}[/bold] (azure/{cred.credential_type}). Azure "
+            "and Entra live in the same Microsoft ecosystem but this "
+            "command needs an Entra store with a refresh token.\n"
+            "  Get one via [cyan]acquire entra device_code[/cyan] / "
+            "[cyan]interactive[/cyan] / [cyan]ropc[/cyan]."
+        )
+        return
+
+    console.print(
+        f"  [red]✗[/red] Active cred [bold]#{cred.id}[/bold] is {cred.provider.upper()} "
+        f"({cred.credential_type}). `acquire entra {action}` needs an entra "
+        "credential.\n"
+        "  Get one with [cyan]acquire entra device_code[/cyan] / "
+        "[cyan]interactive[/cyan] / [cyan]ropc[/cyan]."
+    )
 
 
 def _cap_guidance(error_text: str) -> str | None:

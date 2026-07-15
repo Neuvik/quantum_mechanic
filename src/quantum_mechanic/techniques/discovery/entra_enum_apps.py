@@ -40,7 +40,11 @@ from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 from quantum_mechanic.providers.entra import eam
 from quantum_mechanic.providers.entra.foci import foci_expand
-from quantum_mechanic.providers.entra.graph import graph_list
+from quantum_mechanic.providers.entra.graph import (
+    GraphError,
+    graph_error_to_result,
+    graph_list,
+)
 from quantum_mechanic.providers.entra.graph_perms import GraphPermResolver
 from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
 
@@ -92,8 +96,14 @@ def _format_entra_enum_apps(result: Any) -> None:
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
-    if not isinstance(data, dict) or "error" in data:
+    if not isinstance(data, dict):
+        console.print("  [red]✗[/red] Unknown error")
+        return
+    status = data.get("status", "success" if "error" not in data else "error")
+    if status in ("denied", "error"):
         console.print(f"  [red]✗[/red] {data.get('error', 'Unknown error')}")
+        if data.get("required_scope"):
+            console.print(f"    [dim]Required scope: {data['required_scope']}[/dim]")
         return
 
     apps_raw = data.get("applications", [])
@@ -112,10 +122,10 @@ def _format_entra_enum_apps(result: Any) -> None:
             "check Graph token scope (Application.Read.All recommended)".format(stats["attempts"])
         )
 
-    # Build a quick lookup for the enriched per-app tier so we can render
-    # alongside the raw Graph object fields.
-    tier_by_app_id = {
-        row.get("appId"): row.get("highest_perm_tier", eam.TIER_UNKNOWN)
+    # Build lookups for the enriched per-app tier and CP perm inline so
+    # we can render alongside the raw Graph object fields.
+    enriched_by_id = {
+        row.get("appId"): row
         for row in data.get("apps", [])
         if row.get("type") == "App Registration"
     }
@@ -126,23 +136,39 @@ def _format_entra_enum_apps(result: Any) -> None:
         tbl.add_column("Audience", style="dim")
         tbl.add_column("Secrets", style="yellow")
         tbl.add_column("Highest Perm Tier")
+        tbl.add_column("Top CP Perms")
         tbl.add_column("App ID", style="dim")
 
         for a in apps_raw[:50]:
             secrets = len(a.get("passwordCredentials", []))
             secret_str = f"[yellow]{secrets}[/yellow]" if secrets else "[dim]0[/dim]"
-            tier = tier_by_app_id.get(a.get("appId"), eam.TIER_UNKNOWN)
+            enriched = enriched_by_id.get(a.get("appId"), {})
+            tier = enriched.get("highest_perm_tier", eam.TIER_UNKNOWN)
+            top_cp = enriched.get("top_cp_perms", [])
+            cp_count = enriched.get("cp_perm_count", 0)
+            if top_cp:
+                extra = f" +{cp_count - len(top_cp)}" if cp_count > len(top_cp) else ""
+                cp_cell = "[red]" + ", ".join(top_cp) + "[/red]" + extra
+            else:
+                cp_cell = "[dim]—[/dim]"
             tbl.add_row(
                 a.get("displayName", "—"),
                 a.get("signInAudience", "—"),
                 secret_str,
                 _tier_cell(tier),
+                cp_cell,
                 a.get("appId", ""),
             )
         console.print(tbl)
         if len(apps_raw) > 50:
             console.print(
-                f"  [dim]... and {len(apps_raw) - 50} more apps in result data[/dim]"
+                f"  [dim]... and {len(apps_raw) - 50} more apps in result data. "
+                f"Use `run discovery/entra_enum_app_perms --app-id <id>` for per-app drilldown.[/dim]"
+            )
+        else:
+            console.print(
+                "  [dim]Use `run discovery/entra_enum_app_perms --app-id <id>` "
+                "for per-app permission drilldown.[/dim]"
             )
 
 
@@ -174,31 +200,34 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
     headers = {"Authorization": f"Bearer {token.value}"}
 
-    with httpx.Client(timeout=60) as http:
-        applications = graph_list(http, _APPS_URL, headers)
-        service_principals = graph_list(http, _SP_URL, headers)
+    try:
+        with httpx.Client(timeout=60) as http:
+            applications = graph_list(http, _APPS_URL, headers)
+            service_principals = graph_list(http, _SP_URL, headers)
 
-        # Resolve Graph permission UUIDs → human names on each Application.
-        # The resolver caches per resource_app_id so each resource SP (Graph,
-        # SharePoint, Exchange, etc.) is fetched at most once per run.
-        resolver = GraphPermResolver(http=http, headers=headers)
-        _resolve_attempts = 0
-        _resolve_successes = 0
-        for app in applications:
-            resolved: list[str] = []
-            for rra in app.get("requiredResourceAccess", []):
-                resource_app_id = rra.get("resourceAppId")
-                if not resource_app_id:
-                    continue
-                perm_entries = rra.get("resourceAccess", [])
-                names = resolver.resolve_perm_names(
-                    resource_app_id=resource_app_id,
-                    perm_entries=perm_entries,
-                )
-                _resolve_attempts += len(perm_entries)
-                _resolve_successes += len(names)
-                resolved.extend(names)
-            app["_resolved_perms"] = resolved
+            # Resolve Graph permission UUIDs → human names on each Application.
+            # The resolver caches per resource_app_id so each resource SP (Graph,
+            # SharePoint, Exchange, etc.) is fetched at most once per run.
+            resolver = GraphPermResolver(http=http, headers=headers)
+            _resolve_attempts = 0
+            _resolve_successes = 0
+            for app in applications:
+                resolved: list[str] = []
+                for rra in app.get("requiredResourceAccess", []):
+                    resource_app_id = rra.get("resourceAppId")
+                    if not resource_app_id:
+                        continue
+                    perm_entries = rra.get("resourceAccess", [])
+                    names = resolver.resolve_perm_names(
+                        resource_app_id=resource_app_id,
+                        perm_entries=perm_entries,
+                    )
+                    _resolve_attempts += len(perm_entries)
+                    _resolve_successes += len(names)
+                    resolved.extend(names)
+                app["_resolved_perms"] = resolved
+    except GraphError as e:
+        return graph_error_to_result(e, applications=[], service_principals=[], apps=[])
 
     multi_tenant = [
         a for a in applications
@@ -224,6 +253,13 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     for a in applications:
         # Resolved by GraphPermResolver above.
         perm_names = a.get("_resolved_perms", [])
+        # Top ControlPlane perms surfaced inline so operators can triage
+        # without opening a per-app drilldown. Only ControlPlane tier —
+        # lower tiers show as their tier label only.
+        cp_perms = [
+            p for p in perm_names
+            if eam.classify_graph_permission(p) == eam.TIER_CONTROL_PLANE
+        ]
         apps.append({
             "displayName": a.get("displayName"),
             "type": "App Registration",
@@ -233,6 +269,8 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             "enabled": "—",
             "id": a.get("id"),
             "highest_perm_tier": _highest_tier(perm_names),
+            "top_cp_perms": cp_perms[:3],
+            "cp_perm_count": len(cp_perms),
         })
     for sp in service_principals:
         apps.append({
@@ -249,6 +287,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         })
 
     return {
+        "status": "success",
         "provider": "entra",
         "tenant_id": store.tenant_id,
         "applications": applications,

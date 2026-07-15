@@ -79,6 +79,10 @@ class EntraToken:
     scopes: list[str] = field(default_factory=list)
     raw_claims: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self):
+        if self.value:
+            self.value = self.value.strip()
+
     @property
     def is_expired(self) -> bool:
         if self.expires_at is None:
@@ -118,6 +122,7 @@ class EntraTokenStore:
     user_upn: str | None = None
     tokens: list[EntraToken] = field(default_factory=list)
     device: EntraDeviceState | None = None
+    _dirty: bool = field(default=False, repr=False, init=False)
 
     # ----------------------------------------------------------------
     # Token selection
@@ -219,6 +224,56 @@ class EntraTokenStore:
                 seen.append(l)
         return " ".join(seen) if seen else "no valid tokens"
 
+    def token_details(self) -> list[dict[str, Any]]:
+        """Return per-token structured detail for the shell display.
+
+        Each entry: {kind, resource, expires_at, minutes_remaining, client_id,
+        foci, scopes, roles}. Shell formatters render this — the store does
+        not format strings itself. Expired tokens ARE included so operators
+        see why an old token stopped working.
+        """
+        out: list[dict[str, Any]] = []
+        for tok in self.tokens:
+            claims = decode_jwt_claims(tok.value) if tok.token_type == "access_token" else {}
+            # scp = delegated (space-separated), roles = application (list)
+            scp = claims.get("scp") or ""
+            scopes = scp.split() if isinstance(scp, str) else []
+            roles = claims.get("roles") or []
+            if isinstance(roles, str):
+                roles = [roles]
+
+            if tok.token_type == "prt_with_key":
+                kind = "PRT"
+            elif tok.token_type == "prt_cookie":
+                kind = "PRTcookie"
+            elif tok.token_type == "refresh_token":
+                kind = "FOCI RT" if tok.foci else "RT"
+            elif tok.token_type == "access_token":
+                if "management.azure.com" in (tok.resource or ""):
+                    kind = "ARM AT"
+                elif "graph.microsoft.com" in (tok.resource or ""):
+                    kind = "Graph AT"
+                elif "sharepoint.com" in (tok.resource or ""):
+                    kind = "SPO AT"
+                else:
+                    kind = "AT"
+            else:
+                kind = tok.token_type
+
+            out.append({
+                "kind": kind,
+                "resource": tok.resource or "",
+                "token_type": tok.token_type,
+                "foci": bool(tok.foci),
+                "client_id": tok.client_id or "",
+                "expires_at": tok.expires_at.isoformat() if tok.expires_at else None,
+                "minutes_remaining": tok.minutes_remaining,
+                "is_expired": tok.is_expired,
+                "scopes": scopes,
+                "roles": list(roles),
+            })
+        return out
+
     def add_token(self, token: EntraToken) -> None:
         """Add or replace a token. Deduplicates by token_type + resource."""
         self.tokens = [
@@ -226,6 +281,7 @@ class EntraTokenStore:
             if not (t.token_type == token.token_type and t.resource == token.resource)
         ]
         self.tokens.append(token)
+        self._dirty = True
 
     # ----------------------------------------------------------------
     # roadtools interop
@@ -311,13 +367,21 @@ def decode_jwt_claims(token: str) -> dict[str, Any]:
     """Decode JWT payload without signature verification."""
     try:
         parts = token.split(".")
+
         if len(parts) < 2:
             return {}
         payload = parts[1]
         payload += "=" * (4 - len(payload) % 4)
-        return json.loads(base64.urlsafe_b64decode(payload))
-    except Exception:
+        decoded = base64.urlsafe_b64decode(payload)
+        try:
+            return json.loads(decoded)
+        except json.JSONDecodeError as je:
+            logger.debug("Failed to decode JWT payload JSON: %s (Body: %s)", je, decoded[:100])
+            raise ValueError(f"Invalid JWT payload JSON: {je}")
+    except Exception as e:
+        logger.debug("JWT decode failed: %s", e)
         return {}
+
 
 
 def token_from_jwt(

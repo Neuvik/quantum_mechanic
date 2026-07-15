@@ -118,6 +118,17 @@ class Workspace:
         """List all available workspaces."""
         return Database.list_workspaces(workspace_dir)
 
+    @classmethod
+    def delete(cls, name: str, workspace_dir: Path | None = None) -> None:
+        """Delete a workspace by name.
+
+        Removes both the `<name>.db` file and the sibling `<name>/` artifact
+        directory (loot, exports). Raises FileNotFoundError if the workspace
+        does not exist. It is the caller's responsibility to close any open
+        Workspace instance pointing at this name before calling delete.
+        """
+        Database.delete(name, workspace_dir)
+
     @property
     def active_credential_id(self) -> int | None:
         """ID of the currently active credential."""
@@ -157,8 +168,6 @@ class Workspace:
         if cred is None:
             raise ValueError(f"Credential id={cred_id} not found in workspace")
 
-        expected = cred.friendly_name
-
         providers = {
             "aws": AWSAuthProvider(),
             "azure": AzureAuthProvider(),
@@ -181,16 +190,46 @@ class Workspace:
             result = provider.whoami(session)
         except Exception as e:
             raise CredentialMismatchError(
-                f"Credential id={cred_id} ({cred.provider}, {expected!r}) "
-                f"could not be loaded for verification: {e}"
+                f"Credential id={cred_id} ({cred.provider}, "
+                f"{cred.friendly_name!r}) could not be loaded for verification: {e}"
             ) from e
 
-        if result.friendly_name != expected:
-            raise CredentialMismatchError(
-                f"Credential id={cred_id} stored as {expected!r} but live whoami "
-                f"returned {result.friendly_name!r}. Refusing to substitute identity. "
-                "Re-import the credential or check for stale local CLI sessions."
-            )
+        # Identity claim comparison. principal_id is the stable identity
+        # (ARN for AWS, tenant/user OID for Entra, etc.) — that's what we
+        # actually want to guard against silent substitution of.
+        # friendly_name is a display alias (e.g. "profile:rg_deploy") and
+        # differs from whoami's parsed principal ("rg_deploy_user"), so
+        # comparing those two produces false positives.
+        stored_pid = cred.principal_id
+        live_pid = getattr(result, "principal_id", None)
+
+        if stored_pid and live_pid:
+            if stored_pid != live_pid:
+                raise CredentialMismatchError(
+                    f"Credential id={cred_id} imported as {stored_pid!r} but "
+                    f"live whoami returned {live_pid!r}. Refusing to substitute "
+                    "identity. Re-import the credential or check for stale "
+                    "local CLI sessions."
+                )
+            return
+
+        # Backward compat: pre-fix credentials imported without
+        # principal_id can't be verified strictly. Auto-capture the
+        # principal_id we just learned so subsequent use is guarded.
+        if live_pid and not stored_pid:
+            try:
+                self._credentials.update_principal(cred_id, live_pid)
+            except Exception as e:
+                # Non-fatal — verification just stays best-effort next time.
+                import logging as _logging
+                _logging.getLogger(__name__).debug(
+                    "Could not persist recovered principal_id for cred %d: %s",
+                    cred_id, e,
+                )
+            return
+
+        # Neither side has a principal_id (e.g. provider without a
+        # whoami identity claim). Nothing to verify — accept.
 
     # ================================================================
     # Agent operations — delegates to AgentStore

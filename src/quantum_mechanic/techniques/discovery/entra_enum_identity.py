@@ -202,7 +202,27 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     if amr:
         mfa = "mfa" in amr or "ngcmfa" in amr
 
+    # Suggested next-steps hints (C1): help the operator discover the
+    # obvious follow-on based on posture. Only surface when the follow-on
+    # is genuinely useful given what we just learned.
+    next_steps: list[dict[str, str]] = []
+    if token.foci:
+        next_steps.append({
+            "command": "acquire entra arm",
+            "reason": "FOCI family refresh — pivot to Azure ARM without re-auth.",
+        })
+        next_steps.append({
+            "command": "acquire entra exchange",
+            "reason": "FOCI can also mint Exchange Online tokens for mailbox recon.",
+        })
+    if any("Global Reader" in r or "Global Administrator" in r for r in directory_roles):
+        next_steps.append({
+            "command": "run discovery/entra_enum_users",
+            "reason": "You hold a directory-wide read role — bulk user enum should succeed.",
+        })
+
     return {
+        "status": "success",
         "principal_id": me.get("id", claims.get("oid", "")),
         "principal_type": "user" if upn else "service_principal",
         "tenant_id": tenant_id,
@@ -216,6 +236,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             "token_type": token.token_type,
         },
         "provider": "entra",
+        "next_steps": next_steps,
     }
 
 

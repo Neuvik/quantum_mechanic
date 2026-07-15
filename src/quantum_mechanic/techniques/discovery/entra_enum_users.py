@@ -33,7 +33,11 @@ import httpx
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 from quantum_mechanic.providers.entra.foci import foci_expand
-from quantum_mechanic.providers.entra.graph import graph_list
+from quantum_mechanic.providers.entra.graph import (
+    GraphError,
+    graph_error_to_result,
+    graph_list,
+)
 from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
 
 _USERS_URL = (
@@ -64,8 +68,14 @@ def _format_entra_enum_users(result: Any) -> None:
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
-    if not isinstance(data, dict) or "error" in data:
+    if not isinstance(data, dict):
+        console.print("  [red]✗[/red] Unknown error")
+        return
+    status = data.get("status", "success" if "error" not in data else "error")
+    if status in ("denied", "error"):
         console.print(f"  [red]✗[/red] {data.get('error', 'Unknown error')}")
+        if data.get("required_scope"):
+            console.print(f"    [dim]Required scope: {data['required_scope']}[/dim]")
         return
 
     users = data.get("users", [])
@@ -122,8 +132,11 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
     headers = {"Authorization": f"Bearer {token.value}"}
 
-    with httpx.Client(timeout=60) as http:
-        users = graph_list(http, _USERS_URL, headers)
+    try:
+        with httpx.Client(timeout=60) as http:
+            users = graph_list(http, _USERS_URL, headers)
+    except GraphError as e:
+        return graph_error_to_result(e, users=[], total=0, guests=0, disabled=0)
 
     for u in users:
         u.setdefault("username", u.get("userPrincipalName") or u.get("mail") or "—")
@@ -134,10 +147,17 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     disabled = sum(1 for u in users if not u.get("accountEnabled", True))
 
     return {
+        "status": "success",
         "provider": "entra",
         "tenant_id": store.tenant_id,
         "total": len(users),
         "guests": guests,
         "disabled": disabled,
         "users": users,
+        "next_steps": [
+            {
+                "command": "run collection/entra_export_bloodhound",
+                "reason": "Export the collected users into BloodHound OpenGraph.",
+            },
+        ] if users else [],
     }

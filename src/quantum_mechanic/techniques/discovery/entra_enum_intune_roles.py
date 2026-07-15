@@ -38,7 +38,11 @@ from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 from quantum_mechanic.providers.entra import eam
 from quantum_mechanic.providers.entra.foci import foci_expand
-from quantum_mechanic.providers.entra.graph import graph_list
+from quantum_mechanic.providers.entra.graph import (
+    GraphError,
+    graph_error_to_result,
+    graph_list,
+)
 from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
 
 logger = logging.getLogger(__name__)
@@ -61,9 +65,14 @@ def format_intune_roles(result: Any) -> None:
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
-    if not isinstance(data, dict) or "error" in data:
-        msg = data.get("error", "Unknown error") if isinstance(data, dict) else "Unknown error"
-        console.print(f"  [red]✗[/red] {msg}")
+    if not isinstance(data, dict):
+        console.print("  [red]✗[/red] Unknown error")
+        return
+    status = data.get("status", "success" if "error" not in data else "error")
+    if status in ("denied", "error"):
+        console.print(f"  [red]✗[/red] {data.get('error', 'Unknown error')}")
+        if data.get("required_scope"):
+            console.print(f"    [dim]Required scope: {data['required_scope']}[/dim]")
         return
 
     rows = data.get("assignments", [])
@@ -151,9 +160,12 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                     "members_count": len(a.get("members", [])),
                     "assignment_id": a.get("id"),
                 })
+    except GraphError as e:
+        logger.info("Intune roles enumeration returned %s: %s", type(e).__name__, e)
+        return graph_error_to_result(e, assignments=[])
     except Exception as e:
         logger.warning("Intune role enumeration failed: %s", e)
-        return {"error": str(e), "assignments": []}
+        return {"status": "error", "error": str(e), "assignments": []}
 
     return {
         "status": "success",
