@@ -39,6 +39,17 @@ class BypassFinding:
         affected_policies: list[str],
         remediation: str,
     ) -> None:
+        """Construct a bypass finding.
+
+        Args:
+            severity: One of CRITICAL, HIGH, MEDIUM, LOW, INFO.
+            title: Short human-readable name for the finding.
+            description: What the operator can exploit + why it matters.
+            affected_policies: Display names of the policies that trigger
+                this finding. Empty list for tenant-wide findings.
+            remediation: Actionable defender fix (informational — QM does
+                not modify tenant state).
+        """
         self.severity = severity
         self.title = title
         self.description = description
@@ -46,6 +57,14 @@ class BypassFinding:
         self.remediation = remediation
 
 def run_all_detectors(policies: list[dict[str, Any]]) -> list[BypassFinding]:
+    """Run every bypass detector against a set of CA policies.
+
+    Filters to enabled policies for most detectors (a disabled policy can't
+    grant a bypass), then fans out. Report-only detection is the exception —
+    it needs the full list so it can see stuck-in-report policies.
+    Returns the flat concatenation of all findings, unsorted; the caller
+    (typically `cmd_check_ca_bypasses`) sorts by severity for display.
+    """
     enabled_policies = [p for p in policies if p.get("state") == "enabled"]
     all_findings = []
     all_findings.extend(detect_legacy_auth_allowed(enabled_policies))
@@ -65,6 +84,10 @@ def run_all_detectors(policies: list[dict[str, Any]]) -> list[BypassFinding]:
     return all_findings
 
 def detect_legacy_auth_allowed(policies: list[dict[str, Any]]) -> list[BypassFinding]:
+    """CRITICAL: policy permits legacy auth (ExchangeActiveSync or Other)
+    without Block. Legacy protocols do not enforce modern MFA, so any
+    policy that targets them without blocking is a direct password-spray
+    surface. Emits one finding per offending policy."""
     findings = []
     for p in policies:
         clients = [x.lower() for x in get_list(p.get("client_app_types"))]
@@ -80,6 +103,11 @@ def detect_legacy_auth_allowed(policies: list[dict[str, Any]]) -> list[BypassFin
     return findings
 
 def detect_device_code_not_blocked(policies: list[dict[str, Any]]) -> list[BypassFinding]:
+    """HIGH: no enabled policy blocks the OAuth device-code flow.
+    Device-code phishing (attacker initiates flow, victim types the code
+    into microsoft.com/devicelogin) is a proven initial-access vector
+    that fully bypasses password-only defenses. Returns a single
+    tenant-wide finding when no such block policy exists."""
     blocked = False
     for p in policies:
         flows = p.get("auth_flows", "").lower()
@@ -131,6 +159,11 @@ def detect_foci_exclusion_blast(policies: list[dict[str, Any]]) -> list[BypassFi
     return findings
 
 def detect_break_glass_over_exclusion(policies: list[dict[str, Any]]) -> list[BypassFinding]:
+    """HIGH: a user is excluded from EVERY enabled CA policy in the tenant.
+    Typically legitimate break-glass accounts, but if the excluded user
+    isn't a tightly-monitored break-glass one this is a phishing/pivot
+    goldmine: compromising them evades all CA enforcement. Emits one
+    tenant-wide finding naming the over-excluded users."""
     if not policies:
         return []
     
@@ -153,6 +186,12 @@ def detect_break_glass_over_exclusion(policies: list[dict[str, Any]]) -> list[By
     return []
 
 def detect_grant_or_weakness(policies: list[dict[str, Any]]) -> list[BypassFinding]:
+    """HIGH: policy uses grant operator OR with MFA plus a weaker control
+    (compliantDevice, domainJoinedDevice, approvedApplication, etc.).
+    OR means satisfying ANY control passes — the operator can bypass MFA
+    entirely by satisfying the weaker one (e.g. joining a compliant
+    device). Emits one finding per offending policy naming the weak
+    alternatives."""
     findings = []
     for p in policies:
         grant_op = str(p.get("grant_operator", "OR")).upper()
@@ -173,6 +212,11 @@ def detect_grant_or_weakness(policies: list[dict[str, Any]]) -> list[BypassFindi
     return findings
 
 def detect_weak_mfa_strength(policies: list[dict[str, Any]]) -> list[BypassFinding]:
+    """MEDIUM: policy uses the generic `Require MFA` control instead of a
+    named Authentication Strength (phishing-resistant, passwordless MFA,
+    etc.). Generic MFA accepts SMS/voice, which are AiTM-phishable.
+    Emits one finding per policy that requires plain MFA without a
+    strength qualifier."""
     findings = []
     for p in policies:
         controls = [x.lower() for x in get_list(p.get("grant_controls"))]
@@ -187,6 +231,11 @@ def detect_weak_mfa_strength(policies: list[dict[str, Any]]) -> list[BypassFindi
     return findings
 
 def detect_platform_gaps(policies: list[dict[str, Any]]) -> list[BypassFinding]:
+    """MEDIUM: policy scoped to specific device platforms (Windows/iOS/…)
+    instead of All. Device platform is derived from the User-Agent
+    header, which an attacker sets. Spoofing UA to an unscoped platform
+    bypasses the policy entirely. Emits one finding per policy naming
+    the included platforms."""
     findings = []
     for p in policies:
         inc_p = get_list(p.get("included_platforms"))
@@ -201,7 +250,13 @@ def detect_platform_gaps(policies: list[dict[str, Any]]) -> list[BypassFinding]:
     return findings
 
 def detect_no_workload_ca(policies: list[dict[str, Any]]) -> list[BypassFinding]:
-    # Very rudimentary check: Does any policy target SPs?
+    """MEDIUM: no enabled CA policy targets workload identities (Service
+    Principals). Service principals are almost always unprotected by CA
+    even when the tenant is otherwise well-defended — compromising a
+    high-privilege SP (via app-cred injection, cert theft, etc.) bypasses
+    every user-scoped policy. Emits a single tenant-wide finding when
+    zero policies mention `sp_risk_levels`. Currently rudimentary — false
+    negatives if a policy targets SPs via another mechanism."""
     sp_policies = False
     for p in policies:
         # In the payload, SP risk levels or specific workload identity settings would indicate SP targeting
@@ -220,6 +275,11 @@ def detect_no_workload_ca(policies: list[dict[str, Any]]) -> list[BypassFinding]
     return []
 
 def detect_guest_coverage_gap(policies: list[dict[str, Any]]) -> list[BypassFinding]:
+    """MEDIUM: policy targets All Users but explicitly excludes certain
+    guest types (B2B/B2C). Any excluded guest bypasses this policy,
+    which matters when the policy is the MFA enforcement layer.
+    Operator should verify guests are covered by another policy. Emits
+    one finding per offending policy."""
     findings = []
     for p in policies:
         inc_u = get_list(p.get("included_users"))
@@ -235,6 +295,11 @@ def detect_guest_coverage_gap(policies: list[dict[str, Any]]) -> list[BypassFind
     return findings
 
 def detect_session_hijack_risk(policies: list[dict[str, Any]]) -> list[BypassFinding]:
+    """MEDIUM: policy sets Persistent Browser: always without also enabling
+    Token Protection. Stolen session cookies survive browser restarts
+    and are usable indefinitely from any device without Token Protection
+    binding them to a specific device. Emits one finding per policy in
+    this state."""
     findings = []
     for p in policies:
         pb = p.get("session_persistent_browser", "").lower()
@@ -250,6 +315,10 @@ def detect_session_hijack_risk(policies: list[dict[str, Any]]) -> list[BypassFin
     return findings
 
 def detect_no_token_protection(policies: list[dict[str, Any]]) -> list[BypassFinding]:
+    """MEDIUM: no enabled policy enables Token Protection at all. Every
+    session token in this tenant is portable — steal it (AiTM, malware,
+    browser dumps) and use it anywhere. Emits one tenant-wide finding
+    when zero policies have `session_token_protection` set."""
     tp_enabled = any(str(p.get("session_token_protection", "")).lower() == "true" for p in policies)
     if not tp_enabled and policies:
         return [BypassFinding(
@@ -262,6 +331,11 @@ def detect_no_token_protection(policies: list[dict[str, Any]]) -> list[BypassFin
     return []
 
 def detect_auth_transfer_gap(policies: list[dict[str, Any]]) -> list[BypassFinding]:
+    """LOW: no enabled policy blocks Authentication Transfer (QR sign-in
+    from desktop to mobile). Authentication Transfer can be phished:
+    attacker initiates the flow, target scans the QR believing it's
+    their own device. Emits a single tenant-wide finding when no
+    Block policy targets the flow."""
     blocked = False
     for p in policies:
         flows = p.get("auth_flows", "").lower()
@@ -280,6 +354,13 @@ def detect_auth_transfer_gap(policies: list[dict[str, Any]]) -> list[BypassFindi
     return []
 
 def detect_report_only_stale(policies: list[dict[str, Any]]) -> list[BypassFinding]:
+    """INFO: policy is in Report-Only mode. Report-only policies log what
+    they WOULD do but never actually enforce. Long-lived report-only
+    policies usually mean an admin got scared during rollout and never
+    switched them on. Emits one INFO-severity finding per report-only
+    policy so operators can flag them to the blue team.
+    NOTE: this detector runs against ALL policies, not just enabled — a
+    report-only policy is by definition not `state=enabled`."""
     findings = []
     for p in policies:
         state = p.get("state", "").lower()
