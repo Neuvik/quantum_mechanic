@@ -29,16 +29,16 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------
 # Known FOCI member client IDs.
 # One refresh token from any of these can acquire tokens for all.
+#
+# Data source: vendored providers/entra/refs/GraphPreConsent.yaml
+# (community-maintained by zh54321/GraphPreConsentExplorer, MIT).
+# Falls back to a 7-app in-code baseline if the refs are missing so
+# import never blows up. See providers/entra/refs/README.md for
+# attribution + how to refresh.
 # ----------------------------------------------------------------
-FOCI_CLIENT_IDS: dict[str, str] = {
-    "d3590ed6-52b3-4102-aeff-aad2292ab01c": "Microsoft Office",
-    "1fec8e78-bce4-4aaf-ab1b-5451cc387264": "Microsoft Teams",
-    "ab9b8c07-8f02-4f72-87fa-80105867a763": "OneDrive",
-    "27922004-5251-4030-b22d-91ecd9a37ea4": "Outlook Mobile",
-    "4765445b-32c6-49b0-83e6-1d93765276ca": "Office Web",
-    "00b41c95-dab0-4487-9791-b9d2c32c80f2": "Office 365 Management",
-    "4345a7b9-9a63-4910-a426-35363201d503": "O365 Shell Mobile",
-}
+from quantum_mechanic.providers.entra.refs import foci_client_ids as _foci_client_ids
+
+FOCI_CLIENT_IDS: dict[str, str] = _foci_client_ids()
 
 # Default client to use for FOCI expansion when none is specified.
 FOCI_DEFAULT_CLIENT = "d3590ed6-52b3-4102-aeff-aad2292ab01c"

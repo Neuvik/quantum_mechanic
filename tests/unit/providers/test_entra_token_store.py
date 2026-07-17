@@ -393,8 +393,15 @@ class TestJwtUtilities:
 # ----------------------------------------------------------------
 
 class TestFociClientIds:
-    def test_seven_members(self):
-        assert len(FOCI_CLIENT_IDS) == 7
+    def test_has_at_least_seven_members(self):
+        """OUTCOME: The table must have AT LEAST the 7 baseline apps.
+
+        Previously this asserted exactly 7 — that hardcoded assumption
+        broke the moment we started sourcing from the vendored community
+        list (~49 apps). The invariant we actually care about is that the
+        baseline never regresses.
+        """
+        assert len(FOCI_CLIENT_IDS) >= 7
 
     def test_default_client_in_table(self):
         assert FOCI_DEFAULT_CLIENT in FOCI_CLIENT_IDS
@@ -402,5 +409,19 @@ class TestFociClientIds:
     def test_known_apps_present(self):
         names = list(FOCI_CLIENT_IDS.values())
         assert "Microsoft Office" in names
+
+    def test_community_list_augments_baseline(self):
+        """OUTCOME: The vendored community list adds substantially more FOCI
+        clients than the 7-app baseline. If vendoring silently regresses,
+        this test surfaces it — the whole point of vendoring was coverage.
+        """
+        assert len(FOCI_CLIENT_IDS) > 20, (
+            f"Expected community list to add many FOCI apps beyond the "
+            f"7-app baseline; got only {len(FOCI_CLIENT_IDS)}. "
+            "Refs vendoring may be broken — run tools/update_entra_refs.py."
+        )
+        names = list(FOCI_CLIENT_IDS.values())
+        assert "Microsoft Teams" in names
+        assert "OneDrive" in names
         assert "Microsoft Teams" in names
         assert "OneDrive" in names
