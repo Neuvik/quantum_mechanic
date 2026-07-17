@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import logging.handlers
 import sys
 from pathlib import Path
 from typing import Any
@@ -87,7 +88,14 @@ def run_agent_mode(args: argparse.Namespace, workspace_dir: Path | None = None) 
     console_handler.setLevel(logging.WARNING)
     console_handler.setFormatter(logging.Formatter("%(message)s"))
 
-    file_handler = logging.FileHandler(str(log_dir / "qm.log"))
+    # Rotating handler prevents the log from growing unbounded — we saw a
+    # 252 GB qm.log crash a disk under long-running agent mode. 10 MB per
+    # file × 5 backups = 60 MB ceiling.
+    file_handler = logging.handlers.RotatingFileHandler(
+        str(log_dir / "qm.log"),
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+    )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
 

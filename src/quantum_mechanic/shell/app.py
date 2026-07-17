@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import logging.handlers
 import shlex
 from pathlib import Path
 
@@ -31,14 +32,18 @@ from quantum_mechanic.providers.entra.auth import EntraAuthProvider
 from quantum_mechanic.providers.gcp.auth import GCPAuthProvider
 from quantum_mechanic.providers.oci.auth import OCIAuthProvider
 from quantum_mechanic.shell import formatters
-from quantum_mechanic.shell.commands import COMMANDS, ShellState
+from quantum_mechanic.shell.commands import COMMAND_HELP, COMMANDS, ShellState
 
 # Load private commands (exploits, payloads, connect, disconnect) if available.
 # In the public build commands_private.py does not exist — the import fails
 # silently and the public shell starts without those commands.
 try:
-    from quantum_mechanic.shell.commands_private import PRIVATE_COMMANDS
+    from quantum_mechanic.shell.commands_private import (
+        PRIVATE_COMMAND_HELP,
+        PRIVATE_COMMANDS,
+    )
     COMMANDS.update(PRIVATE_COMMANDS)
+    COMMAND_HELP.update(PRIVATE_COMMAND_HELP)
 except ImportError:
     pass
 
@@ -166,7 +171,12 @@ def run_shell(args: argparse.Namespace) -> None:
     console_handler.setFormatter(logging.Formatter("%(message)s"))
 
     # Verbose file sink
-    file_handler = logging.FileHandler(str(log_dir / "qm.log"))
+    # Rotating handler — see agent/mode.py for the 252 GB story.
+    file_handler = logging.handlers.RotatingFileHandler(
+        str(log_dir / "qm.log"),
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+    )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
 
