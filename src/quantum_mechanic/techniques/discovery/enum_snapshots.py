@@ -165,10 +165,69 @@ def format_snapshots_result(result: Any) -> None:
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     if ctx.session is not None:
         return _exec_authenticated(ctx)
+    return _exec_anonymous(ctx)
+
+
+def _exec_anonymous(ctx: ExecutionContext) -> dict[str, Any]:
+    """Unauthenticated recon path — uses UNSIGNED boto3 requests to hit
+    the public EC2 surface (public snapshots owned by a specific account,
+    or public AMIs matching a search string).
+
+    Requires at least one of `account_id` or `search` to have a target;
+    without a filter there's no useful anonymous query to run.
+    """
+    account_id = ctx.get_param("account_id") or ""
+    search = ctx.get_param("search") or ""
+    if not account_id and not search:
+        return {
+            "status": "error",
+            "error": (
+                "Anonymous mode requires --param account_id=<12-digit-id> "
+                "or --param search=<substring> to scope the query. Without "
+                "a filter there's no useful anonymous EC2 call to make."
+            ),
+            "snapshots": [],
+        }
+
+    # Use the module-level boto3 binding so `@patch("...enum_snapshots.boto3")`
+    # in tests can substitute a mock. UNSIGNED config is imported lazily
+    # since it isn't needed on the authenticated path.
+    try:
+        from botocore import UNSIGNED
+        from botocore.config import Config
+        from botocore.exceptions import ClientError
+    except ImportError:
+        return {"status": "error", "error": "boto3 not installed.", "snapshots": []}
+
+    regions = _resolve_regions(ctx, session=None)
+    if isinstance(regions, dict):
+        return regions
+
+    ctx.info(
+        f"Anonymous scan — {len(regions)} region(s) for public snapshots "
+        f"{'in account ' + account_id if account_id else 'matching search'}..."
+    )
+
+    snapshots: list[dict[str, Any]] = []
+    for region in regions:
+        try:
+            ec2 = boto3.client(
+                "ec2",
+                region_name=region,
+                config=Config(signature_version=UNSIGNED),
+            )
+            snapshots.extend(_enum_snapshots_public(ec2, region, account_id, search))
+            snapshots.extend(_enum_amis_public(ec2, region, account_id, search))
+        except ClientError as e:
+            logger.debug("Skipping region %s (anonymous): %s", region, e)
+
     return {
-        "status": "error",
-        "error": "This technique requires an active AWS credential. Anonymous enumeration of AWS snapshots is not supported by the AWS API.",
-        "snapshots": [],
+        "status": "success",
+        "mode": "anonymous",
+        "snapshots": snapshots,
+        "total": len(snapshots),
+        "public_count": sum(1 for s in snapshots if s.get("public")),
+        "regions_scanned": len(regions),
     }
 
 

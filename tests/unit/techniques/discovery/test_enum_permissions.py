@@ -126,33 +126,47 @@ class TestEnumPermissionsAWS:
 
 class TestEnumPermissionsAzure:
     def test_azure_returns_effective_permissions(self, mock_ctx):
+        """OUTCOME: The technique's raw-HTTP path against
+        /subscriptions/<id>/providers/Microsoft.Authorization/permissions
+        parses `value[].actions` / `notActions` into `allowed_actions` /
+        `denied_actions`.
+
+        Previously this test mocked the AzureAuthorizationManagementClient
+        SDK class — but the technique got refactored to use httpx directly,
+        so the SDK mock never fired and the real call went out with the
+        fake 'sub-123' id, returning HTTP 400 InvalidSubscriptionId.
+        """
         mock_ctx.provider_name = "azure"
         mock_ctx.session = MagicMock()
+        # ctx.session.get_token(...) must return an object with `.token`.
+        mock_ctx.session.get_token.return_value = MagicMock(token="fake-arm-jwt")
         mock_ctx.whoami().extra = {"subscriptions": [{"id": "sub-123"}]}
-        
-        import sys
-        mock_auth_mgmt = MagicMock()
-        mock_client = MagicMock()
-        mock_auth_mgmt.AuthorizationManagementClient.return_value = mock_client
-        
-        mock_perm = MagicMock()
-        mock_perm.actions = ["Microsoft.Compute/virtualMachines/runCommand/action"]
-        mock_perm.not_actions = ["Microsoft.Authorization/roleAssignments/write"]
-        mock_perm.data_actions = []
-        mock_perm.not_data_actions = []
-        
-        mock_client.permissions.list_for_subscription.return_value = [mock_perm]
-        
-        azure_mocks = {
-            "azure.mgmt.authorization": mock_auth_mgmt
+
+        # Mock the httpx.Client that the technique instantiates.
+        mock_http_client = MagicMock()
+        mock_http_client.__enter__ = lambda self: self
+        mock_http_client.__exit__ = lambda self, *a: False
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "value": [
+                {
+                    "actions": ["Microsoft.Compute/virtualMachines/runCommand/action"],
+                    "notActions": ["Microsoft.Authorization/roleAssignments/write"],
+                    "dataActions": [],
+                    "notDataActions": [],
+                }
+            ]
         }
-        
-        with patch.dict(sys.modules, azure_mocks):
-            import importlib
+        mock_http_client.get.return_value = mock_response
+
+        with patch(
+            "quantum_mechanic.techniques.discovery.enum_permissions.httpx.Client",
+            return_value=mock_http_client,
+        ):
             import quantum_mechanic.techniques.discovery.enum_permissions as mod
-            importlib.reload(mod)
             result = mod.execute(mock_ctx)
-            
+
         assert result["status"] == "success"
         assert "Microsoft.Compute/virtualMachines/runCommand/action" in result["allowed_actions"]
         assert "Microsoft.Authorization/roleAssignments/write" in result["denied_actions"]

@@ -48,12 +48,15 @@ def test_aws_success():
     
     assert result["provider"] == "aws"
     assert result["total"] == 1
-    assert result["functions"] == [{
-        "name": "api-lambda",
-        "role": "arn:aws:iam::123:role/lambda-role",
-        "runtime": "python3.12",
-        "region": "eu-north-1"
-    }]
+    # Assert the required contract fields — the technique also enriches with
+    # env_var_count / env_vars / code_location which we don't want to lock down
+    # here (future enrichment shouldn't break the test).
+    assert len(result["functions"]) == 1
+    fn = result["functions"][0]
+    assert fn["name"] == "api-lambda"
+    assert fn["role"] == "arn:aws:iam::123:role/lambda-role"
+    assert fn["runtime"] == "python3.12"
+    assert fn["region"] == "eu-north-1"
 
 def test_azure_success():
     ctx = MagicMock()
