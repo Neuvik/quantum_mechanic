@@ -182,6 +182,34 @@ class FindingStore:
             for r in rows
         ]
 
+    def clear(self, technique_id: str) -> None:
+        """Delete all findings for a specific technique in this workspace.
+
+        Called from Workspace.clear_findings() (in turn called from
+        runner.py before each execute) to prevent duplicate/stale findings
+        piling up across repeated runs of the same technique.
+        """
+        if self._use_orm:
+            self._clear_orm(technique_id)
+            return
+        self._db.execute(
+            "DELETE FROM findings WHERE workspace_id = ? AND technique_id = ?",
+            (self._workspace_id, technique_id),
+        )
+
+    def _clear_orm(self, technique_id: str) -> None:
+        from sqlalchemy import delete
+
+        from quantum_mechanic.core.orm.tables import FindingRow
+
+        with self._SessionLocal() as session:
+            stmt = delete(FindingRow).where(
+                FindingRow.workspace_id == self._workspace_id,
+                FindingRow.technique_id == technique_id,
+            )
+            session.execute(stmt)
+            session.commit()
+
     def close(self) -> None:
         """Dispose of the ORM engine and nullify the session factory."""
         if hasattr(self, "_engine"):
