@@ -1816,11 +1816,22 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
         tbl.add_column("Vulnerability Type", style="bold red")
         tbl.add_column("Affected Policies", style="cyan")
         tbl.add_column("Description", style="yellow")
-        
+
         for f in detector_findings:
             sev_color = "red" if f.severity in ("CRITICAL", "HIGH") else "yellow" if f.severity == "MEDIUM" else "dim"
             tbl.add_row(f"[{sev_color}]{f.severity}[/{sev_color}]", f.title, ", ".join(f.affected_policies), f.description)
         console.print(tbl)
+
+        # Attribution footer — credit the community researchers whose data
+        # backs these detectors. Shown once per check-ca-bypasses run.
+        from quantum_mechanic.providers.entra.refs import ATTRIBUTION_LINE, refs_status
+        _status = refs_status()
+        _foci_n = _status["graph_preconsent"]["foci_count"]
+        _apps_n = _status["microsoft_apps"]["app_count"]
+        console.print(
+            f"  [dim]Reference data: {_foci_n} FOCI clients, "
+            f"{_apps_n} first-party apps for name lookup. {ATTRIBUTION_LINE}[/dim]"
+        )
 
     # 5.5 Cartesian Policy Sweep (MFA Bypass Matrix Analysis)
     # We build small representative domains from values referenced in policies
