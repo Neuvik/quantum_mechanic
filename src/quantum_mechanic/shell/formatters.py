@@ -26,14 +26,18 @@ console = Console()
 
 
 def format_banner() -> None:
-    """Display the QM startup banner."""
+    """Display the QM startup banner. Version is sourced from installed
+    package metadata (pyproject.toml) so it never drifts from the release
+    tag."""
+    from quantum_mechanic import __version__
+
     banner = Text()
     banner.append("  ██████  ███    ███\n", style="bold cyan")
     banner.append("  ██   ██ ████  ████\n", style="bold cyan")
     banner.append("  ██   ██ ██ ████ ██\n", style="bold cyan")
     banner.append("  ██▄▄▄██ ██  ██  ██\n", style="bold cyan")
     banner.append("  ███████ ██      ██\n", style="bold cyan")
-    banner.append("\n  Quantum Mechanic v0.1.0", style="bold white")
+    banner.append(f"\n  Quantum Mechanic v{__version__}", style="bold white")
     banner.append("\n  Cross-cloud offensive security framework\n", style="dim")
     console.print(Panel(banner, border_style="cyan", expand=False))
 
