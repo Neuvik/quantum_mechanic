@@ -58,7 +58,11 @@ class ExecutionContext:
         self.safe_mode = safe_mode
         self.params: dict[str, Any] = params or {}
         self._on_event = on_event
-        self._provider_name = provider.provider_name
+        # Unauth techniques (providers=[]) run without a credential and
+        # therefore without a provider object. The runner constructs the
+        # ctx with provider=None in that case — sentinel here matches the
+        # "none" string the runner uses in telemetry (runner.py:165).
+        self._provider_name = provider.provider_name if provider is not None else "none"
         self._api_call_count = 0
 
     @property
