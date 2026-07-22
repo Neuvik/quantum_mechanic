@@ -1,7 +1,8 @@
 """Tests for the CA-policy CIDR-comma parsing bug fix (B3).
 
-The bug: named location strings like
-    "SOC Secure Browser IPs (54.211.72.106/32, 13.251.2.79/32)"
+The bug: named location strings whose display name embeds a
+parenthesized CIDR list — e.g.
+    "SASE Gateway IPs (192.0.2.10/32, 192.0.2.20/32)"
 were being split on commas inside the parentheses, producing three
 bogus entries instead of one.
 
