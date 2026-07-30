@@ -1,6 +1,6 @@
 [project]
 name = "quantum-mechanic"
-version = "1.0-rc0"
+version = "1.0-rc2"
 description = "Offensive security assessment framework"
 authors = [
     { name = "Moses Frost", email = "moses@neuvik.com" },
