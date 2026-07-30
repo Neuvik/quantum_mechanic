@@ -43,7 +43,7 @@ import logging
 from typing import Any
 
 from quantum_mechanic.core.context import ExecutionContext
-from quantum_mechanic.core.technique import technique
+from quantum_mechanic.core.technique import Parameter, technique
 
 # ----------------------------------------------------------------
 # Loot schema — Declarative table mapping
@@ -72,6 +72,9 @@ logger = logging.getLogger(__name__)
     severity="info",
     safe=True,
     description="List all compute instances and optionally retrieve their assigned metadata.",
+    parameters=[
+        Parameter("project", "Target GCP project ID (override default)", required=False)
+    ],
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,
 )
@@ -336,7 +339,7 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
     try:
         credentials = ctx.session
         whoami = ctx.whoami()
-        project = whoami.account_id
+        project = ctx.get_param("project") or whoami.account_id
 
         if not project:
             return {"error": "Could not determine GCP project ID from credentials.", "instances": []}
