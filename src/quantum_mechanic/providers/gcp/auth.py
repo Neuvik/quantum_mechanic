@@ -91,9 +91,23 @@ class GCPAuthProvider(AuthProvider):
             token = secret_data.get("access_token")
             if not token:
                 raise ValueError("GCP captured_token method requires 'access_token'")
-            cred = TokenCredentials(token)
+            
+            from datetime import datetime, timedelta
+            # Provide an arbitrary future expiry so Google SDK clients don't
+            # attempt to automatically refresh this static token.
+            # Using naive UTC datetime as expected by google-auth.
+            future_expiry = datetime.utcnow() + timedelta(hours=1)
+            class StaticTokenCredentials(TokenCredentials):
+                def refresh(self, request):
+                    raise ValueError(
+                        "This GCP token was captured statically via `import gcp --default` "
+                        "and has expired. Please run `import gcp --default` again to capture "
+                        "a fresh token."
+                    )
+            
+            cred = StaticTokenCredentials(token, expiry=future_expiry)
             if "project_id" in secret_data:
-                cred._project_id = secret_data["project_id"]  # noqa: SLF001
+                cred.project_id = secret_data["project_id"]
             return cred
 
         if method == "service_account_file":
@@ -151,7 +165,8 @@ class GCPAuthProvider(AuthProvider):
         # to populate token metadata.
         # --------------------------------------------------------
         request = Request()
-        credentials.refresh(request)
+        if not (isinstance(credentials, TokenCredentials) and not credentials.refresh_token):
+            credentials.refresh(request)
 
         # --------------------------------------------------------
         # Extract identity from the credential object.
