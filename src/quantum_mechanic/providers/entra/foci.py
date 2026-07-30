@@ -43,6 +43,39 @@ FOCI_CLIENT_IDS: dict[str, str] = _foci_client_ids()
 # Default client to use for FOCI expansion when none is specified.
 FOCI_DEFAULT_CLIENT = "d3590ed6-52b3-4102-aeff-aad2292ab01c"
 
+# Default client for the interactive (browser + localhost listener) auth
+# code flow. Must be a FOCI member with "http://localhost" registered as
+# a redirect URI. FOCI_DEFAULT_CLIENT (Office) only has the Windows
+# broker URI and the out-of-band URN registered, so using it here fails
+# with AADSTS50011. "Visual Studio - Legacy" is the only FOCI client in
+# refs/GraphPreConsent.yaml with a localhost redirect URI.
+INTERACTIVE_DEFAULT_CLIENT = "872cd9fa-d31f-45e0-9eab-6e460a02d1f1"
+
+# ----------------------------------------------------------------
+# Short mnemonic names for the well-known client IDs operators reach
+# for via `--client`, so nobody has to memorize or paste a GUID.
+# Unrecognized `--client` values pass through unchanged (assumed to
+# already be a GUID) via resolve_client_alias() below.
+# ----------------------------------------------------------------
+CLIENT_ALIASES: dict[str, str] = {
+    "office": "d3590ed6-52b3-4102-aeff-aad2292ab01c",
+    "vs-legacy": "872cd9fa-d31f-45e0-9eab-6e460a02d1f1",
+    "az-cli": "04b07795-8ddb-461a-bbee-02f9e1bf7b46",
+    "az-ps": "1950a258-227b-4e31-a9cf-717495945fc2",
+    "graph-cli": "14d82eec-204b-4c2f-b7e8-296a70dab67e",
+}
+
+
+def resolve_client_alias(value: str | None) -> str | None:
+    """Resolve a short `--client` alias (e.g. "graph-cli") to its GUID.
+
+    Case-insensitive. Values not found in CLIENT_ALIASES pass through
+    unchanged so `--client <raw-guid>` keeps working exactly as before.
+    """
+    if value is None:
+        return None
+    return CLIENT_ALIASES.get(value.strip().lower(), value)
+
 # ----------------------------------------------------------------
 # Resource → typical FOCI client mapping.
 # Used to pick the most appropriate client for each resource.

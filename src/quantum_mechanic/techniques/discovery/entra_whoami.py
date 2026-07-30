@@ -205,12 +205,16 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
     claims = token.raw_claims or decode_jwt_claims(token.value)
 
+    # claims["tid"] is decoded straight from the current access token, so
+    # it's always the real, authoritative tenant GUID. Prefer it over
+    # store.tenant_id, which can still hold the "common" placeholder from
+    # an acquisition that didn't pin a specific tenant.
     tenant_id = (
-        me.get("tenantId")
+        claims.get("tid", "")
+        or me.get("tenantId")
         or store.tenant_id
-        or claims.get("tid", "")
     )
-    if tenant_id and not store.tenant_id:
+    if tenant_id and tenant_id != store.tenant_id:
         store.tenant_id = tenant_id
 
     upn = me.get("userPrincipalName") or store.user_upn or ""

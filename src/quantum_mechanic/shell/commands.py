@@ -2960,7 +2960,17 @@ COMMAND_HELP: dict[str, CommandHelp] = {
             SubcommandHelp(
                 name="entra",
                 synopsis="Import Entra ID tokens",
-                args="browserdump <path> | roadtools <path> | refresh_token <tok>",
+                args="browserdump <path> | roadtools <path> | refresh_token <tok> [--client <id>]",
+            ),
+        ],
+        flags=[
+            FlagHelp(
+                name="--client",
+                value="<id>",
+                synopsis=(
+                    "(entra refresh_token/prt_cookie/ests_cookie) Client GUID, or a "
+                    "short alias: office | vs-legacy | az-cli | az-ps | graph-cli"
+                ),
             ),
         ],
         examples=[
@@ -3006,11 +3016,16 @@ COMMAND_HELP: dict[str, CommandHelp] = {
         name="acquire",
         category="credentials",
         synopsis="Acquire a new Entra credential interactively",
-        description="Drives device-code or browser flows to obtain Entra tokens.",
+        description=(
+            "Drives device-code or browser flows to obtain Entra tokens. "
+            "--client accepts a short alias instead of a raw client GUID."
+        ),
         subcommands=[
             SubcommandHelp(
                 name="entra device_code",
                 synopsis="Interactive device-code login",
+                args="[--client <id>] [--resource <url>] [--tenant <id>]",
+                example="acquire entra device_code --client graph-cli",
             ),
             SubcommandHelp(
                 name="entra interactive",
@@ -3023,6 +3038,16 @@ COMMAND_HELP: dict[str, CommandHelp] = {
                 synopsis="Pivot Entra credential into Azure ARM (FOCI)",
             ),
         ],
+        flags=[
+            FlagHelp(
+                name="--client",
+                value="<id>",
+                synopsis=(
+                    "Client GUID, or a short alias: office | vs-legacy | "
+                    "az-cli | az-ps | graph-cli"
+                ),
+            ),
+        ],
     ),
     "export": CommandHelp(
         name="export",
@@ -3030,8 +3055,17 @@ COMMAND_HELP: dict[str, CommandHelp] = {
         synopsis="Export credential material for offline use",
         description="Prints raw tokens or decoded JWT claims for an imported Entra credential.",
         subcommands=[
-            SubcommandHelp(name="entra token", synopsis="Print raw access token"),
+            SubcommandHelp(
+                name="entra token",
+                synopsis="Print raw access token",
+                args="[--resource <res>]",
+                example="export entra token --resource https://graph.microsoft.com",
+            ),
             SubcommandHelp(name="entra describe", synopsis="Decode and display JWT claims"),
+        ],
+        examples=[
+            "export entra token --resource https://graph.microsoft.com > token.txt",
+            'azurehound list -j "$(cat token.txt)" -t <tenant-id> az-ad -o azurehound-ad.json',
         ],
     ),
 

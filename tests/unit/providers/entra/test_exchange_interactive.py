@@ -84,7 +84,8 @@ def test_interactive_authorize_returns_token_on_successful_exchange():
     assert len(opened_urls) == 1
     assert "code_challenge=" in opened_urls[0]
     assert "code_challenge_method=S256" in opened_urls[0]
-    assert "redirect_uri=http%3A%2F%2Flocalhost%3A54321%2Fcallback" in opened_urls[0]
+    assert "redirect_uri=http%3A%2F%2Flocalhost%3A54321" in opened_urls[0]
+    assert "callback" not in opened_urls[0]
     # Token POST happened with the captured code
     post_kwargs = mock_client.post.call_args.kwargs
     post_data = post_kwargs.get("data")

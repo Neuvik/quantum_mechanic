@@ -70,6 +70,9 @@ _ACQUIRE_USAGE = """\
     arm                                              Pivot to Azure ARM via FOCI
     certificate  --pfx <path> --password <pw> --client <id> --tenant <id>
                  [--resource <res>]
+
+  --client also accepts a short alias instead of a raw GUID:
+    office | vs-legacy | az-cli | az-ps | graph-cli
 """
 
 _EXPORT_USAGE = """\
@@ -238,6 +241,7 @@ def _import_refresh_token(
     args: list[str],
     opts: dict[str, str],
 ) -> None:
+    from quantum_mechanic.providers.entra.foci import resolve_client_alias
     from quantum_mechanic.providers.entra.ingest import ingest_refresh_token
 
     token = args[0] if args else opts.get("token", "")
@@ -248,7 +252,7 @@ def _import_refresh_token(
         return
 
     tenant_id = opts.get("tenant")
-    client_id = opts.get("client")
+    client_id = resolve_client_alias(opts.get("client"))
     if not tenant_id:
         console.print("  [red]✗[/red] --tenant is required for refresh_token import")
         return
@@ -269,7 +273,7 @@ def _import_prt_cookie(
     opts: dict[str, str],
 ) -> None:
     from quantum_mechanic.providers.entra.exchange import exchange_prt_cookie
-    from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
+    from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT, resolve_client_alias
     from quantum_mechanic.providers.entra.ingest import ingest_prt_cookie
 
     jwt = args[0] if args else opts.get("token", "")
@@ -290,7 +294,7 @@ def _import_prt_cookie(
     )
 
     tenant = tok.tenant_id or opts.get("tenant", "common")
-    client_id = opts.get("client", FOCI_DEFAULT_CLIENT)
+    client_id = resolve_client_alias(opts.get("client")) or FOCI_DEFAULT_CLIENT
     resource = opts.get("resource", _GRAPH)
 
     resp = exchange_prt_cookie(
@@ -313,7 +317,7 @@ def _import_ests_cookie(
     opts: dict[str, str],
 ) -> None:
     from quantum_mechanic.providers.entra.exchange import exchange_ests_cookie
-    from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
+    from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT, resolve_client_alias
     from quantum_mechanic.providers.entra.ingest import ingest_ests_cookie
 
     value = args[0] if args else opts.get("value", "")
@@ -324,7 +328,7 @@ def _import_ests_cookie(
         return
 
     tenant = opts.get("tenant", "common")
-    client_id = opts.get("client", FOCI_DEFAULT_CLIENT)
+    client_id = resolve_client_alias(opts.get("client")) or FOCI_DEFAULT_CLIENT
     resource = opts.get("resource", _GRAPH)
 
     tok = ingest_ests_cookie(value, tenant_id=tenant)
@@ -413,10 +417,10 @@ def _acquire_device_code(state: ShellState, opts: dict[str, str]) -> None:
         initiate_device_code,
         poll_device_code,
     )
-    from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
+    from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT, resolve_client_alias
 
     tenant = opts.get("tenant", "common")
-    client_id = opts.get("client", FOCI_DEFAULT_CLIENT)
+    client_id = resolve_client_alias(opts.get("client")) or FOCI_DEFAULT_CLIENT
     resource = opts.get("resource", _GRAPH)
 
     console.print("  Initiating device code flow...")
@@ -470,10 +474,13 @@ def _acquire_interactive(state: ShellState, opts: dict[str, str]) -> None:
     for tokens; persists via the standard EntraTokenStore pipeline.
     """
     from quantum_mechanic.providers.entra.exchange import interactive_authorize
-    from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
+    from quantum_mechanic.providers.entra.foci import (
+        INTERACTIVE_DEFAULT_CLIENT,
+        resolve_client_alias,
+    )
 
     tenant = opts.get("tenant", "common")
-    client_id = opts.get("client", FOCI_DEFAULT_CLIENT)
+    client_id = resolve_client_alias(opts.get("client")) or INTERACTIVE_DEFAULT_CLIENT
     resource = opts.get("resource", _GRAPH)
     timeout = int(opts.get("timeout", "300"))
 
@@ -508,7 +515,7 @@ def _acquire_interactive(state: ShellState, opts: dict[str, str]) -> None:
 
 def _acquire_ropc(state: ShellState, opts: dict[str, str]) -> None:
     from quantum_mechanic.providers.entra.exchange import exchange_ropc
-    from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
+    from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT, resolve_client_alias
 
     username = opts.get("username", "")
     password = opts.get("password", "")
@@ -524,7 +531,7 @@ def _acquire_ropc(state: ShellState, opts: dict[str, str]) -> None:
         "and MFA is not required."
     )
 
-    client_id = opts.get("client", FOCI_DEFAULT_CLIENT)
+    client_id = resolve_client_alias(opts.get("client")) or FOCI_DEFAULT_CLIENT
     resource  = opts.get("resource", _GRAPH)
 
     resp = exchange_ropc(
@@ -549,7 +556,7 @@ def _acquire_ropc(state: ShellState, opts: dict[str, str]) -> None:
 
 def _acquire_refresh(state: ShellState, opts: dict[str, str]) -> None:
     from quantum_mechanic.providers.entra.exchange import exchange_refresh_token
-    from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
+    from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT, resolve_client_alias
 
     store = _active_entra_store(state)
     if store is None:
@@ -562,7 +569,7 @@ def _acquire_refresh(state: ShellState, opts: dict[str, str]) -> None:
         return
 
     resource  = opts.get("resource", _GRAPH)
-    client_id = opts.get("client", rt.client_id or FOCI_DEFAULT_CLIENT)
+    client_id = resolve_client_alias(opts.get("client")) or rt.client_id or FOCI_DEFAULT_CLIENT
     tenant    = store.tenant_id or rt.tenant_id or "common"
 
     # Was there already a live AT for this resource? If so, this is a
@@ -745,7 +752,10 @@ def _export_token(state: ShellState, opts: dict[str, str]) -> None:
         )
         return
 
-    console.print(tok.value)
+    # soft_wrap: let the terminal visually wrap long tokens without Rich
+    # inserting real newlines into the text — otherwise copy-pasting a
+    # wrapped JWT reconstructs a broken, multi-line string.
+    console.print(tok.value, soft_wrap=True)
 
 
 def _export_describe(state: ShellState, opts: dict[str, str]) -> None:
@@ -893,8 +903,12 @@ def _persist_store(state: ShellState, store: EntraTokenStore) -> int | None:
         console.print("  [red]✗[/red] No active workspace.")
         return None
 
-    secret = json.dumps({"token_store": store.to_dict()})
+    # _entra_friendly_name() corrects store.tenant_id from the "common"
+    # placeholder to the real tenant GUID (decoded from token claims) as a
+    # side effect — it MUST run before the store is serialized, or the
+    # persisted secret_data keeps the uncorrected placeholder forever.
     friendly = _entra_friendly_name(store)
+    secret = json.dumps({"token_store": store.to_dict()})
 
     # Check for an existing entra credential with the same identity to avoid duplicates.
     existing = state.transport.list_credentials(provider="entra")
@@ -1119,7 +1133,7 @@ def _print_import_summary(store: EntraTokenStore, cred_id: int) -> None:
     console.print()
     console.print(
         "  [green]✓[/green] Active provider set to entra. "
-        "Run: [cyan]run identity/entra_whoami[/cyan]"
+        "Run: [cyan]run discovery/entra_whoami[/cyan]"
     )
     console.print()
 

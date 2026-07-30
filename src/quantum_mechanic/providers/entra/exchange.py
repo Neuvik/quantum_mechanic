@@ -302,7 +302,11 @@ def interactive_authorize(
     state = secrets.token_urlsafe(16)
     server.expected_state = state
 
-    redirect_uri = f"http://localhost:{port}/callback"
+    # Must be the bare loopback origin, no path: Microsoft's loopback
+    # redirect-URI exception (RFC 8252 §7.3) only relaxes the port, not
+    # the path, so a registered "http://localhost" only matches
+    # "http://localhost:<port>" — never "http://localhost:<port>/callback".
+    redirect_uri = f"http://localhost:{port}"
     scope = resource.rstrip("/") + "/.default openid offline_access"
     params = {
         "client_id": client_id,

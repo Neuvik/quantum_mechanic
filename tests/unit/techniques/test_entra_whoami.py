@@ -188,6 +188,25 @@ class TestSuccessWithAccessToken:
             result = execute(ctx)
         assert result["owned_objects"] == []
 
+    def test_tenant_id_prefers_token_claim_over_common_placeholder(self):
+        """OUTCOME: when store.tenant_id is still the "common" placeholder
+        (set at acquisition time when no specific tenant was pinned), the
+        real tenant GUID decoded from the access token's `tid` claim wins,
+        and store.tenant_id gets corrected to match."""
+        store = EntraTokenStore(tenant_id="common", user_upn="alice@contoso.com")
+        store.add_token(_make_access_token())  # raw_claims tid == "tenant-123"
+        ctx = _build_ctx(store)
+        http = _mock_http_responses(
+            (200, {**_ME_RESPONSE, "tenantId": None}),
+            (200, _MEMBER_OF_RESPONSE),
+            (200, _DIR_ROLES_RESPONSE),
+            (200, _OWNED_OBJECTS_RESPONSE),
+        )
+        with patch("quantum_mechanic.techniques.discovery.entra_whoami.httpx.Client", return_value=http):
+            result = execute(ctx)
+        assert result["tenant_id"] == "tenant-123"
+        assert store.tenant_id == "tenant-123"
+
     def test_posture_mfa_from_claims(self):
         result = self._run()
         assert result["posture"]["mfa"] is True
