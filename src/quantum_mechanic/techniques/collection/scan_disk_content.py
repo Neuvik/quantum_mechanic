@@ -132,7 +132,9 @@ def _scan_aws_direct(ctx: ExecutionContext, snapshot_id: str, region: str | None
                 ctx.info(f"AWS Direct: Snapshot discovered in {r}")
                 found = True
                 break
-            except Exception: continue
+            except Exception as e:
+                logger.debug("Failed discovering snapshot in region %s: %s", r, e)
+                continue
 
         if not found:
             return {"error": f"Snapshot {snapshot_id} not found in any common region.", "hits": []}
@@ -243,7 +245,9 @@ def _scan_local(ctx: ExecutionContext, mount_point: str) -> dict[str, Any]:
             try:
                 if not full_path.is_file(): continue
                 if full_path.stat().st_size > 10 * 1024 * 1024: continue # 10MB limit
-            except Exception: continue
+            except Exception as e:
+                logger.debug("Failed to stat file %s: %s", full_path, e)
+                continue
 
             for label, regex in compiled.items():
                 if regex.match(filename):

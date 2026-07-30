@@ -271,7 +271,8 @@ def _search_oci(ctx: ExecutionContext) -> dict[str, Any]:
         try:
             child_compartments = identity.list_compartments(tenancy_id, compartment_id_in_subtree=True, access_level="ACCESSIBLE").data
             compartment_ids += [c.id for c in child_compartments]
-        except Exception: pass
+        except Exception as e:
+            logger.debug("Failed listing child compartments: %s", e)
 
         namespace = os_client.get_namespace().data
 
@@ -290,7 +291,8 @@ def _search_oci(ctx: ExecutionContext) -> dict[str, Any]:
                                 "size": obj.size,
                                 "type": "Pattern Match",
                             })
-            except Exception: pass
+            except Exception as e:
+                logger.debug("Failed listing buckets in compartment %s: %s", cid, e)
 
         return {"hits": hits, "count": len(hits), "provider": "oci"}
     except Exception as e:

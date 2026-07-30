@@ -108,7 +108,8 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
                         # Extract RG from ID: /subscriptions/.../resourceGroups/{RG}/...
                         rg = vault.id.split("/")[4]
                         full_vault = kv_client.vaults.get(rg, vault.name)
-                    except Exception: pass
+                    except Exception as e:
+                        logger.debug("Failed to get full vault properties for %s: %s", vault.name, e)
 
                 props = getattr(full_vault, "properties", None)
                 public_access = "Enabled"

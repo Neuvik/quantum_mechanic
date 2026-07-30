@@ -107,11 +107,14 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
                                     try:
                                         rg = vault.id.split("/")[4]
                                         full_vault = kv_client.vaults.get(rg, vault.name)
-                                    except Exception: pass
+                                    except Exception as e:
+                                        logger.debug("Failed to get properties for vault %s: %s", vault.name, e)
 
                                 vault_uris.append((full_vault.name, full_vault.properties.vault_uri))
                                 break
-                    except Exception: continue
+                    except Exception as e:
+                        logger.debug("Failed listing vaults: %s", e)
+                        continue
         else:
             # Discovery mode: list all in all subscriptions
             sub_client = SubscriptionClient(cred)
@@ -124,7 +127,8 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
                             try:
                                 rg = vault.id.split("/")[4]
                                 full_vault = kv_client.vaults.get(rg, vault.name)
-                            except Exception: pass
+                            except Exception as e:
+                                logger.debug("Failed to get properties for vault %s: %s", vault.name, e)
 
                         vault_uris.append((full_vault.name, full_vault.properties.vault_uri))
                 except Exception as e:
