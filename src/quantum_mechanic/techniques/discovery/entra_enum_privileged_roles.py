@@ -52,6 +52,7 @@ LOOT_SCHEMA = [
     ("principal_name", "Principal",      "bold cyan"),
     ("principal_type", "Type",           "dim"),
     ("assignment_type", "Assignment",     "white"),
+    ("expires_at",     "Expires At",     "dim"),
     ("principal_id",   "Object ID",      "dim"),
 ]
 
@@ -75,10 +76,26 @@ def format_privileged_roles(result: Any) -> None:
         console.print("  [dim]No privileged role assignments found.[/dim]")
         return
 
+    glyph = "[bold yellow]⚠[/bold yellow]" if status == "partial" else "[bold green]✓[/bold green]"
     console.print(
-        f"  [bold green]✓[/bold green] Discovered "
+        f"  {glyph} Discovered "
         f"[bold cyan]{len(assignments)}[/bold cyan] privileged assignment(s)"
     )
+
+    if status == "partial":
+        visibility = data.get("visibility", {})
+        missing_scopes = data.get("missing_scopes", [])
+        if visibility.get("pim_eligibility") is False or visibility.get("pim_activated") is False:
+            console.print("    [yellow]PIM visibility incomplete[/yellow]")
+        if missing_scopes:
+            console.print(
+                "    [dim]Missing delegated scope(s): "
+                + ", ".join(missing_scopes)
+                + "[/dim]"
+            )
+            console.print(
+                "    [dim]Next step: acquire entra interactive --bundle pim-read[/dim]"
+            )
 
     tbl = Table(box=box.ROUNDED, border_style="dim")
     tbl.add_column("Tier", style="bold")
@@ -150,6 +167,18 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         "https://graph.microsoft.com/v1.0/roleManagement/directory/"
         "roleEligibilitySchedules?$expand=principal"
     )
+    role_activated_url = (
+        "https://graph.microsoft.com/v1.0/roleManagement/directory/"
+        "roleAssignmentScheduleInstances?$filter=assignmentType eq 'Activated'"
+    )
+
+    partial_reasons: list[str] = []
+    missing_scopes: set[str] = set()
+    visibility = {
+        "active_assignments": False,
+        "pim_eligibility": False,
+        "pim_activated": False,
+    }
 
     with httpx.Client(timeout=30) as http:
         ctx.info("Resolving directory role definitions...")
@@ -166,6 +195,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             assignments = graph_list(http, role_assignments_url, headers)
         except GraphError as e:
             return graph_error_to_result(e, assignments=[])
+        visibility["active_assignments"] = True
 
         for a in assignments:
             role_id = a.get("roleDefinitionId")
@@ -189,7 +219,8 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                 "principal_name": p_name,
                 "principal_id": a.get("principalId"),
                 "principal_type": p_type,
-                "assignment_type": "Active/Permanent"
+                "assignment_type": "Active/Permanent",
+                "expires_at": None,
             })
 
         # 3. Try to get PIM eligibility (Role Eligibility Schedules)
@@ -197,9 +228,13 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         try:
             ctx.info("Probing PIM eligibility schedules...")
             eligible = graph_list(http, role_eligibility_url, headers)
+            visibility["pim_eligibility"] = True
         except GraphError as ex:
             ctx.debug(f"PIM eligibility probe denied/failed: {ex}")
             eligible = []
+            partial_reasons.append("PIM eligibility visibility denied")
+            if ex.scope_hint:
+                missing_scopes.add(ex.scope_hint)
         for e in eligible:
             role_id = e.get("roleDefinitionId")
             role_name = id_to_role.get(role_id, "Unknown Role")
@@ -220,12 +255,48 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                 "principal_name": p_name,
                 "principal_id": e.get("principalId"),
                 "principal_type": p_type,
-                "assignment_type": "Eligible (PIM)"
+                "assignment_type": "Eligible (PIM)",
+                "expires_at": None,
             })
+
+        # 4. Cross-reference currently-activated PIM assignments so
+        # active standing admins are not conflated with time-boxed PIM
+        # activations.
+        try:
+            ctx.info("Cross-referencing currently-activated PIM assignments...")
+            activated_instances = graph_list(http, role_activated_url, headers)
+            visibility["pim_activated"] = True
+        except GraphError as ex:
+            ctx.debug(f"PIM activated-instance probe denied/failed: {ex}")
+            activated_instances = []
+            partial_reasons.append("PIM activated-assignment visibility denied")
+            if ex.scope_hint:
+                missing_scopes.add(ex.scope_hint)
+
+        activated_expiry: dict[tuple[str, str], str | None] = {
+            (inst.get("principalId"), inst.get("roleDefinitionId")): inst.get("endDateTime")
+            for inst in activated_instances
+            if inst.get("principalId") and inst.get("roleDefinitionId")
+        }
+
+        for result in results:
+            result.setdefault("expires_at", None)
+            if result.get("assignment_type") != "Active/Permanent":
+                continue
+
+            key = (result.get("principal_id"), result.get("role_id"))
+            if key in activated_expiry:
+                result["assignment_type"] = "Activated (PIM)"
+                result["expires_at"] = activated_expiry[key]
+
+    status = "partial" if partial_reasons else "success"
 
     return {
         "provider": "entra",
-        "status": "success",
+        "status": status,
         "assignments": results,
-        "tenant_id": store.tenant_id
+        "tenant_id": store.tenant_id,
+        "visibility": visibility,
+        "partial_reasons": partial_reasons,
+        "missing_scopes": sorted(missing_scopes),
     }

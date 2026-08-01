@@ -83,7 +83,11 @@ class ExecutionContext:
         return self.params.get(name, default)
 
     @contextlib.contextmanager
-    def subtask(self, name: str, params: dict[str, Any] | None = None) -> Iterator[ExecutionContext]:
+    def subtask(
+        self,
+        name: str,
+        params: dict[str, Any] | None = None,
+    ) -> Iterator[ExecutionContext]:
         """A context manager for running a logical subtask or child technique.
 
         Creates a temporary context with merged parameters and tracks it
@@ -141,6 +145,17 @@ class ExecutionContext:
             data=data or {}
         ))
 
+    def debug(self, message: str, data: dict[str, Any] | None = None) -> None:
+        """Log a debug-level message within the technique context."""
+        logger.debug("[%s] %s", self.technique_id or "qm", message)
+        self._emit(TelemetryEvent(
+            technique_id=self.technique_id or "unknown",
+            event_type=TelemetryType.LOG,
+            level=TelemetryLevel.DEBUG,
+            message=message,
+            data=data or {}
+        ))
+
     def success(self, message: str, data: dict[str, Any] | None = None) -> None:
         """Log a successful operation or discovery."""
         self.log(f"SUCCESS: {message}")
@@ -174,7 +189,12 @@ class ExecutionContext:
             data=data or {}
         ))
 
-    def discovery(self, asset_type: str, asset_id: str, metadata: dict[str, Any] | None = None) -> None:
+    def discovery(
+        self,
+        asset_type: str,
+        asset_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         """Emit a structured discovery event."""
         msg = f"Discovered {asset_type}: {asset_id}"
         self.log(msg)

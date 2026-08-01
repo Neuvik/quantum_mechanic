@@ -275,10 +275,25 @@ class EntraTokenStore:
         return out
 
     def add_token(self, token: EntraToken) -> None:
-        """Add or replace a token. Deduplicates by token_type + resource."""
+        """Add or replace a token.
+
+        Most token types deduplicate by token_type + resource.
+        ESTS cookies keep distinct browser cookie variants (persistent/light/etc.)
+        by including cookie_name in the deduplication key.
+        """
+        cookie_name = None
+        if token.token_type == "ests_cookie":
+            cookie_name = token.raw_claims.get("cookie_name")
         self.tokens = [
             t for t in self.tokens
-            if not (t.token_type == token.token_type and t.resource == token.resource)
+            if not (
+                t.token_type == token.token_type
+                and t.resource == token.resource
+                and (
+                    token.token_type != "ests_cookie"
+                    or t.raw_claims.get("cookie_name") == cookie_name
+                )
+            )
         ]
         self.tokens.append(token)
         self._dirty = True

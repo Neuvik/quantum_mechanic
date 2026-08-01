@@ -16,14 +16,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.workspace import Workspace
 from quantum_mechanic.providers.base import WhoAmIResult
-
 
 # ================================================================
 # Fixtures
@@ -226,3 +225,8 @@ class TestExecutionContextLog:
             technique_id=None,
         )
         ctx.log("no technique id test")  # should not raise
+
+    def test_debug_does_not_raise(self, workspace):
+        """ctx.debug() is callable so techniques can log denied probes without crashing."""
+        ctx = _make_ctx(workspace, _make_result(), technique_id="discovery/whoami")
+        ctx.debug("debug message")  # should not raise

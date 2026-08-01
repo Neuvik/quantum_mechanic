@@ -4,13 +4,9 @@
 
 from __future__ import annotations
 
-import time
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from quantum_mechanic.providers.entra.exchange import (
-    ESTS_BASE,
     exchange_ests_cookie,
     exchange_prt_cookie,
     exchange_refresh_token,
@@ -119,8 +115,17 @@ class TestExchangePrtCookie:
 
 class TestExchangeEstsCookie:
     def test_success(self):
-        expected = {"access_token": "eyJ.at", "refresh_token": "0.rt"}
-        client = _mock_client(expected)
+        authorize_resp = MagicMock()
+        authorize_resp.status_code = 302
+        authorize_resp.headers = {
+            "location": "https://login.microsoftonline.com/common/oauth2/nativeclient?code=abc123&state=qm-ests"
+        }
+        token_resp = MagicMock()
+        token_resp.status_code = 200
+        token_resp.json.return_value = {"access_token": "eyJ.at", "refresh_token": "0.rt"}
+        client = MagicMock()
+        client.get.return_value = authorize_resp
+        client.post.return_value = token_resp
         result = exchange_ests_cookie(
             "opaque-ests",
             tenant_id="t",
@@ -131,7 +136,17 @@ class TestExchangeEstsCookie:
         assert result["access_token"] == "eyJ.at"
 
     def test_cookie_sent_in_header(self):
-        client = _mock_client({"access_token": "t"})
+        authorize_resp = MagicMock()
+        authorize_resp.status_code = 302
+        authorize_resp.headers = {
+            "location": "https://login.microsoftonline.com/common/oauth2/nativeclient?code=abc123&state=qm-ests"
+        }
+        token_resp = MagicMock()
+        token_resp.status_code = 200
+        token_resp.json.return_value = {"access_token": "t"}
+        client = MagicMock()
+        client.get.return_value = authorize_resp
+        client.post.return_value = token_resp
         exchange_ests_cookie(
             "my-ests-value",
             tenant_id="t",
@@ -140,11 +155,21 @@ class TestExchangeEstsCookie:
             cookie_name="ESTSAUTHPERSISTENT",
             http=client,
         )
-        headers = client.post.call_args[1]["headers"]
+        headers = client.get.call_args[1]["headers"]
         assert "ESTSAUTHPERSISTENT=my-ests-value" in headers["Cookie"]
 
     def test_user_agent_set(self):
-        client = _mock_client({"access_token": "t"})
+        authorize_resp = MagicMock()
+        authorize_resp.status_code = 302
+        authorize_resp.headers = {
+            "location": "https://login.microsoftonline.com/common/oauth2/nativeclient?code=abc123&state=qm-ests"
+        }
+        token_resp = MagicMock()
+        token_resp.status_code = 200
+        token_resp.json.return_value = {"access_token": "t"}
+        client = MagicMock()
+        client.get.return_value = authorize_resp
+        client.post.return_value = token_resp
         exchange_ests_cookie(
             "v",
             tenant_id="t",
@@ -152,12 +177,14 @@ class TestExchangeEstsCookie:
             resource="https://graph.microsoft.com",
             http=client,
         )
-        headers = client.post.call_args[1]["headers"]
+        headers = client.get.call_args[1]["headers"]
         assert "User-Agent" in headers
         assert "Mozilla" in headers["User-Agent"]
 
     def test_http_error_returns_error_dict(self):
-        client = _http_error_client()
+        import httpx
+        client = MagicMock()
+        client.get.side_effect = httpx.HTTPError("connection refused")
         result = exchange_ests_cookie(
             "v",
             tenant_id="t",
@@ -166,6 +193,82 @@ class TestExchangeEstsCookie:
             http=client,
         )
         assert result["error"] == "http_error"
+
+    def test_authorize_request_uses_nativeclient_redirect(self):
+        authorize_resp = MagicMock()
+        authorize_resp.status_code = 302
+        authorize_resp.headers = {
+            "location": "https://login.microsoftonline.com/common/oauth2/nativeclient?code=abc123&state=qm-ests"
+        }
+        token_resp = MagicMock()
+        token_resp.status_code = 200
+        token_resp.json.return_value = {"access_token": "t"}
+        client = MagicMock()
+        client.get.return_value = authorize_resp
+        client.post.return_value = token_resp
+
+        exchange_ests_cookie(
+            "v",
+            tenant_id="common",
+            client_id="c",
+            resource="https://graph.microsoft.com",
+            http=client,
+        )
+
+        url = client.get.call_args[0][0]
+        assert "oauth2/authorize" in url
+        params = client.get.call_args[1]["params"]
+        assert params["redirect_uri"] == "https://login.microsoftonline.com/common/oauth2/nativeclient"
+
+    def test_token_post_redeems_captured_auth_code(self):
+        authorize_resp = MagicMock()
+        authorize_resp.status_code = 302
+        authorize_resp.headers = {
+            "location": "https://login.microsoftonline.com/common/oauth2/nativeclient?code=abc123&state=qm-ests"
+        }
+        token_resp = MagicMock()
+        token_resp.status_code = 200
+        token_resp.json.return_value = {"access_token": "t"}
+        client = MagicMock()
+        client.get.return_value = authorize_resp
+        client.post.return_value = token_resp
+
+        exchange_ests_cookie(
+            "v",
+            tenant_id="common",
+            client_id="client-1",
+            resource="https://graph.microsoft.com",
+            http=client,
+        )
+
+        data = client.post.call_args[1]["data"]
+        assert data["grant_type"] == "authorization_code"
+        assert data["code"] == "abc123"
+        assert data["client_id"] == "client-1"
+        assert data["resource"] == "https://graph.microsoft.com"
+
+    def test_authorize_error_redirect_returns_error_dict(self):
+        authorize_resp = MagicMock()
+        authorize_resp.status_code = 302
+        authorize_resp.headers = {
+            "location": (
+                "https://login.microsoftonline.com/common/oauth2/nativeclient"
+                "?error=login_required&error_description=Need+interaction&state=qm-ests"
+            )
+        }
+        client = MagicMock()
+        client.get.return_value = authorize_resp
+
+        result = exchange_ests_cookie(
+            "v",
+            tenant_id="common",
+            client_id="client-1",
+            resource="https://graph.microsoft.com",
+            http=client,
+        )
+
+        assert result["error"] == "login_required"
+        assert "Need interaction" in result["error_description"]
 
 
 # ----------------------------------------------------------------
@@ -212,6 +315,24 @@ class TestInitiateDeviceCode:
             http=client,
         )
         assert result["error"] == "http_error"
+
+    def test_explicit_scopes_replace_default_bootstrap_scope(self):
+        """OUTCOME: when explicit scopes are provided, the POST uses them
+        instead of resource/.default."""
+        client = _mock_client({"device_code": "d"})
+        initiate_device_code(
+            tenant_id="t",
+            client_id="c",
+            resource="https://graph.microsoft.com",
+            scopes=["User.Read", "RoleManagement.Read.Directory"],
+            http=client,
+        )
+        data = client.post.call_args[1]["data"]
+        assert data["scope"] == (
+            "https://graph.microsoft.com/User.Read "
+            "https://graph.microsoft.com/RoleManagement.Read.Directory "
+            "openid offline_access"
+        )
 
 
 # ----------------------------------------------------------------
@@ -262,7 +383,10 @@ class TestPollDeviceCode:
         client.post.side_effect = [resp_slow, resp_success]
 
         sleep_calls = []
-        with patch("quantum_mechanic.providers.entra.exchange.time.sleep", side_effect=lambda s: sleep_calls.append(s)):
+        with patch(
+            "quantum_mechanic.providers.entra.exchange.time.sleep",
+            side_effect=lambda s: sleep_calls.append(s),
+        ):
             poll_device_code(
                 "dev-code",
                 tenant_id="t",
@@ -281,17 +405,22 @@ class TestPollDeviceCode:
         client = MagicMock()
         client.post.return_value = resp_pending
 
-        with patch("quantum_mechanic.providers.entra.exchange.time.sleep"):
-            with patch("quantum_mechanic.providers.entra.exchange.time.time", side_effect=[0, 0, 999]):
-                result = poll_device_code(
-                    "dev-code",
-                    tenant_id="t",
-                    client_id="c",
-                    resource="https://graph.microsoft.com",
-                    interval=1,
-                    timeout=1,
-                    http=client,
-                )
+        with (
+            patch("quantum_mechanic.providers.entra.exchange.time.sleep"),
+            patch(
+                "quantum_mechanic.providers.entra.exchange.time.time",
+                side_effect=[0, 0, 999],
+            ),
+        ):
+            result = poll_device_code(
+                "dev-code",
+                tenant_id="t",
+                client_id="c",
+                resource="https://graph.microsoft.com",
+                interval=1,
+                timeout=1,
+                http=client,
+            )
         assert result["error"] == "expired_token"
 
     def test_terminal_error_returned_immediately(self):
@@ -320,6 +449,24 @@ class TestPollDeviceCode:
             http=client,
         )
         assert result["error"] == "http_error"
+
+    def test_explicit_scopes_replace_default_bootstrap_scope(self):
+        """OUTCOME: polling reuses the same explicit scope string used at initiation."""
+        client = _mock_client({"access_token": "eyJ.at"})
+        poll_device_code(
+            "dev-code",
+            tenant_id="t",
+            client_id="c",
+            resource="https://graph.microsoft.com",
+            scopes=["User.Read", "RoleManagement.Read.Directory"],
+            http=client,
+        )
+        data = client.post.call_args[1]["data"]
+        assert data["scope"] == (
+            "https://graph.microsoft.com/User.Read "
+            "https://graph.microsoft.com/RoleManagement.Read.Directory "
+            "openid offline_access"
+        )
 
 
 # ----------------------------------------------------------------

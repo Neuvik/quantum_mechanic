@@ -94,8 +94,18 @@ class TestFociExpansion:
             "quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies.graph_list",
             side_effect=_mock_graph_list
         ), patch(
-            "quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies.resolve_directory_objects",
-            return_value={"user-exclude-1": "Resolved User 1"}
+            "quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies._resolve_directory_objects_with_diagnostics",
+            return_value=(
+                {"user-exclude-1": "Resolved User 1"},
+                {
+                    "attempted": 1,
+                    "resolved_count": 1,
+                    "unresolved_count": 0,
+                    "fallback_skipped_due_to_budget": False,
+                    "throttling_observed": False,
+                    "sample_unresolved_ids": [],
+                },
+            )
         ), patch(
             "quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies.httpx.Client",
             return_value=MagicMock(__enter__=lambda s: s, __exit__=MagicMock()),
@@ -146,12 +156,22 @@ class TestSuccess:
             "quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies.graph_list",
             side_effect=_mock_graph_list
         ), patch(
-            "quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies.resolve_directory_objects",
-            return_value={
-                "user-exclude-1": "Resolved User 1",
-                "group-include-1": "Resolved Group 1",
-                "group-exclude-1": "Resolved Group 2"
-            }
+            "quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies._resolve_directory_objects_with_diagnostics",
+            return_value=(
+                {
+                    "user-exclude-1": "Resolved User 1",
+                    "group-include-1": "Resolved Group 1",
+                    "group-exclude-1": "Resolved Group 2"
+                },
+                {
+                    "attempted": 3,
+                    "resolved_count": 3,
+                    "unresolved_count": 0,
+                    "fallback_skipped_due_to_budget": False,
+                    "throttling_observed": False,
+                    "sample_unresolved_ids": [],
+                },
+            )
         ), patch(
             "quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies.httpx.Client",
             return_value=MagicMock(__enter__=lambda s: s, __exit__=MagicMock()),
@@ -172,6 +192,58 @@ class TestSuccess:
         assert p["excluded_groups"] == "Resolved Group 2"
         assert p["included_roles"] == "Resolved Role 1"
         assert p["excluded_roles"] == "Resolved Role 2"
+
+    def test_returns_partial_when_directory_object_resolution_is_degraded(self):
+        store = _make_store(_make_token("access_token"))
+        ctx = _build_ctx(store)
+
+        mock_policies = [
+            {
+                "id": "policy-1",
+                "displayName": "MFA Policy",
+                "state": "enabled",
+                "grantControls": {"builtInControls": ["mfa"]},
+                "conditions": {
+                    "users": {
+                        "includeUsers": ["All"],
+                        "excludeUsers": ["11111111-1111-1111-1111-111111111111"],
+                    }
+                },
+            }
+        ]
+
+        def _mock_graph_list(http, url, headers):
+            if "roleDefinitions" in url or "namedLocations" in url:
+                return []
+            return mock_policies
+
+        with patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies.graph_list",
+            side_effect=_mock_graph_list,
+        ), patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies._resolve_directory_objects_with_diagnostics",
+            return_value=(
+                {},
+                {
+                    "attempted": 1,
+                    "resolved_count": 0,
+                    "unresolved_count": 1,
+                    "fallback_skipped_due_to_budget": False,
+                    "throttling_observed": True,
+                    "sample_unresolved_ids": ["11111111-1111-1111-1111-111111111111"],
+                },
+            ),
+        ), patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies.httpx.Client",
+            return_value=MagicMock(__enter__=lambda s: s, __exit__=MagicMock()),
+        ):
+            result = execute(ctx)
+
+        assert result["status"] == "partial"
+        assert result["partial_reasons"] == ["Directory object resolution incomplete"]
+        assert result["resolution"]["throttling_observed"] is True
+        assert result["resolution"]["unresolved_count"] == 1
+        assert result["policies"][0]["excluded_users"] == "11111111-1111-1111-1111-111111111111"
 
     def test_tbl_data_helper(self):
         parsed = [
@@ -283,6 +355,25 @@ class TestResolveDirectoryObjects:
         assert res["guid-rd"] == "Fallback RD"
         assert res["guid-dev"] == "Fallback Device"
         assert res["guid-del"] == "Fallback Deleted Object (Deleted)"
+
+    def test_skips_individual_fallback_when_unresolved_set_is_large(self):
+        from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import (
+            _resolve_directory_objects_with_diagnostics,
+        )
+
+        mock_http = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"value": []}
+        mock_http.request.return_value = mock_resp
+
+        ids = [f"11111111-1111-1111-1111-{i:012d}" for i in range(10)]
+        resolved, diagnostics = _resolve_directory_objects_with_diagnostics(mock_http, {}, ids)
+
+        assert resolved == {}
+        assert diagnostics["fallback_skipped_due_to_budget"] is True
+        assert diagnostics["unresolved_count"] == len(ids)
+        assert mock_http.request.call_count == 1
 
 class TestLoadLootMappings:
     def test_loads_from_csv(self, tmp_path):
@@ -538,4 +629,3 @@ class TestExplainControls:
         # Test empty input
         assert explain_controls("") == []
         assert explain_controls(None) == []
-

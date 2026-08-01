@@ -147,6 +147,48 @@ class TestEntraTokenStore:
         store.add_token(_make_access_token(resource=ARM))
         assert len(store.tokens) == 2
 
+    def test_add_token_keeps_distinct_ests_cookies_by_cookie_name(self):
+        store = EntraTokenStore(tenant_id="t")
+        store.add_token(
+            EntraToken(
+                token_type="ests_cookie",
+                value="cookie-1",
+                resource="",
+                raw_claims={"cookie_name": "ESTSAUTHPERSISTENT"},
+            )
+        )
+        store.add_token(
+            EntraToken(
+                token_type="ests_cookie",
+                value="cookie-2",
+                resource="",
+                raw_claims={"cookie_name": "ESTSAUTH"},
+            )
+        )
+        assert len([t for t in store.tokens if t.token_type == "ests_cookie"]) == 2
+
+    def test_add_token_replaces_same_ests_cookie_name(self):
+        store = EntraTokenStore(tenant_id="t")
+        store.add_token(
+            EntraToken(
+                token_type="ests_cookie",
+                value="cookie-1",
+                resource="",
+                raw_claims={"cookie_name": "ESTSAUTHPERSISTENT"},
+            )
+        )
+        store.add_token(
+            EntraToken(
+                token_type="ests_cookie",
+                value="cookie-2",
+                resource="",
+                raw_claims={"cookie_name": "ESTSAUTHPERSISTENT"},
+            )
+        )
+        cookies = [t for t in store.tokens if t.token_type == "ests_cookie"]
+        assert len(cookies) == 1
+        assert cookies[0].value == "cookie-2"
+
     def test_foci_refresh_token_found(self):
         store = _make_store_with_foci_refresh()
         assert store.foci_refresh_token() is not None

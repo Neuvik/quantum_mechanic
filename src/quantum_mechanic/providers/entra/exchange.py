@@ -34,6 +34,8 @@ from typing import Any
 
 import httpx
 
+from quantum_mechanic.providers.entra.scope_bundles import build_scope_string
+
 logger = logging.getLogger(__name__)
 
 ESTS_BASE = "https://login.microsoftonline.com"
@@ -43,6 +45,7 @@ DEVICE_EP = ESTS_BASE + "/{tenant}/oauth2/v2.0/devicecode"
 
 # Legacy v1 token endpoint — required for PRT cookie and ESTS cookie exchange.
 TOKEN_V1_EP = ESTS_BASE + "/{tenant}/oauth2/token"
+AUTH_V1_EP = ESTS_BASE + "/{tenant}/oauth2/authorize"
 
 _DEFAULT_TIMEOUT = 30
 
@@ -87,19 +90,17 @@ def exchange_ests_cookie(
 ) -> dict[str, Any]:
     """Exchange an ESTS browser cookie for tokens.
 
-    Submits the cookie in a form POST to the v1 authorize endpoint,
-    which ESTS completes server-side and returns tokens directly.
+    Uses the ESTS browser session cookie for a silent v1 /authorize request
+    with prompt=none, captures the authorization code from the redirect to
+    the native-client URI, then redeems that code at the v1 /token endpoint.
 
     Returns:
         Raw ESTS response dict.
     """
-    url = TOKEN_V1_EP.format(tenant=tenant_id)
-    data = {
-        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-        "client_id": client_id,
-        "resource": resource,
-        "scope": "openid offline_access",
-    }
+    auth_url = AUTH_V1_EP.format(tenant=tenant_id)
+    token_url = TOKEN_V1_EP.format(tenant=tenant_id)
+    redirect_uri = "https://login.microsoftonline.com/common/oauth2/nativeclient"
+    state = "qm-ests"
     headers = {
         "Cookie": f"{cookie_name}={cookie_value}",
         "User-Agent": (
@@ -108,7 +109,64 @@ def exchange_ests_cookie(
             "Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0"
         ),
     }
-    return _post_token(url, data, headers=headers, http=http)
+    params = {
+        "client_id": client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "resource": resource,
+        "prompt": "none",
+        "state": state,
+    }
+    owned = http is None
+    client = http or httpx.Client(timeout=_DEFAULT_TIMEOUT, follow_redirects=False)
+    try:
+        auth_resp = client.get(
+            auth_url,
+            params=params,
+            headers=headers,
+            follow_redirects=False,
+        )
+        location = auth_resp.headers.get("location", "")
+        if not location:
+            return {
+                "error": "authorize_failed",
+                "error_description": f"Silent ESTS authorize did not return a redirect (status {auth_resp.status_code})",
+            }
+        parsed = urllib.parse.urlparse(location)
+        query = urllib.parse.parse_qs(parsed.query)
+        if "error" in query:
+            return {
+                "error": query["error"][0],
+                "error_description": query.get("error_description", [query["error"][0]])[0],
+            }
+        code = query.get("code", [None])[0]
+        returned_state = query.get("state", [""])[0]
+        if not code:
+            return {
+                "error": "authorize_failed",
+                "error_description": "Silent ESTS authorize redirect did not include an authorization code.",
+            }
+        if returned_state and returned_state != state:
+            return {
+                "error": "state_mismatch",
+                "error_description": "Silent ESTS authorize returned an unexpected state value.",
+            }
+
+        data = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "resource": resource,
+        }
+        token_resp = client.post(token_url, data=data)
+        return token_resp.json()
+    except httpx.HTTPError as e:
+        logger.debug("ESTS request failed: %s", e)
+        return {"error": "http_error", "error_description": str(e)}
+    finally:
+        if owned:
+            client.close()
 
 
 def initiate_device_code(
@@ -116,6 +174,7 @@ def initiate_device_code(
     tenant_id: str,
     client_id: str,
     resource: str,
+    scopes: list[str] | None = None,
     http: httpx.Client | None = None,
 ) -> dict[str, Any]:
     """Start a device code flow.
@@ -124,10 +183,9 @@ def initiate_device_code(
     'expires_in', and 'interval' fields.
     """
     url = DEVICE_EP.format(tenant=tenant_id)
-    scope = resource.rstrip("/") + "/.default openid offline_access"
     data = {
         "client_id": client_id,
-        "scope": scope,
+        "scope": build_scope_string(resource, scopes),
     }
     owned = http is None
     client = http or httpx.Client(timeout=_DEFAULT_TIMEOUT)
@@ -147,6 +205,7 @@ def poll_device_code(
     tenant_id: str,
     client_id: str,
     resource: str,
+    scopes: list[str] | None = None,
     interval: int = 5,
     timeout: int = 300,
     http: httpx.Client | None = None,
@@ -157,12 +216,11 @@ def poll_device_code(
     responses. Returns the final token response (success or failure).
     """
     url = TOKEN_EP.format(tenant=tenant_id)
-    scope = resource.rstrip("/") + "/.default openid offline_access"
     data = {
         "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
         "device_code": device_code,
         "client_id": client_id,
-        "scope": scope,
+        "scope": build_scope_string(resource, scopes),
     }
 
     owned = http is None
@@ -224,6 +282,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         self.server.captured_code = params.get("code", [None])[0]
         self.server.captured_state = params.get("state", [None])[0]
         self.server.captured_error = params.get("error", [None])[0]
+        self.server.captured_error_description = params.get("error_description", [None])[0]
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
@@ -245,6 +304,7 @@ class _CallbackServer(HTTPServer):
         self.captured_code: str | None = None
         self.captured_state: str | None = None
         self.captured_error: str | None = None
+        self.captured_error_description: str | None = None
         self.expected_state: str = ""
         self.port: int = port
 
@@ -266,6 +326,7 @@ def interactive_authorize(
     tenant_id: str,
     client_id: str,
     resource: str,
+    scopes: list[str] | None = None,
     timeout: int = 300,
     opener=None,
     server_factory=None,
@@ -307,7 +368,7 @@ def interactive_authorize(
     # the path, so a registered "http://localhost" only matches
     # "http://localhost:<port>" — never "http://localhost:<port>/callback".
     redirect_uri = f"http://localhost:{port}"
-    scope = resource.rstrip("/") + "/.default openid offline_access"
+    scope = build_scope_string(resource, scopes)
     params = {
         "client_id": client_id,
         "response_type": "code",
@@ -342,9 +403,13 @@ def interactive_authorize(
     code = server.captured_code
     captured_state = server.captured_state
     captured_error = server.captured_error
+    captured_error_description = getattr(server, "captured_error_description", None)
 
     if captured_error:
-        return {"error": captured_error, "error_description": captured_error}
+        return {
+            "error": captured_error,
+            "error_description": captured_error_description or captured_error,
+        }
     if not code:
         return {
             "error": "expired_token",
@@ -380,16 +445,16 @@ def exchange_refresh_token(
     tenant_id: str,
     client_id: str,
     resource: str,
+    scopes: list[str] | None = None,
     http: httpx.Client | None = None,
 ) -> dict[str, Any]:
     """Exchange a refresh token for an access token against a specific resource."""
     url = TOKEN_EP.format(tenant=tenant_id)
-    scope = resource.rstrip("/") + "/.default openid offline_access"
     data = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
         "client_id": client_id,
-        "scope": scope,
+        "scope": build_scope_string(resource, scopes),
     }
     return _post_token(url, data, http=http)
 

@@ -203,14 +203,26 @@ def ingest_prt_cookie(jwt: str) -> EntraToken:
     )
 
 
-def ingest_ests_cookie(value: str, *, tenant_id: str | None = None) -> EntraToken:
+def ingest_ests_cookie(
+    value: str,
+    *,
+    tenant_id: str | None = None,
+    cookie_name: str | None = None,
+    cookie_domain: str | None = None,
+) -> EntraToken:
     """Build an EntraToken from an ESTS cookie value (opaque, not JWT)."""
+    raw_claims: dict[str, Any] = {}
+    if cookie_name:
+        raw_claims["cookie_name"] = cookie_name
+    if cookie_domain:
+        raw_claims["cookie_domain"] = cookie_domain
     return EntraToken(
         token_type="ests_cookie",
         value=value,
         resource="",
         tenant_id=tenant_id,
         device_claims=False,
+        raw_claims=raw_claims,
     )
 
 

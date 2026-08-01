@@ -55,6 +55,12 @@ def test_import_entra_usage_cross_references_acquire_entra():
     assert "interactive" in out
 
 
+def test_import_entra_usage_mentions_browser_cdp():
+    """OUTCOME: import usage shows the browser-assisted CDP path."""
+    out = _capture(ce.import_entra, [])
+    assert "browser_cdp" in out
+
+
 def test_acquire_entra_help_prints_usage():
     out = _capture(ce.acquire_entra, ["help"])
     assert "Usage: acquire entra" in out

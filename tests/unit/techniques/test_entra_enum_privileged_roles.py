@@ -4,18 +4,19 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
+from quantum_mechanic.providers.entra.graph import GraphAccessError
 from quantum_mechanic.providers.entra.token_store import GRAPH, EntraToken, EntraTokenStore
 from quantum_mechanic.techniques.discovery.entra_enum_privileged_roles import execute
 
+
 def _future() -> datetime:
-    return datetime.now(timezone.utc) + timedelta(hours=1)
+    return datetime.now(UTC) + timedelta(hours=1)
+
 
 def _make_token(token_type: str = "access_token", foci: bool = False) -> EntraToken:
     return EntraToken(
@@ -33,6 +34,7 @@ def _make_store(token: EntraToken | None = None) -> EntraTokenStore:
     if token:
         store.add_token(token)
     return store
+
 
 def _build_ctx(store: EntraTokenStore) -> MagicMock:
     ctx = MagicMock(spec=ExecutionContext)
@@ -54,7 +56,10 @@ class TestFociExpansion:
     def test_error_when_expansion_fails(self):
         store = _make_store(_make_token("refresh_token", foci=True))
         ctx = _build_ctx(store)
-        with patch("quantum_mechanic.techniques.discovery.entra_enum_privileged_roles.foci_expand", return_value=None):
+        with patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_privileged_roles.foci_expand",
+            return_value=None,
+        ):
             result = execute(ctx)
         assert "error" in result
 
@@ -62,33 +67,31 @@ class TestFociExpansion:
         store = _make_store(_make_token("refresh_token", foci=True))
         ctx = _build_ctx(store)
         expanded = _make_token("access_token")
-        
-        mock_role_defs = [
-            {"id": "role-1", "displayName": "Global Administrator"}
-        ]
+
+        mock_role_defs = [{"id": "role-1", "displayName": "Global Administrator"}]
         mock_assignments = [
             {
                 "roleDefinitionId": "role-1",
                 "principalId": "user-1",
                 "principal": {
                     "@odata.type": "#microsoft.graph.user",
-                    "userPrincipalName": "admin@contoso.com"
-                }
+                    "userPrincipalName": "admin@contoso.com",
+                },
             }
         ]
-        
+
         with patch(
             "quantum_mechanic.techniques.discovery.entra_enum_privileged_roles.foci_expand",
             return_value=expanded,
         ), patch(
             "quantum_mechanic.techniques.discovery.entra_enum_privileged_roles.graph_list",
-            side_effect=[mock_role_defs, mock_assignments, []]
+            side_effect=[mock_role_defs, mock_assignments, []],
         ), patch(
             "quantum_mechanic.techniques.discovery.entra_enum_privileged_roles.httpx.Client",
             return_value=MagicMock(__enter__=lambda s: s, __exit__=MagicMock()),
         ):
             result = execute(ctx)
-        
+
         assert result["status"] == "success"
         assert result["provider"] == "entra"
         assert len(result["assignments"]) == 1
@@ -127,7 +130,7 @@ class TestSuccess:
 
         with patch(
             "quantum_mechanic.techniques.discovery.entra_enum_privileged_roles.graph_list",
-            side_effect=[mock_role_defs, mock_assignments, mock_pim_eligibility]
+            side_effect=[mock_role_defs, mock_assignments, mock_pim_eligibility, []],
         ), patch(
             "quantum_mechanic.techniques.discovery.entra_enum_privileged_roles.httpx.Client",
             return_value=MagicMock(__enter__=lambda s: s, __exit__=MagicMock()),
@@ -137,7 +140,7 @@ class TestSuccess:
         assert result["status"] == "success"
         assert result["provider"] == "entra"
         assert len(result["assignments"]) == 2
-        
+
         # Verify active role details
         active = [r for r in result["assignments"] if r["assignment_type"] == "Active/Permanent"][0]
         assert active["principal_name"] == "admin@contoso.com"
@@ -179,3 +182,186 @@ class TestSuccess:
         assignments_out = result["assignments"]
         assert len(assignments_out) == 1
         assert assignments_out[0]["tier"] == "ControlPlane"
+
+
+class TestPimActivatedDistinction:
+    def test_activated_pim_assignment_tagged_separately_with_expiry(self):
+        """OUTCOME: An active assignment cross-referenced in activated PIM
+        schedule instances is labeled Activated (PIM) with expiry metadata."""
+        store = _make_store(_make_token("access_token"))
+        ctx = _build_ctx(store)
+
+        mock_role_defs = [{"id": "role-1", "displayName": "Global Administrator"}]
+        mock_assignments = [
+            {
+                "roleDefinitionId": "role-1",
+                "principalId": "user-1",
+                "principal": {
+                    "@odata.type": "#microsoft.graph.user",
+                    "userPrincipalName": "alice@fabrikam.example",
+                },
+            }
+        ]
+        mock_pim_eligibility = []
+        mock_activated_instances = [
+            {
+                "roleDefinitionId": "role-1",
+                "principalId": "user-1",
+                "endDateTime": "2026-07-30T18:00:00Z",
+            }
+        ]
+
+        with patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_privileged_roles.graph_list",
+            side_effect=[
+                mock_role_defs,
+                mock_assignments,
+                mock_pim_eligibility,
+                mock_activated_instances,
+            ],
+        ), patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_privileged_roles.httpx.Client",
+            return_value=MagicMock(__enter__=lambda s: s, __exit__=MagicMock()),
+        ):
+            result = execute(ctx)
+
+        assert len(result["assignments"]) == 1
+        assignment = result["assignments"][0]
+        assert assignment["assignment_type"] == "Activated (PIM)"
+        assert assignment["expires_at"] == "2026-07-30T18:00:00Z"
+
+    def test_standing_assignment_has_no_expiry(self):
+        """OUTCOME: An active assignment absent from activated schedule
+        instances remains a standing permanent admin with no expiry."""
+        store = _make_store(_make_token("access_token"))
+        ctx = _build_ctx(store)
+
+        mock_role_defs = [{"id": "role-1", "displayName": "Global Administrator"}]
+        mock_assignments = [
+            {
+                "roleDefinitionId": "role-1",
+                "principalId": "user-2",
+                "principal": {
+                    "@odata.type": "#microsoft.graph.user",
+                    "userPrincipalName": "bob@fabrikam.example",
+                },
+            }
+        ]
+
+        with patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_privileged_roles.graph_list",
+            side_effect=[mock_role_defs, mock_assignments, [], []],
+        ), patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_privileged_roles.httpx.Client",
+            return_value=MagicMock(__enter__=lambda s: s, __exit__=MagicMock()),
+        ):
+            result = execute(ctx)
+
+        assignment = result["assignments"][0]
+        assert assignment["assignment_type"] == "Active/Permanent"
+        assert assignment["expires_at"] is None
+
+
+class TestPartialVisibility:
+    def test_returns_partial_when_optional_pim_probes_are_scope_denied(self):
+        """OUTCOME: Base privileged-role enumeration stays usable, but the
+        technique reports partial visibility and missing scopes when optional
+        PIM probes are denied."""
+        store = _make_store(_make_token("access_token"))
+        ctx = _build_ctx(store)
+
+        mock_role_defs = [{"id": "role-1", "displayName": "Global Administrator"}]
+        mock_assignments = [
+            {
+                "roleDefinitionId": "role-1",
+                "principalId": "user-2",
+                "principal": {
+                    "@odata.type": "#microsoft.graph.user",
+                    "userPrincipalName": "bob@fabrikam.example",
+                },
+            }
+        ]
+
+        eligibility_denied = GraphAccessError(
+            url="https://graph.microsoft.com/v1.0/roleManagement/directory/roleEligibilitySchedules?$expand=principal",
+            status=403,
+            code="PermissionScopeNotGranted",
+            message="missing RoleEligibilitySchedule.Read.Directory",
+            scope_hint="RoleEligibilitySchedule.Read.Directory",
+        )
+        activated_denied = GraphAccessError(
+            url=(
+                "https://graph.microsoft.com/v1.0/roleManagement/directory/"
+                "roleAssignmentScheduleInstances?$filter=assignmentType eq 'Activated'"
+            ),
+            status=403,
+            code="PermissionScopeNotGranted",
+            message="missing RoleAssignmentSchedule.Read.Directory",
+            scope_hint="RoleAssignmentSchedule.Read.Directory",
+        )
+
+        with patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_privileged_roles.graph_list",
+            side_effect=[
+                mock_role_defs,
+                mock_assignments,
+                eligibility_denied,
+                activated_denied,
+            ],
+        ), patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_privileged_roles.httpx.Client",
+            return_value=MagicMock(__enter__=lambda s: s, __exit__=MagicMock()),
+        ):
+            result = execute(ctx)
+
+        assert result["status"] == "partial"
+        assert len(result["assignments"]) == 1
+        assert result["visibility"] == {
+            "active_assignments": True,
+            "pim_eligibility": False,
+            "pim_activated": False,
+        }
+        assert result["missing_scopes"] == [
+            "RoleAssignmentSchedule.Read.Directory",
+            "RoleEligibilitySchedule.Read.Directory",
+        ]
+        assert result["partial_reasons"] == [
+            "PIM eligibility visibility denied",
+            "PIM activated-assignment visibility denied",
+        ]
+
+    def test_returns_success_when_optional_pim_probes_are_empty_but_allowed(self):
+        """OUTCOME: Empty optional PIM views are still a full success when
+        Graph allowed the probes."""
+        store = _make_store(_make_token("access_token"))
+        ctx = _build_ctx(store)
+
+        mock_role_defs = [{"id": "role-1", "displayName": "Global Administrator"}]
+        mock_assignments = [
+            {
+                "roleDefinitionId": "role-1",
+                "principalId": "user-2",
+                "principal": {
+                    "@odata.type": "#microsoft.graph.user",
+                    "userPrincipalName": "bob@fabrikam.example",
+                },
+            }
+        ]
+
+        with patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_privileged_roles.graph_list",
+            side_effect=[mock_role_defs, mock_assignments, [], []],
+        ), patch(
+            "quantum_mechanic.techniques.discovery.entra_enum_privileged_roles.httpx.Client",
+            return_value=MagicMock(__enter__=lambda s: s, __exit__=MagicMock()),
+        ):
+            result = execute(ctx)
+
+        assert result["status"] == "success"
+        assert result["visibility"] == {
+            "active_assignments": True,
+            "pim_eligibility": True,
+            "pim_activated": True,
+        }
+        assert result["missing_scopes"] == []
+        assert result["partial_reasons"] == []

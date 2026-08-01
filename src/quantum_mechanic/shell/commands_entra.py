@@ -37,6 +37,11 @@ _IMPORT_USAGE = """\
 
   Import subcommands:
     browserdump <path>                              Parse browserdump JSON output
+    browser_cdp  [--browser edge|chrome]            Print local Chrome/Edge CDP launch guidance
+                 [--os windows|linux|macos]         for operator-assisted browser import
+                 [--port <n>] [--browser-path <p>]
+                 [--user-data-dir <p>]
+                 [--launch] [--attach] [--host <h>]
     roadtools   <path>                              Import .roadtools_auth file
     access_token <jwt>                              Raw JWT access token
     refresh_token <token> --tenant <id>             Raw refresh token
@@ -62,8 +67,9 @@ _ACQUIRE_USAGE = """\
 
   Subcommands:
     device_code  [--client <id>] [--resource <res>] [--tenant <id>]
+                 [--scope <perm> | --bundle <name>]
     interactive  [--tenant <id>] [--client <id>] [--resource <res>]
-                 [--timeout <secs>]
+                 [--timeout <secs>] [--scope <perm> | --bundle <name>]
     ropc         --username <upn> --password <pass> --tenant <id>
                  [--resource <res>]
     refresh      [--resource <res>] [--client <id>]
@@ -73,6 +79,9 @@ _ACQUIRE_USAGE = """\
 
   --client also accepts a short alias instead of a raw GUID:
     office | vs-legacy | az-cli | az-ps | graph-cli
+
+  Scope bundles:
+    basic-graph | ca-read | pim-read | entra-admin-read
 """
 
 _EXPORT_USAGE = """\
@@ -103,6 +112,8 @@ def import_entra(state: ShellState, args: list[str]) -> None:
         console.print(_IMPORT_USAGE)
     elif sub == "browserdump":
         _import_browserdump(state, rest, opts)
+    elif sub == "browser_cdp":
+        _import_browser_cdp(state, opts)
     elif sub == "roadtools":
         _import_roadtools(state, rest, opts)
     elif sub == "access_token":
@@ -171,11 +182,13 @@ def _import_browserdump(
         # Exchange ESTS cookies.
         for tok in [t for t in store.tokens if t.token_type == "ests_cookie" and t.value]:
             tenant = store.tenant_id or tok.tenant_id or "common"
+            cookie_name = tok.raw_claims.get("cookie_name", "ESTSAUTHPERSISTENT")
             resp = exchange_ests_cookie(
                 tok.value,
                 tenant_id=tenant,
                 client_id=FOCI_DEFAULT_CLIENT,
                 resource=_GRAPH,
+                cookie_name=cookie_name,
             )
             if "access_token" in resp:
                 _apply_token_response(
@@ -186,6 +199,132 @@ def _import_browserdump(
         if cred_id:
             _set_active(state, cred_id, store)
             _print_import_summary(store, cred_id)
+
+
+def _import_browser_cdp(state: ShellState, opts: dict[str, str]) -> None:
+    """Phase 1: print cross-platform browser CDP launch guidance."""
+    from quantum_mechanic.providers.entra.exchange import (
+        exchange_ests_cookie,
+        exchange_prt_cookie,
+    )
+    from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
+    from quantum_mechanic.providers.entra.browser_cdp import (
+        build_launch_plan,
+        detect_os_name,
+        import_browser_session,
+        launch_browser,
+    )
+
+    browser = opts.get("browser", "edge")
+    os_name = opts.get("os") or detect_os_name()
+    port = int(opts.get("port", "9222"))
+    host = opts.get("host", "127.0.0.1")
+    browser_path = opts.get("browser-path")
+    user_data_dir = opts.get("user-data-dir")
+
+    if opts.get("attach") == "true":
+        try:
+            store, meta = import_browser_session(host=host, port=port)
+        except ValueError as e:
+            console.print(f"  [red]✗[/red] {e}")
+            return
+        except OSError as e:
+            console.print(f"  [red]✗[/red] Failed to attach to browser CDP: {e}")
+            return
+
+        prt = store.prt_cookie()
+        if prt and not prt.is_expired:
+            tenant = store.tenant_id or prt.tenant_id or "common"
+            resp = exchange_prt_cookie(
+                prt.value,
+                tenant_id=tenant,
+                client_id=FOCI_DEFAULT_CLIENT,
+                resource=_GRAPH,
+            )
+            _apply_token_response(store, resp, resource=_GRAPH, client_id=FOCI_DEFAULT_CLIENT)
+
+        for tok in [t for t in store.tokens if t.token_type == "ests_cookie" and t.value]:
+            tenant = store.tenant_id or tok.tenant_id or "common"
+            cookie_name = tok.raw_claims.get("cookie_name", "ESTSAUTHPERSISTENT")
+            resp = exchange_ests_cookie(
+                tok.value,
+                tenant_id=tenant,
+                client_id=FOCI_DEFAULT_CLIENT,
+                resource=_GRAPH,
+                cookie_name=cookie_name,
+            )
+            if "access_token" in resp:
+                _apply_token_response(
+                    store, resp, resource=_GRAPH, client_id=FOCI_DEFAULT_CLIENT
+                )
+
+        cred_id = _persist_store(state, store)
+        if cred_id:
+            _set_active(state, cred_id, store)
+            graph_ready = store.best_token(_GRAPH) is not None
+            console.print(
+                "  [green]✓[/green] Imported browser-derived Microsoft auth "
+                f"artifacts from {meta.get('browser_name', 'browser')} "
+                f"({meta.get('cookie_count', 0)} cookie(s))"
+            )
+            if graph_ready:
+                console.print("  [dim]Graph ready:[/dim] yes")
+            else:
+                console.print(
+                    "  [dim]Graph ready:[/dim] not yet — browser cookies were imported, but no "
+                    "usable Graph token was derived on this attach."
+                )
+            _print_import_summary(store, cred_id)
+        return
+
+    launcher = launch_browser if opts.get("launch") == "true" else build_launch_plan
+    try:
+        plan = launcher(
+            browser=browser,
+            os_name=os_name,
+            port=port,
+            browser_path=browser_path,
+            user_data_dir=user_data_dir,
+        )
+    except ValueError as e:
+        console.print(f"  [red]✗[/red] {e}")
+        return
+    except OSError as e:
+        console.print(f"  [red]✗[/red] Failed to launch browser: {e}")
+        return
+
+    display_browser = "Edge" if plan.browser == "edge" else "Chrome"
+    console.print(
+        f"  [bold]Browser-assisted Entra import (Phase 1)[/bold] — "
+        f"{display_browser} on {plan.os_name}"
+    )
+    console.print()
+    if opts.get("launch") == "true":
+        console.print("  [green]✓[/green] Launched temp browser profile.")
+        console.print("  1. QM launched a separate browser profile with CDP enabled:")
+    else:
+        console.print("  1. Launch a separate browser profile with CDP enabled:")
+    console.print(f"     [cyan]{plan.command}[/cyan]")
+    console.print()
+    console.print("  2. In that launched browser, sign in to the Microsoft app/page")
+    console.print("     that demonstrates the visibility you need (Entra portal, Azure portal, PIM, etc.).")
+    console.print()
+    console.print("  3. Keep that browser session open. Phase 2 will attach to the")
+    console.print("     CDP endpoint and import usable auth artifacts.")
+    console.print()
+    console.print(
+        "  [dim]Port:[/dim] "
+        f"{plan.port}    [dim]Profile:[/dim] {plan.user_data_dir}"
+    )
+    console.print(
+        "  [dim]This is separate from `acquire entra interactive` — the "
+        "browser session may see data through a different Microsoft app or "
+        "backend token path.[/dim]"
+    )
+    console.print(
+        "  [dim]Next step after launch/sign-in: rerun `import entra browser_cdp` "
+        "once the attach/import slice lands.[/dim]"
+    )
 
 
 def _import_roadtools(
@@ -418,13 +557,26 @@ def _acquire_device_code(state: ShellState, opts: dict[str, str]) -> None:
         poll_device_code,
     )
     from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT, resolve_client_alias
+    scope_label, scopes = _resolve_explicit_scopes(opts)
+    if scope_label is None and ("scope" in opts or "bundle" in opts):
+        return
 
     tenant = opts.get("tenant", "common")
     client_id = resolve_client_alias(opts.get("client")) or FOCI_DEFAULT_CLIENT
     resource = opts.get("resource", _GRAPH)
+    if scopes and not _preflight_scope_request(client_id, scopes, resource=resource):
+        return
 
     console.print("  Initiating device code flow...")
-    dc = initiate_device_code(tenant_id=tenant, client_id=client_id, resource=resource)
+    if scope_label:
+        console.print(f"  [dim]Acquisition mode: {scope_label}[/dim]")
+        console.print(f"  [dim]Requested scopes: {', '.join(scopes)}[/dim]")
+    dc = initiate_device_code(
+        tenant_id=tenant,
+        client_id=client_id,
+        resource=resource,
+        scopes=scopes,
+    )
 
     if "error" in dc:
         console.print(f"  [red]✗[/red] {dc.get('error_description', dc['error'])}")
@@ -446,6 +598,7 @@ def _acquire_device_code(state: ShellState, opts: dict[str, str]) -> None:
         tenant_id=tenant,
         client_id=client_id,
         resource=resource,
+        scopes=scopes,
         interval=interval,
         timeout=expires_in,
     )
@@ -478,23 +631,32 @@ def _acquire_interactive(state: ShellState, opts: dict[str, str]) -> None:
         INTERACTIVE_DEFAULT_CLIENT,
         resolve_client_alias,
     )
+    scope_label, scopes = _resolve_explicit_scopes(opts)
+    if scope_label is None and ("scope" in opts or "bundle" in opts):
+        return
 
     tenant = opts.get("tenant", "common")
     client_id = resolve_client_alias(opts.get("client")) or INTERACTIVE_DEFAULT_CLIENT
     resource = opts.get("resource", _GRAPH)
     timeout = int(opts.get("timeout", "300"))
+    if scopes and not _preflight_scope_request(client_id, scopes, resource=resource):
+        return
 
     console.print("  Opening browser for interactive sign-in...")
     console.print(
         f"  [dim]Tenant: {tenant}   Client: {client_id[:8]}...   "
         f"Resource: {resource}[/dim]"
     )
+    if scope_label:
+        console.print(f"  [dim]Acquisition mode: {scope_label}[/dim]")
+        console.print(f"  [dim]Requested scopes: {', '.join(scopes)}[/dim]")
     console.print(f"  [dim]Waiting up to {timeout}s for callback...[/dim]")
 
     resp = interactive_authorize(
         tenant_id=tenant,
         client_id=client_id,
         resource=resource,
+        scopes=scopes,
         timeout=timeout,
     )
 
@@ -1087,6 +1249,68 @@ def _print_no_entra_cred_guidance(state: ShellState, action: str) -> None:
 def _cap_guidance(error_text: str) -> str | None:
     from quantum_mechanic.providers.entra.token_store import EntraTokenStore
     return EntraTokenStore.cap_guidance(error_text)
+
+
+def _client_scope_compatibility(client_id: str, scopes: list[str]) -> tuple[bool, list[str]]:
+    """Return whether a first-party client can request the delegated scopes."""
+    from quantum_mechanic.providers.entra.refs import client_preconsented_graph_perms
+
+    granted = set(client_preconsented_graph_perms(client_id))
+    missing = [scope for scope in scopes if scope not in granted]
+    return not missing, missing
+
+
+def _preflight_scope_request(client_id: str, scopes: list[str], *, resource: str) -> bool:
+    """Reject impossible first-party scope requests before opening a browser."""
+    from quantum_mechanic.providers.entra.refs import app_display_name
+
+    compatible, missing = _client_scope_compatibility(client_id, scopes)
+    if compatible:
+        return True
+
+    client_name = app_display_name(client_id) or client_id
+    console.print(
+        f"  [red]✗[/red] Client [bold]{client_name}[/bold] cannot request the "
+        f"selected delegated scope(s) for {resource}."
+    )
+    console.print(f"  [dim]Missing on this client: {', '.join(missing)}[/dim]")
+    console.print(
+        "  [dim]If you can view this in Edge/Chrome, that may be a portal/browser "
+        "session using a different Microsoft app or backend token path.[/dim]"
+    )
+    console.print(
+        "  [dim]Next options: import entra browserdump <path> from that browser "
+        "context, or use a custom app registration with those delegated "
+        "permissions granted.[/dim]"
+    )
+    return False
+
+
+def _resolve_explicit_scopes(opts: dict[str, str]) -> tuple[str | None, list[str] | None]:
+    """Parse mutually-exclusive --scope / --bundle acquisition options."""
+    from quantum_mechanic.providers.entra.scope_bundles import resolve_scope_bundle
+
+    scope = opts.get("scope")
+    bundle = opts.get("bundle")
+
+    if scope and bundle:
+        console.print("  [red]✗[/red] --scope and --bundle are mutually exclusive.")
+        return None, None
+
+    if scope:
+        return f"scope:{scope}", [scope]
+
+    if bundle:
+        resolved = resolve_scope_bundle(bundle)
+        if resolved is None:
+            console.print(f"  [red]✗[/red] Unknown bundle: {bundle}")
+            console.print(
+                "  [dim]Known bundles: basic-graph, ca-read, pim-read, entra-admin-read[/dim]"
+            )
+            return None, None
+        return f"bundle:{bundle}", resolved
+
+    return None, None
 
 
 def _print_import_summary(store: EntraTokenStore, cred_id: int) -> None:

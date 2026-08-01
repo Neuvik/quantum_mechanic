@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import logging
 import logging.handlers
+import os
 import shlex
 from pathlib import Path
 
@@ -159,7 +160,8 @@ def run_shell(args: argparse.Namespace) -> None:
     # --------------------------------------------------------
     # Setup logging — split between minimal console and verbose file
     # --------------------------------------------------------
-    log_dir = Path.home() / ".quantum_mechanic" / "logs"
+    qm_home = Path(os.environ.get("QM_HOME", "")) if os.environ.get("QM_HOME") else Path.home()
+    log_dir = qm_home / ".quantum_mechanic" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
     root_logger = logging.getLogger()
@@ -226,7 +228,7 @@ def run_shell(args: argparse.Namespace) -> None:
     # --------------------------------------------------------
     # Setup prompt with history.
     # --------------------------------------------------------
-    history_dir = Path.home() / ".quantum_mechanic"
+    history_dir = qm_home / ".quantum_mechanic"
     history_dir.mkdir(parents=True, exist_ok=True)
     history_file = history_dir / "shell_history"
 
@@ -323,4 +325,3 @@ def _handle_command(state: ShellState, cmd_name: str, cmd_args: list[str]) -> No
         return
 
     handler(state, cmd_args)
-

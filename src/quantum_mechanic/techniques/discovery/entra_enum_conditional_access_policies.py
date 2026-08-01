@@ -161,7 +161,26 @@ def format_conditional_access_policies_result(result: Any) -> None:
         console.print("  [dim]No Conditional Access policies found.[/dim]")
         return
 
-    console.print(f"  [bold green]✓[/bold green] Discovered [bold cyan]{len(policies)}[/bold cyan] CA policy/policies")
+    glyph = "[bold yellow]⚠[/bold yellow]" if status == "partial" else "[bold green]✓[/bold green]"
+    console.print(f"  {glyph} Discovered [bold cyan]{len(policies)}[/bold cyan] CA policy/policies")
+    if status == "partial":
+        resolution = data.get("resolution") or {}
+        unresolved_count = resolution.get("unresolved_count", 0)
+        if unresolved_count:
+            console.print(
+                "    [yellow]Object resolution incomplete[/yellow]"
+                f" — [bold]{unresolved_count}[/bold] referenced ID(s) remain unresolved."
+            )
+        if resolution.get("fallback_skipped_due_to_budget"):
+            console.print(
+                "    [dim]Large unresolved set detected. QM skipped expensive per-ID Graph fallback "
+                "to avoid throttling and returned raw IDs where necessary.[/dim]"
+            )
+        if resolution.get("throttling_observed"):
+            console.print(
+                "    [dim]Graph throttling was observed during identity enrichment. "
+                "Policy coverage is real; name enrichment is partial.[/dim]"
+            )
     # OR-across-categories semantics banner. A user is exempted from a CA
     # policy if ANY single exclusion category matches — this is the
     # attacker-useful mental model that isn't obvious from the raw JSON.
@@ -736,10 +755,21 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
             
     return mapping
 
-def resolve_directory_objects(http: httpx.Client, headers: dict[str, str], ids: list[str]) -> dict[str, str]:
-    """Resolve directory object IDs (GUIDs) to names via Microsoft Graph API POST getByIds."""
+def _resolve_directory_objects_with_diagnostics(
+    http: httpx.Client,
+    headers: dict[str, str],
+    ids: list[str],
+) -> tuple[dict[str, str], dict[str, Any]]:
+    """Resolve directory object IDs and report whether enrichment was degraded."""
     if not ids:
-        return {}
+        return {}, {
+            "attempted": 0,
+            "resolved_count": 0,
+            "unresolved_count": 0,
+            "fallback_skipped_due_to_budget": False,
+            "throttling_observed": False,
+            "sample_unresolved_ids": [],
+        }
 
     import re
     # Match standard GUID or typical test mock IDs (e.g. guid-1, mock-user)
@@ -750,9 +780,17 @@ def resolve_directory_objects(http: httpx.Client, headers: dict[str, str], ids: 
     valid_ids = [x for x in ids if x and uuid_pattern.match(str(x))]
     
     if not valid_ids:
-        return {}
+        return {}, {
+            "attempted": 0,
+            "resolved_count": 0,
+            "unresolved_count": 0,
+            "fallback_skipped_due_to_budget": False,
+            "throttling_observed": False,
+            "sample_unresolved_ids": [],
+        }
 
     resolved = {}
+    throttling_observed = False
     chunk_size = 900
     for i in range(0, len(valid_ids), chunk_size):
         chunk = valid_ids[i:i+chunk_size]
@@ -772,63 +810,35 @@ def resolve_directory_objects(http: httpx.Client, headers: dict[str, str], ids: 
                     name = obj.get("userPrincipalName") or obj.get("displayName") or obj_id
                     resolved[obj_id] = name
             else:
+                if resp.status_code == 429:
+                    throttling_observed = True
                 logger.debug("getByIds returned status code %d: %s", resp.status_code, resp.text)
         except Exception as e:
             logger.debug("Failed to resolve directory objects via getByIds: %s", e)
 
-    # Fallback for any unresolved GUIDs (e.g. if getByIds returned 403 Forbidden due to limited scopes)
+    # Large per-ID fallback fans out aggressively and is what caused the 429 storm
+    # during live operator testing. Keep the fallback budget tight.
     unresolved_ids = [x for x in valid_ids if x not in resolved]
+    max_individual_fallback_ids = 8
     if unresolved_ids:
+        if len(unresolved_ids) > max_individual_fallback_ids:
+            logger.debug(
+                "Skipping per-ID fallback for %d unresolved ID(s) to avoid Graph throttling",
+                len(unresolved_ids),
+            )
+            return resolved, {
+                "attempted": len(valid_ids),
+                "resolved_count": len(resolved),
+                "unresolved_count": len(unresolved_ids),
+                "fallback_skipped_due_to_budget": True,
+                "throttling_observed": throttling_observed,
+                "sample_unresolved_ids": unresolved_ids[:5],
+            }
+
         logger.debug("Attempting individual fallback resolution for %d unresolved ID(s)", len(unresolved_ids))
-        # Limit individual calls to avoid flooding (max 30 calls)
-        for obj_id in unresolved_ids[:30]:
+        for obj_id in unresolved_ids:
             # --------------------------------------------------------
-            # 1. Try Group (most common target for CA policies)
-            # --------------------------------------------------------
-            try:
-                url_g = f"https://graph.microsoft.com/v1.0/groups/{obj_id}"
-                resp_g = _graph_call(http, "GET", url_g, headers=headers)
-                if resp_g.status_code == 200:
-                    g_data = resp_g.json()
-                    name = g_data.get("displayName")
-                    if name:
-                        resolved[obj_id] = name
-                        continue
-            except Exception as ex_g:
-                logger.debug("Failed to resolve group %s in fallback: %s", obj_id, ex_g)
-
-            # --------------------------------------------------------
-            # 2. Try User
-            # --------------------------------------------------------
-            try:
-                url_u = f"https://graph.microsoft.com/v1.0/users/{obj_id}"
-                resp_u = _graph_call(http, "GET", url_u, headers=headers)
-                if resp_u.status_code == 200:
-                    u_data = resp_u.json()
-                    name = u_data.get("userPrincipalName") or u_data.get("displayName")
-                    if name:
-                        resolved[obj_id] = name
-                        continue
-            except Exception as ex_u:
-                logger.debug("Failed to resolve user %s in fallback: %s", obj_id, ex_u)
-
-            # --------------------------------------------------------
-            # 3. Try Service Principal
-            # --------------------------------------------------------
-            try:
-                url_sp = f"https://graph.microsoft.com/v1.0/servicePrincipals/{obj_id}"
-                resp_sp = _graph_call(http, "GET", url_sp, headers=headers)
-                if resp_sp.status_code == 200:
-                    sp_data = resp_sp.json()
-                    name = sp_data.get("displayName")
-                    if name:
-                        resolved[obj_id] = name
-                        continue
-            except Exception as ex_sp:
-                logger.debug("Failed to resolve service principal %s in fallback: %s", obj_id, ex_sp)
-
-            # --------------------------------------------------------
-            # 4. Try generic Directory Object (resilient if Directory.Read.All is held instead of type-specific permissions)
+            # 1. Try generic Directory Object first.
             # --------------------------------------------------------
             try:
                 url_do = f"https://graph.microsoft.com/v1.0/directoryObjects/{obj_id}"
@@ -839,8 +849,61 @@ def resolve_directory_objects(http: httpx.Client, headers: dict[str, str], ids: 
                     if name:
                         resolved[obj_id] = name
                         continue
+                if resp_do.status_code == 429:
+                    throttling_observed = True
             except Exception as ex_do:
                 logger.debug("Failed to resolve directory object %s in fallback: %s", obj_id, ex_do)
+
+            # --------------------------------------------------------
+            # 2. Try Group
+            # --------------------------------------------------------
+            try:
+                url_g = f"https://graph.microsoft.com/v1.0/groups/{obj_id}"
+                resp_g = _graph_call(http, "GET", url_g, headers=headers)
+                if resp_g.status_code == 200:
+                    g_data = resp_g.json()
+                    name = g_data.get("displayName")
+                    if name:
+                        resolved[obj_id] = name
+                        continue
+                if resp_g.status_code == 429:
+                    throttling_observed = True
+            except Exception as ex_g:
+                logger.debug("Failed to resolve group %s in fallback: %s", obj_id, ex_g)
+
+            # --------------------------------------------------------
+            # 3. Try User
+            # --------------------------------------------------------
+            try:
+                url_u = f"https://graph.microsoft.com/v1.0/users/{obj_id}"
+                resp_u = _graph_call(http, "GET", url_u, headers=headers)
+                if resp_u.status_code == 200:
+                    u_data = resp_u.json()
+                    name = u_data.get("userPrincipalName") or u_data.get("displayName")
+                    if name:
+                        resolved[obj_id] = name
+                        continue
+                if resp_u.status_code == 429:
+                    throttling_observed = True
+            except Exception as ex_u:
+                logger.debug("Failed to resolve user %s in fallback: %s", obj_id, ex_u)
+
+            # --------------------------------------------------------
+            # 4. Try Service Principal
+            # --------------------------------------------------------
+            try:
+                url_sp = f"https://graph.microsoft.com/v1.0/servicePrincipals/{obj_id}"
+                resp_sp = _graph_call(http, "GET", url_sp, headers=headers)
+                if resp_sp.status_code == 200:
+                    sp_data = resp_sp.json()
+                    name = sp_data.get("displayName")
+                    if name:
+                        resolved[obj_id] = name
+                        continue
+                if resp_sp.status_code == 429:
+                    throttling_observed = True
+            except Exception as ex_sp:
+                logger.debug("Failed to resolve service principal %s in fallback: %s", obj_id, ex_sp)
 
             # --------------------------------------------------------
             # 5. Try Directory Role
@@ -854,6 +917,8 @@ def resolve_directory_objects(http: httpx.Client, headers: dict[str, str], ids: 
                     if name:
                         resolved[obj_id] = name
                         continue
+                if resp_dr.status_code == 429:
+                    throttling_observed = True
             except Exception as ex_dr:
                 logger.debug("Failed to resolve directory role %s in fallback: %s", obj_id, ex_dr)
 
@@ -869,6 +934,8 @@ def resolve_directory_objects(http: httpx.Client, headers: dict[str, str], ids: 
                     if name:
                         resolved[obj_id] = name
                         continue
+                if resp_rd.status_code == 429:
+                    throttling_observed = True
             except Exception as ex_rd:
                 logger.debug("Failed to resolve role definition %s in fallback: %s", obj_id, ex_rd)
 
@@ -884,6 +951,8 @@ def resolve_directory_objects(http: httpx.Client, headers: dict[str, str], ids: 
                     if name:
                         resolved[obj_id] = name
                         continue
+                if resp_d.status_code == 429:
+                    throttling_observed = True
             except Exception as ex_d:
                 logger.debug("Failed to resolve device %s in fallback: %s", obj_id, ex_d)
 
@@ -899,9 +968,25 @@ def resolve_directory_objects(http: httpx.Client, headers: dict[str, str], ids: 
                     if name:
                         resolved[obj_id] = f"{name} (Deleted)"
                         continue
+                if resp_del.status_code == 429:
+                    throttling_observed = True
             except Exception as ex_del:
                 logger.debug("Failed to resolve deleted item %s in fallback: %s", obj_id, ex_del)
-            
+
+    remaining = [x for x in valid_ids if x not in resolved]
+    return resolved, {
+        "attempted": len(valid_ids),
+        "resolved_count": len(resolved),
+        "unresolved_count": len(remaining),
+        "fallback_skipped_due_to_budget": False,
+        "throttling_observed": throttling_observed,
+        "sample_unresolved_ids": remaining[:5],
+    }
+
+
+def resolve_directory_objects(http: httpx.Client, headers: dict[str, str], ids: list[str]) -> dict[str, str]:
+    """Backward-compatible wrapper returning only the resolved mapping."""
+    resolved, _ = _resolve_directory_objects_with_diagnostics(http, headers, ids)
     return resolved
 
 @technique(
@@ -930,6 +1015,15 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
     headers = {"Authorization": f"Bearer {token.value}"}
     parsed_policies = []
+    partial_reasons: list[str] = []
+    resolution = {
+        "attempted": 0,
+        "resolved_count": 0,
+        "unresolved_count": 0,
+        "fallback_skipped_due_to_budget": False,
+        "throttling_observed": False,
+        "sample_unresolved_ids": [],
+    }
 
     with httpx.Client(timeout=30) as http:
         ctx.info("Enumerating Conditional Access policies...")
@@ -1039,8 +1133,10 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         unresolved = [g for g in guids if g not in resolved]
         if unresolved:
             ctx.info(f"Resolving {len(unresolved)} unique object ID(s) via Graph API...")
-            api_resolved = resolve_directory_objects(http, headers, unresolved)
+            api_resolved, resolution = _resolve_directory_objects_with_diagnostics(http, headers, unresolved)
             resolved.update(api_resolved)
+            if resolution.get("unresolved_count", 0) > 0:
+                partial_reasons.append("Directory object resolution incomplete")
 
         resolved_lower = {k.lower(): v for k, v in resolved.items() if k}
         def resolve_list(lst: list[str]) -> list[str]:
@@ -1366,11 +1462,15 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                             mitre_id="T1580"
                         )
 
+    status = "partial" if partial_reasons else "success"
+
     return {
         "provider": "entra",
-        "status": "success",
+        "status": status,
         "policies": parsed_policies,
-        "tenant_id": store.tenant_id
+        "tenant_id": store.tenant_id,
+        "partial_reasons": partial_reasons,
+        "resolution": resolution,
     }
 
 
@@ -1526,4 +1626,3 @@ def explain_controls(controls_str: str) -> list[str]:
             )
 
     return explanations
-
