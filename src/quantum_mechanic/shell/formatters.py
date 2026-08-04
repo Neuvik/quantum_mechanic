@@ -389,7 +389,7 @@ def format_techniques_list(techniques: list[RegisteredTechnique]) -> None:
 
     for t in techniques:
         safe_icon = "[green]✓[/green]" if t.metadata.safe else "[red]✗[/red]"
-        providers = ", ".join(t.metadata.providers)
+        providers = ", ".join(t.metadata.providers) if t.metadata.providers else "unauthenticated"
         table.add_row(
             t.metadata.id,
             t.metadata.tactic,

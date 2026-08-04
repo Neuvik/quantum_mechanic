@@ -2,12 +2,14 @@
 
 | | |
 |---|---|
-| **Version** | v0.1.0 |
-| **Issued** | 2026-03-09 |
-| **Last reviewed** | 2026-03-12 |
+| **Version** | v1.0-rc2 |
+| **Issued** | 2026-08-04 |
+| **Last reviewed** | 2026-08-04 |
 | **Status** | Active |
 
-Quantum Mechanic (QM) is a cross-cloud offensive security framework covering the full MITRE ATT&CK Cloud matrix — AWS, Azure, GCP, and OCI — from a single shell.
+Quantum Mechanic (QM) is a cross-cloud offensive security framework covering
+cloud and identity workflows across AWS, Azure, Entra, GCP, and OCI from a
+single shell.
 
 ```
 qm[acme-prod][aws:AKIA...]> run discovery/enum_iam
@@ -37,4 +39,4 @@ qm[acme-prod][aws:AKIA...]> run discovery/enum_iam
 
 See [Release Notes](./Release-Notes.md) for what changed in each version.
 
-**Current:** `v0.1.0` — initial release (2026-03-09)
+**Current:** `v1.0-rc2` — public release candidate (2026-08-04)

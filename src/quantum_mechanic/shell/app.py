@@ -132,7 +132,7 @@ def _build_completer(state: ShellState) -> NestedCompleter:
         "quit": None,
     }
 
-    # ── Conditional Private Commands (Public Hygiene) ──────────────
+    # ── Optional commands loaded when available ────────────────────
     if "exploits" in COMMANDS:
         completions["exploits"] = {
             "list": None,
@@ -151,8 +151,40 @@ def _build_completer(state: ShellState) -> NestedCompleter:
         completions["connect"] = None
     if "disconnect" in COMMANDS:
         completions["disconnect"] = None
+    if "playbook" in COMMANDS:
+        completions["playbook"] = {"list": None, "run": None}
+    if "loot" in COMMANDS:
+        completions["loot"] = technique_ids
+    if "activity" in COMMANDS:
+        completions["activity"] = technique_ids
+    if "check-ca-bypasses" in COMMANDS:
+        completions["check-ca-bypasses"] = None
+    if "acquire" in COMMANDS:
+        completions["acquire"] = {"entra": {"device_code": None, "interactive": None, "ropc": None, "refresh": None, "arm": None}}
+    if "export" in COMMANDS:
+        completions["export"] = {"entra": {"roadtools": None, "token": None, "describe": None}}
 
     return NestedCompleter.from_nested_dict(completions)
+
+
+def _attach_file_logger(root_logger: logging.Logger, log_dir: Path) -> None:
+    """Attach the rotating file logger when the target path is writable."""
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.handlers.RotatingFileHandler(
+            str(log_dir / "qm.log"),
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+        )
+    except OSError as exc:
+        logger.warning("File logging disabled: %s", exc)
+        return
+
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
+    root_logger.addHandler(file_handler)
 
 
 def run_shell(args: argparse.Namespace) -> None:
@@ -162,7 +194,6 @@ def run_shell(args: argparse.Namespace) -> None:
     # --------------------------------------------------------
     qm_home = Path(os.environ.get("QM_HOME", "")) if os.environ.get("QM_HOME") else Path.home()
     log_dir = qm_home / ".quantum_mechanic" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
 
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
@@ -172,18 +203,8 @@ def run_shell(args: argparse.Namespace) -> None:
     console_handler.setLevel(logging.WARNING)
     console_handler.setFormatter(logging.Formatter("%(message)s"))
 
-    # Verbose file sink
-    # Rotating handler — see agent/mode.py for the 252 GB story.
-    file_handler = logging.handlers.RotatingFileHandler(
-        str(log_dir / "qm.log"),
-        maxBytes=10 * 1024 * 1024,
-        backupCount=5,
-    )
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
-
     root_logger.addHandler(console_handler)
-    root_logger.addHandler(file_handler)
+    _attach_file_logger(root_logger, log_dir)
 
     # --------------------------------------------------------
     # Initialize core components.

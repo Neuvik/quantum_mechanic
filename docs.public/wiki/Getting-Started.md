@@ -1,12 +1,10 @@
 # Getting Started
 
-> **`🔓 PUBLIC`**
-
 | | |
 |---|---|
-| **Version** | v0.1.0 |
-| **Issued** | 2026-03-09 |
-| **Last reviewed** | 2026-03-09 |
+| **Version** | v1.0-rc2 |
+| **Issued** | 2026-08-04 |
+| **Last reviewed** | 2026-08-04 |
 | **Status** | Active |
 
 ---
@@ -25,8 +23,8 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ## 2. Installation
 
 ```bash
-git clone <repo>
-cd quantum_mechanic
+# From a checkout of the public repository:
+cd /path/to/quantum_mechanic
 uv sync
 ```
 

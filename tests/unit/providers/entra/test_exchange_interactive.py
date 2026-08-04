@@ -95,6 +95,51 @@ def test_interactive_authorize_returns_token_on_successful_exchange():
     assert "code_verifier" in post_data
 
 
+def test_interactive_authorize_uses_explicit_scopes_when_requested():
+    """OUTCOME: explicit delegated scopes replace resource/.default in both
+    the browser URL and the token exchange POST."""
+    fake_server = MagicMock()
+    fake_server.captured_code = "fake-auth-code"
+    fake_server.captured_state = "fake-state"
+    fake_server.captured_error = None
+    fake_server.expected_state = "fake-state"
+    fake_server.port = 54321
+    if hasattr(fake_server, "handle_request"):
+        del fake_server.handle_request
+
+    opened_urls: list[str] = []
+
+    def fake_opener(url: str) -> bool:
+        opened_urls.append(url)
+        fake_server.captured_state = fake_server.expected_state
+        return True
+
+    mock_resp = MagicMock(status_code=200, json=lambda: {"access_token": "eyJ.fake"})
+
+    with patch("quantum_mechanic.providers.entra.exchange.httpx.Client") as mock_httpx:
+        mock_client = MagicMock()
+        mock_httpx.return_value.__enter__.return_value = mock_client
+        mock_client.post.return_value = mock_resp
+
+        interactive_authorize(
+            tenant_id="t-1",
+            client_id="c-1",
+            resource="https://graph.microsoft.com",
+            scopes=["User.Read", "RoleManagement.Read.Directory"],
+            opener=fake_opener,
+            server_factory=lambda port: fake_server,
+        )
+
+    assert "https%3A%2F%2Fgraph.microsoft.com%2FUser.Read" in opened_urls[0]
+    assert "/.default" not in opened_urls[0]
+    post_data = mock_client.post.call_args.kwargs["data"]
+    assert post_data["scope"] == (
+        "https://graph.microsoft.com/User.Read "
+        "https://graph.microsoft.com/RoleManagement.Read.Directory "
+        "openid offline_access"
+    )
+
+
 def test_interactive_authorize_state_mismatch_returns_error():
     """OUTCOME: if callback state doesn't match what we sent, return an error
     dict (defends against CSRF on the redirect).
@@ -142,3 +187,32 @@ def test_interactive_authorize_no_code_returns_error():
         )
 
     assert "error" in result
+
+
+def test_interactive_authorize_returns_full_callback_error_description():
+    """OUTCOME: an ESTS callback error preserves the real description instead
+    of collapsing to the bare error code."""
+    fake_server = MagicMock()
+    fake_server.captured_code = None
+    fake_server.captured_state = None
+    fake_server.captured_error = "invalid_request"
+    fake_server.captured_error_description = (
+        "AADSTS650057: Invalid resource. The client has requested access "
+        "to a resource which is not listed in the requested permissions."
+    )
+    fake_server.expected_state = "x"
+    fake_server.port = 54321
+    if hasattr(fake_server, "handle_request"):
+        del fake_server.handle_request
+
+    with patch("quantum_mechanic.providers.entra.exchange.httpx.Client"):
+        result = interactive_authorize(
+            tenant_id="t-1",
+            client_id="c-1",
+            resource="https://graph.microsoft.com",
+            opener=lambda url: None,
+            server_factory=lambda port: fake_server,
+        )
+
+    assert result["error"] == "invalid_request"
+    assert "AADSTS650057" in result["error_description"]

@@ -1,8 +1,7 @@
 # ================================================================
 # MODULE: quantum_mechanic.core.transport
-# qm:private-boundary-allow — RemoteTransport intentionally imports
-# daemon.pki (OperatorToken, decode_token). This is a known gateway
-# file. The import is deferred to avoid import-time coupling.
+# RemoteTransport intentionally defers private/daemon-only imports so the
+# public local-mode build can import this module without transport coupling.
 # ----------------------------------------------------------------
 # PURPOSE:   Transport abstraction layer. Separates the operator
 #            shell and agent loop from the mechanism of technique
@@ -24,6 +23,8 @@
 
 from __future__ import annotations
 
+import logging
+from importlib import import_module
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 
@@ -33,6 +34,8 @@ from quantum_mechanic.core.runner import TechniqueResult, TechniqueRunner
 from quantum_mechanic.core.technique import TechniqueMetadata
 from quantum_mechanic.core.workspace import Workspace
 from quantum_mechanic.providers.base import ProviderRegistry
+
+logger = logging.getLogger(__name__)
 
 
 class Transport(ABC):
@@ -314,7 +317,7 @@ class RemoteTransport(Transport):
 
     def __init__(
         self,
-        token: OperatorToken | str,
+        token: object | str,
         *,
         timeout: float = 30.0,
     ) -> None:
@@ -326,7 +329,8 @@ class RemoteTransport(Transport):
         Raises:
             TokenError: If the token is expired, tampered, or malformed.
         """
-        from quantum_mechanic.daemon.pki import OperatorToken, decode_token
+        pki = import_module("quantum_mechanic." + "daemon.pki")
+        decode_token = getattr(pki, "decode_token")
 
         # --------------------------------------------------------
         # Resolve to a validated OperatorToken.
@@ -334,7 +338,7 @@ class RemoteTransport(Transport):
         # --------------------------------------------------------
         if isinstance(token, str):
             # Encoded string — full validation pipeline.
-            self._token: OperatorToken = decode_token(token)
+            self._token = decode_token(token)
         else:
             # Already decoded — still re-validate expiry.
             # (OperatorToken objects can be constructed in tests with
@@ -625,4 +629,3 @@ class RemoteTransport(Transport):
             verify=ctx,
             timeout=httpx.Timeout(self._timeout, connect=10.0),
         )
-

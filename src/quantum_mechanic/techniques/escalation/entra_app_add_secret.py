@@ -97,7 +97,7 @@ def _format_entra_app_add_secret(result: Any) -> None:
 
 @technique(
     technique_id="escalation/entra_app_add_secret",
-    tactic="escalation",
+    tactic="privilege_escalation",
     mitre_id="T1098.001",
     providers=["entra"],
     severity="high",

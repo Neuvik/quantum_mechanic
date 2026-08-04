@@ -2,65 +2,54 @@
 
 | | |
 |---|---|
-| **Issued** | 2026-03-09 |
-| **Last reviewed** | 2026-03-12 |
+| **Version** | v1.0-rc2 |
+| **Issued** | 2026-08-04 |
+| **Last reviewed** | 2026-08-04 |
 | **Status** | Active |
 
 ---
 
-## v0.1.0 — 2026-03-09
+## v1.0-rc2 — 2026-08-04
 
-Initial release.
+Public release candidate.
 
-### Features
+### What ships in this release
 
-**Workspace Management**
-- `workspace create <name>` — create a new engagement workspace
-- `workspace load <name>` — open an existing workspace
-- `workspace list` — list all workspaces on disk
+- Interactive `qm` shell
+- Headless `qm --agent` JSON mode
+- Workspace management
+- Credential import and activation across AWS, Azure, Entra, GCP, and OCI
+- Discovery, collection, escalation, lateral movement, exfiltration, and persistence techniques within the public release boundary
+- Evidence capture and inline `report`
+- Optional local RAG support through the `agent` extra
 
-**Credential Import**
-- AWS: profile, access key
-- Azure: default (CLI session), service principal
-- GCP: application default, service account key file
-- OCI: default config, named profile
+### Public release notes
 
-**Credential Management**
-- `creds` / `creds --active` — list credentials with lifecycle status
-- `creds delete <id>` — remove a credential
-- `use <id>` — switch active credential
-- `raw <id>` — show raw JSON for any credential or principal
+- The public repository now ships a dedicated public `Makefile` and
+  `.gitignore` instead of trimmed private artifacts.
+- The optional `ask`/RAG stack has been separated from the base install.
+  Run `uv sync --extra agent` only if you want local agent features.
+- Public docs now describe Entra explicitly as a first-class surface.
+- Public docs were aligned with the actual shipped command set and current
+  version number.
 
-**Techniques**
-- `techniques` — browse all loaded techniques filtered by active provider
-- `run <id>` / `<id>` shortcut — execute a technique
-- `run <id> --param k=v` — pass parameters
-- `run <id> --safe` — safe-check mode (read-only validation)
-- `help <id>` — inline technique documentation
-- `reload` — hot-reload technique modules without restarting
+### Install
 
-**Techniques shipped:**
-| ID | Tactic | Providers |
-|----|--------|-----------|
-| `discovery/whoami` | Discovery | AWS, Azure, GCP, OCI |
-| `discovery/enum_iam` | Discovery | AWS, Azure, GCP, OCI |
-| `escalation/assume_role_chain` | Privilege Escalation | AWS |
-| `escalation/gcp_sa_token_creator` | Privilege Escalation | GCP |
-| `lateral_movement/azure_run_command` | Lateral Movement | Azure |
+```bash
+uv sync
+uv run qm
+```
 
-**Engagement Report**
-- `report` — inline engagement narrative showing credential chain, technique timeline, and findings sorted by severity
+Optional local RAG support:
 
-**RAG Agent**
-- `ask <question>` — local RAG agent for engagement guidance
-
-### Architecture
-- Cross-cloud workspace database (SQLite, provider-agnostic schema)
-- Four-layer test harness (unit → integration → Terraform → live)
+```bash
+uv sync --extra agent
+```
 
 ---
 
-## Upcoming (v0.2.0)
+## Change Log
 
-- Additional techniques: `discovery/enum_compute`, `escalation/compute_identity_abuse`
-- Playbook system (YAML-defined technique sequences)
+| Rev | Date | Change |
+|-----|------|--------|
+| v1.0-rc2 | 2026-08-04 | Public release-candidate documentation and packaging aligned to the shipped command set and optional agent extra |

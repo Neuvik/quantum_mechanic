@@ -35,6 +35,26 @@ from quantum_mechanic.providers.oci.auth import OCIAuthProvider
 logger = logging.getLogger(__name__)
 
 
+def _attach_file_logger(root_logger: logging.Logger, log_dir: Path) -> None:
+    """Attach the rotating file logger when the target path is writable."""
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.handlers.RotatingFileHandler(
+            str(log_dir / "qm.log"),
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+        )
+    except OSError as exc:
+        logger.warning("File logging disabled: %s", exc)
+        return
+
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
+    root_logger.addHandler(file_handler)
+
+
 def _json_out(data: dict[str, Any]) -> None:
     """Write compact JSON to stdout (for agent consumption).
 
@@ -79,7 +99,6 @@ def run_agent_mode(args: argparse.Namespace, workspace_dir: Path | None = None) 
     # Setup logging — minimal for console, verbose for background log
     # --------------------------------------------------------
     log_dir = Path.home() / ".quantum_mechanic" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
 
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
@@ -88,19 +107,8 @@ def run_agent_mode(args: argparse.Namespace, workspace_dir: Path | None = None) 
     console_handler.setLevel(logging.WARNING)
     console_handler.setFormatter(logging.Formatter("%(message)s"))
 
-    # Rotating handler prevents the log from growing unbounded — we saw a
-    # 252 GB qm.log crash a disk under long-running agent mode. 10 MB per
-    # file × 5 backups = 60 MB ceiling.
-    file_handler = logging.handlers.RotatingFileHandler(
-        str(log_dir / "qm.log"),
-        maxBytes=10 * 1024 * 1024,
-        backupCount=5,
-    )
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
-
     root_logger.addHandler(console_handler)
-    root_logger.addHandler(file_handler)
+    _attach_file_logger(root_logger, log_dir)
 
     registry = _build_registry()
     loader = TechniqueLoader()

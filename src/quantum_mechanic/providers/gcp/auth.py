@@ -92,11 +92,10 @@ class GCPAuthProvider(AuthProvider):
             if not token:
                 raise ValueError("GCP captured_token method requires 'access_token'")
             
-            from datetime import datetime, timedelta
+            from datetime import UTC, datetime, timedelta
             # Provide an arbitrary future expiry so Google SDK clients don't
             # attempt to automatically refresh this static token.
-            # Using naive UTC datetime as expected by google-auth.
-            future_expiry = datetime.utcnow() + timedelta(hours=1)
+            future_expiry = datetime.now(UTC) + timedelta(hours=1)
             class StaticTokenCredentials(TokenCredentials):
                 def refresh(self, request):
                     raise ValueError(

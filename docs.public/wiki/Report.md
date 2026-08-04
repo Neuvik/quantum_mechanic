@@ -1,12 +1,10 @@
 # Report
 
-> **`🔓 PUBLIC`**
-
 | | |
 |---|---|
-| **Version** | v0.1.0 |
-| **Issued** | 2026-03-09 |
-| **Last reviewed** | 2026-03-09 |
+| **Version** | v1.0-rc2 |
+| **Issued** | 2026-08-04 |
+| **Last reviewed** | 2026-08-04 |
 | **Status** | Active |
 
 The `report` command renders the full engagement narrative inline in the terminal.
@@ -63,4 +61,4 @@ Severity levels: `critical` · `high` · `medium` · `low` · `info`
 
 | Rev | Date | Change |
 |-----|------|--------|
-| 1.0 | 2026-03-09 | Initial |
+| v1.0-rc2 | 2026-08-04 | Public report guide aligned to the shipped inline engagement narrative |
