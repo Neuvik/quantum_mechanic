@@ -1,8 +1,10 @@
 # Quantum Mechanic
 
-A cross-cloud offensive security framework for the MITRE ATT&CK Cloud matrix.
+A cross-cloud offensive security framework for cloud and identity operations.
 
-QM gives you a single shell to run discovery, privilege escalation, and lateral movement techniques across AWS, Azure, GCP, and OCI — with structured evidence capture, credential chain tracking, and engagement reporting built in.
+Current public release: `v1.0-rc2` (2026-08-04).
+
+QM gives you a single shell to run discovery, privilege escalation, lateral movement, and identity assessment workflows across AWS, Azure, Entra, GCP, and OCI — with structured evidence capture, credential chain tracking, and engagement reporting built in.
 
 ## TL;DR
 
@@ -49,6 +51,13 @@ QM is workspace-first.
 4. Use `techniques` and `info <technique-id>` to understand what is available before running higher-impact modules.
 5. Use `report` and the workspace loot/evidence artifacts at the end of the run.
 
+If you want the optional `ask` command and local RAG features, install the
+agent extra:
+
+```bash
+uv sync --extra agent
+```
+
 If you want a non-interactive JSON interface for automation:
 
 ```bash
@@ -72,7 +81,7 @@ workspace create/load
 
 ## What It Does
 
-**Discovery** — Enumerate IAM principals, compute instances, storage, and permissions across four clouds from a single interface.
+**Discovery** — Enumerate IAM principals, compute instances, storage, identities, and permissions from a single interface.
 
 **Privilege Escalation** — Identify and exploit overpermissioned compute identities, role assumption chains, and service account impersonation paths.
 
@@ -80,12 +89,13 @@ workspace create/load
 
 **Evidence & Reporting** — Every API call is logged. Findings include severity ratings, detection signatures for defenders, and remediation guidance. Generate a narrative report at the end of an engagement.
 
-## Supported Clouds
+## Supported Platforms
 
 | Provider | Auth Methods | Status |
 |----------|-------------|--------|
 | AWS | Named profiles, access keys, STS sessions | Implemented |
 | Azure | CLI sessions, service principals | Implemented |
+| Entra | Interactive/device-code OAuth, token import, browser-assisted acquisition | Implemented |
 | GCP | Application default credentials, service account keys | Implemented |
 | OCI | Config file profiles | Implemented |
 
@@ -106,7 +116,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add a new technique.
 
 ```bash
 uv run pytest tests/unit/ -q     # unit tests
-make integration                  # shell integration tests
+make test                         # public test target
 ```
 
 ## License
@@ -115,4 +125,4 @@ Quantum Mechanic is licensed under the GNU Affero General Public License,
 version 3 or later (`AGPL-3.0-or-later`).
 
 - Full project notice: [LICENSE.md](LICENSE.md)
-- Public license guide: [docs.public/wiki/License.md](docs.public/wiki/License.md)
+- Public license guide: [docs/wiki/License.md](docs/wiki/License.md)

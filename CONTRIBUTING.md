@@ -13,19 +13,14 @@ license notice, attribution, and redistribution requirements.
 
 ---
 
-## 🚀 Quick Start: Scaffold Your Technique
+## 🚀 Quick Start: Start from a Nearby Technique
 
-Don't start from a blank file. Use our YAML-to-technique generator to produce the boilerplate, decorator, and test file automatically:
+The public repository does not ship the private scaffolding helpers. Start by
+copying a nearby technique that matches your provider and tactic, then rename
+it and adjust the metadata:
 
-```bash
-# 1. Define your technique in a YAML file (use scripts/technique_defs/ as a guide)
-# 2. Run the generator
-uv run scripts/gen_technique.py my_new_technique.yaml
-```
-
-The generator creates:
-- `src/quantum_mechanic/techniques/<tactic>/<name>.py` — Source with stubs
-- `tests/unit/techniques/<tactic>/test_<name>.py` — Unit test scaffold
+- `src/quantum_mechanic/techniques/<tactic>/<name>.py`
+- `tests/unit/techniques/<tactic>/test_<name>.py`
 
 ---
 
@@ -78,9 +73,10 @@ This is where your attack logic lives. You use the `ctx` object to interact with
 Before opening a Pull Request, ensure your module passes these checks:
 
 1. **Unit Tests**: Place tests in `tests/unit/techniques/`. Mock all cloud responses.
-2. **Formatting**: Run `uv run ruff check .`
+2. **Public validation**: Run `uv run pytest tests/unit/ -q` or `make test`
 3. **Safety**: If your module changes state (creates/deletes resources), it **must** be marked `safe=False`.
-4. **Coverage**: Target ≥80% code coverage for your new module.
+4. **Coverage**: Add focused tests for the code you changed. The repository's
+   broader coverage gate is maintained separately from this quick-start path.
 
 ---
 

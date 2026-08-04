@@ -1,6 +1,3 @@
-# Reference material — NEVER commit (SANS SEC588 course content, proprietary)
-/reference/
-
 # Python
 __pycache__/
 *.py[cod]
@@ -24,59 +21,11 @@ build/
 .DS_Store
 Thumbs.db
 
-# Test environments
-tests/environments/**/terraform.tfstate*
-tests/environments/**/.terraform/
-
-# PKI material — NEVER commit private keys or certificates
-*.key
-*.crt
-*.csr
-*.srl
-*.log
-*.pem
-*.token
-
-# Coverage reports
+# Coverage / test output
 .coverage
 htmlcov/
 coverage.xml
-
-# Rust build artifacts — neutrino/ workspace
-neutrino/target/
-
-# Terraform — provider binaries (re-downloadable via terraform init)
-**/.terraform/
-# Terraform state — use remote state in production; exclude local state files
-**/terraform.tfstate
-**/terraform.tfstate.backup
-# Ignore all terraform artifacts including lock files
-**/.terraform*
-
-# Testing Sandbox Secrets
-terraform/setup_identities/**/*.json
-terraform/setup_identities/**/*.pem
-terraform/setup_identities/**/*.tfvars
-
-# Chaos E2E Execution Artifacts
-tests/chaos_e2e/**/audit_report_*.md
-tests/chaos_e2e/**/audit_execution_*.log
-tests/chaos_e2e/**/audit_*.log
-tests/chaos_e2e/**/execution_trace_*.jsonl
-tests/chaos_e2e/**/ground_truth_*.json
-tests/chaos_e2e/**/gcp_auditor_*.json
-tests/chaos_e2e/**/gcp_attacker_*.json
-tests/chaos_e2e/**/qm-chaos-*.db*
-
-# Local session scratch — AI workflow artifacts, personal planning docs,
-# and per-machine tooling state. These accumulate as maintainers use AI
-# coding assistants; they belong to the operator's local session, not
-# the shipped project. Also common sources of accidental PII leaks
-# (engagement notes, workspace names) — keep out of git entirely.
-.antigravitycli/
-MagicMock/
-scratch/
-docs/superpowers/
-# Per-workspace maintainer notes / engagement drift tracker — same reason
-# (see also docs/project_management/live_testing_issues.md which IS tracked
-# as the operator-facing template).
+.pytest_cache/
+.pytest_tmp/
+.ruff_cache/
+.pyright/

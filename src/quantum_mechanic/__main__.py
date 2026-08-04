@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import argparse
 
+from quantum_mechanic import __version__
+
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments.
@@ -37,6 +39,11 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Workspace name to load on startup",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
 
     # --------------------------------------------------------

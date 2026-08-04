@@ -1,11 +1,9 @@
 # Quantum Mechanic License
 
-> **`🔓 PUBLIC`** — This page is part of the public documentation.
-
 | | |
 |---|---|
-| **Version** | v0.1.0 |
-| **Issued** | 2026-08-02 |
+| **Version** | v1.0-rc2 |
+| **Issued** | 2026-08-04 |
 | **Status** | Active |
 
 Quantum Mechanic is distributed under the GNU Affero General Public License,
@@ -32,3 +30,9 @@ version 3 or later (`AGPL-3.0-or-later`).
 
 - Root project notice: [`../../LICENSE.md`](../../LICENSE.md)
 - Contribution expectations: [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md)
+
+## Change Log
+
+| Rev | Date | Change |
+|-----|------|--------|
+| v1.0-rc2 | 2026-08-04 | Public AGPLv3-or-later license guide added for the release candidate |

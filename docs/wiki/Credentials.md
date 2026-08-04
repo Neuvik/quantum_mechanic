@@ -1,12 +1,10 @@
 # Credentials
 
-> **`🔓 PUBLIC`**
-
 | | |
 |---|---|
-| **Version** | v0.1.0 |
-| **Issued** | 2026-03-09 |
-| **Last reviewed** | 2026-03-09 |
+| **Version** | v1.0-rc2 |
+| **Issued** | 2026-08-04 |
+| **Last reviewed** | 2026-08-04 |
 | **Status** | Active |
 
 ---
@@ -89,12 +87,13 @@ qm[ws]> creds
 ```
 qm[ws]> raw 1
   AccessKeyId:     ASIA3PZ...
-  SecretAccessKey: [REDACTED — use 'reveal 1' to show in session]
+  SecretAccessKey: [REDACTED]
   SessionToken:    FwoGZX...
   Expiration:      2026-03-09T18:47:00Z
 ```
 
-> **Note:** Secret material is encrypted at rest. `raw` shows the structure without revealing the secret.
+> **Note:** Secret material is encrypted at rest. `raw` shows the structure
+> without revealing the secret.
 
 ---
 
@@ -102,4 +101,4 @@ qm[ws]> raw 1
 
 | Rev | Date | Change |
 |-----|------|--------|
-| 1.0 | 2026-03-09 | Initial |
+| v1.0-rc2 | 2026-08-04 | Public credential guide aligned to the shipped AWS, Azure, Entra, GCP, and OCI command set |

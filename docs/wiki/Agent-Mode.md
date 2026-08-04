@@ -1,12 +1,10 @@
 # Agent Mode
 
-> **`🔓 PUBLIC`**
-
 | | |
 |---|---|
-| **Version** | v0.1.0 |
-| **Issued** | 2026-03-09 |
-| **Last reviewed** | 2026-03-09 |
+| **Version** | v1.0-rc2 |
+| **Issued** | 2026-08-04 |
+| **Last reviewed** | 2026-08-04 |
 | **Status** | Active |
 
 Quantum Mechanic supports AI agents in two distinct ways:
@@ -24,7 +22,8 @@ Agent mode requires the `[agent]` optional extras:
 ```bash
 uv sync --extra agent
 ```
-*(This installs LangChain and the Anthropic SDK. It is not required to use the rest of QM.)*
+*(This installs the optional local-RAG dependencies. It is not required to use
+the rest of QM.)*
 
 ### Usage
 ```
@@ -36,9 +35,10 @@ The agent:
 2. Reasons over what has been discovered so far
 3. Suggests techniques to run or attack paths to pursue
 
-### Limitations (v0.1.0)
+### Limitations in v1.0-rc2
 - The agent answers based on what has already been discovered in the workspace. It does not autonomously run techniques.
-- Autonomous engagement mode (`agent.autonomous`) is planned for v0.2.0.
+- Autonomous engagement orchestration is not part of the public `v1.0-rc2`
+  release.
 
 ---
 
@@ -70,4 +70,4 @@ When a technique runs (without `--raw`), the output is wrapped in a token-effici
 
 | Rev | Date | Change |
 |-----|------|--------|
-| 1.0 | 2026-03-09 | Initial — ask command, RAG agent, limitations documented |
+| v1.0-rc2 | 2026-08-04 | Public release candidate documentation aligned to the shipped optional `agent` extra and `qm --agent` interface |

@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | v0.1.0 |
-| **Issued** | 2026-03-09 |
-| **Last reviewed** | 2026-03-12 |
+| **Version** | v1.0-rc2 |
+| **Issued** | 2026-08-04 |
+| **Last reviewed** | 2026-08-04 |
 | **Status** | Active |
 
 Complete reference for every command available in the `qm` interactive shell.
@@ -42,6 +42,8 @@ Complete reference for every command available in the `qm` interactive shell.
 | `creds delete <id>` | Remove credential by ID |
 | `use <id>` | Set credential `<id>` as active |
 | `raw <id>` | Show raw JSON for credential or principal `<id>` |
+| `acquire entra <method>` | Acquire Entra tokens interactively |
+| `export entra <format>` | Export or describe current Entra token material |
 
 **Details:** See [Credentials](./Credentials.md)
 
@@ -59,6 +61,10 @@ Complete reference for every command available in the `qm` interactive shell.
 | `help <technique_id>` | Show inline technique documentation |
 | `info <technique_id>` | Alias for `help` |
 | `reload` | Hot-reload technique modules without restarting |
+| `playbook list` / `playbook run <name>` | Manage YAML playbooks |
+| `loot` / `loot <technique_id>` | View saved loot |
+| `activity` | View workspace activity log |
+| `check-ca-bypasses` | Analyze stored CA policy data for bypasses |
 
 **Details:** See [Techniques](./Techniques.md)
 
@@ -87,6 +93,8 @@ The report shows:
 
 **Details:** See [Agent Mode](./Agent-Mode.md)
 
+> **Note:** `ask` requires the optional agent extra: `uv sync --extra agent`
+
 ---
 
 ## General Commands
@@ -95,3 +103,9 @@ The report shows:
 |---------|-------------|
 | `help` | Show the full command reference table |
 | `exit` / `quit` | Exit QM |
+
+## Change Log
+
+| Rev | Date | Change |
+|-----|------|--------|
+| v1.0-rc2 | 2026-08-04 | Shell command reference aligned to the shipped public command set, including Entra acquire/export, playbooks, loot, activity, and CA bypass analysis |

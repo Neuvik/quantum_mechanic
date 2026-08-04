@@ -1,12 +1,10 @@
 # Techniques
 
-> **`🔓 PUBLIC`**
-
 | | |
 |---|---|
-| **Version** | v0.1.0 |
-| **Issued** | 2026-03-09 |
-| **Last reviewed** | 2026-03-09 |
+| **Version** | v1.0-rc2 |
+| **Issued** | 2026-08-04 |
+| **Last reviewed** | 2026-08-04 |
 | **Status** | Active |
 
 ---
@@ -65,8 +63,10 @@ These metrics are visible in the JSON output when using the `qm --agent` API and
 
 ## Reading Technique Documentation
 
-Every technique ships with inline documentation explaining what it does,
-how it works per provider, what the blue team should look for, and how to remediate.
+Every technique ships with inline metadata and source-level header comments.
+In the public `v1.0-rc2` shell, `help <technique>` shows the concise
+operator-facing summary: technique ID, tactic, MITRE mapping, providers,
+safety, parameters, and examples.
 
 ```
 qm[ws]> help discovery/enum_iam
@@ -75,23 +75,9 @@ qm[ws]> help discovery/enum_iam
   TACTIC:    Discovery (TA0007)
   MITRE:     T1087 — Account Discovery
 
-  PURPOSE:
-    Enumerate IAM policies, roles, and permissions attached to the
-    current principal. Identifies admin-equivalent access and
-    privilege escalation paths.
-
-  HOW IT WORKS:
-    AWS   — iam:ListAttachedUserPolicies, iam:SimulatePrincipalPolicy
-    Azure — RBAC ListRoleAssignments for current principal
-    GCP   — cloudresourcemanager.getIamPolicy on project
-    OCI   — identity.ListPolicies filtered by compartment
-
-  DETECTION (Blue Team):
-    AWS   — CloudTrail: iam:SimulatePrincipalPolicy
-    Azure — Azure Monitor: Microsoft.Authorization/roleAssignments/read
-    GCP   — Cloud Audit Logs: GetIamPolicy on cloudresourcemanager
-
-  SAFE: Yes — read-only enumeration
+  Description: Enumerate IAM policies, roles, and permissions
+  Providers: aws, azure, gcp, oci
+  Safe: Yes
 ```
 
 ---
@@ -111,5 +97,4 @@ qm[ws]> reload
 
 | Rev | Date | Change |
 |-----|------|--------|
-| 1.0 | 2026-03-09 | Initial |
-| 1.1 | 2026-03-09 | Added Execution Metrics documentation |
+| v1.0-rc2 | 2026-08-04 | Public technique guide aligned to the shipped shell output, including execution metrics and current command behavior |

@@ -132,7 +132,7 @@ def _build_completer(state: ShellState) -> NestedCompleter:
         "quit": None,
     }
 
-    # ── Conditional Private Commands (Public Hygiene) ──────────────
+    # ── Optional commands loaded when available ────────────────────
     if "exploits" in COMMANDS:
         completions["exploits"] = {
             "list": None,
@@ -151,6 +151,18 @@ def _build_completer(state: ShellState) -> NestedCompleter:
         completions["connect"] = None
     if "disconnect" in COMMANDS:
         completions["disconnect"] = None
+    if "playbook" in COMMANDS:
+        completions["playbook"] = {"list": None, "run": None}
+    if "loot" in COMMANDS:
+        completions["loot"] = technique_ids
+    if "activity" in COMMANDS:
+        completions["activity"] = technique_ids
+    if "check-ca-bypasses" in COMMANDS:
+        completions["check-ca-bypasses"] = None
+    if "acquire" in COMMANDS:
+        completions["acquire"] = {"entra": {"device_code": None, "interactive": None, "ropc": None, "refresh": None, "arm": None}}
+    if "export" in COMMANDS:
+        completions["export"] = {"entra": {"roadtools": None, "token": None, "describe": None}}
 
     return NestedCompleter.from_nested_dict(completions)
 

@@ -2157,7 +2157,7 @@ def cmd_ask(state: ShellState, args: list[str]) -> None:
         console.print("\n[red]✗ Agent Dependencies Missing[/red]")
         console.print("  The RAG Agent is an optional feature.")
         console.print("  To enable it, install the AI dependencies:")
-        console.print("  [bold cyan]pip install quantum-mechanic[agent][/bold cyan]")
+        console.print("  [bold cyan]uv sync --extra agent[/bold cyan]")
         return
 
     with console.status("[cyan]Agent reasoning...[/cyan]"):
@@ -2365,7 +2365,7 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
     intel = [
         f"[bold cyan]Tactic:[/bold cyan]    {m.tactic}",
         f"[bold cyan]MITRE ID:[/bold cyan]  {m.mitre_id or '—'}",
-        f"[bold cyan]Providers:[/bold cyan] {', '.join(m.providers)}",
+        f"[bold cyan]Providers:[/bold cyan] {', '.join(m.providers) if m.providers else 'unauthenticated'}",
         f"[bold cyan]Severity:[/bold cyan]  {m.severity.upper()}",
         f"[bold cyan]Risk Profile:[/bold cyan] {safe_label}"
     ]

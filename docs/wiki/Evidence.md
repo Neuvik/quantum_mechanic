@@ -1,12 +1,10 @@
 # Evidence Pipeline
 
-> **`🔓 PUBLIC`**
-
 | | |
 |---|---|
-| **Version** | v0.1.0 |
-| **Issued** | 2026-03-09 |
-| **Last reviewed** | 2026-03-09 |
+| **Version** | v1.0-rc2 |
+| **Issued** | 2026-08-04 |
+| **Last reviewed** | 2026-08-04 |
 | **Status** | Active |
 
 Quantum Mechanic strictly enforces evidence retention. Every technique run, API call, and finding is persistently recorded in the workspace.
@@ -75,4 +73,4 @@ This file is a structured narrative of the entire engagement up to the current m
 
 | Rev | Date | Change |
 |-----|------|--------|
-| 1.0 | 2026-03-09 | Initial — Evidence pipeline documentation (writer and attack path) |
+| v1.0-rc2 | 2026-08-04 | Public evidence guide aligned to the shipped workspace artifact layout and report pipeline |

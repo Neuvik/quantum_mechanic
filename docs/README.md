@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| **Version** | v0.1.0 |
-| **Issued** | 2026-03-12 |
+| **Version** | v1.0-rc2 |
+| **Issued** | 2026-08-04 |
 | **Status** | Active |
 
 ## Operator Guide
@@ -22,7 +22,8 @@
 
 ## Release History
 
-See [Release Notes](wiki/Release-Notes.md).
+See [Release Notes](wiki/Release-Notes.md) for specific shipped releases,
+including `v1.0-rc2` dated 2026-08-04.
 
 ## License
 
