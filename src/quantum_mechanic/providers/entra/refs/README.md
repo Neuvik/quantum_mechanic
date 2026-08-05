@@ -85,27 +85,10 @@ zh54321 and the community catalog them. Refresh on your own schedule.
 
 ## Updating the vendored data
 
-Run from the repo root:
-
-```bash
-# See what would change without writing
-uv run python tools/update_entra_refs.py --check
-
-# Refresh the vendored files
-uv run python tools/update_entra_refs.py
-
-# Refresh only one source
-uv run python tools/update_entra_refs.py --source graphpreconsent
-uv run python tools/update_entra_refs.py --source merill
-```
-
-The tool fetches from the upstream URLs and rewrites the files in this
-directory. Review the git diff, run the CA-bypass tests, then commit:
-
-```bash
-git add src/quantum_mechanic/providers/entra/refs/
-git commit -m "refs: refresh entra reference data"
-```
+Refresh these files from the private maintenance repository or another
+maintained source-of-truth for Entra reference data. The public repository
+ships the vendored results for offline use; it does not document the
+internal refresh workflow here.
 
 ---
 

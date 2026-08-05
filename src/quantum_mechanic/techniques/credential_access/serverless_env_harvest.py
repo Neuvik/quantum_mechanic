@@ -82,7 +82,7 @@ LOOT_SCHEMA = [
     technique_id='credential_access/serverless_env_harvest',
     tactic='credential_access',
     mitre_id='T1552',
-    providers=['aws', 'azure', 'gcp', 'oci'],
+    providers=['aws'],
     severity='high',
     safe=True,
     description='Harvest plaintext API keys and connection strings from serverless environments.',
@@ -212,9 +212,11 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
     #     detection_log="Azure Monitor: Microsoft",
     # )
     # -----------------------------------------------------------------
-    raise NotImplementedError(
-        "Implement azure path — see docstring and attack map above."
-    )
+    return {
+        "provider": "azure",
+        "status": "not_implemented",
+        "note": "Azure implementation pending.",
+    }
 def _gcp(ctx: ExecutionContext) -> dict[str, Any]:
     """
     Requires cloudfunctions.functions.list / get. Scrapes
@@ -246,9 +248,11 @@ def _gcp(ctx: ExecutionContext) -> dict[str, Any]:
     #     detection_log="Cloud Audit Logs: cloudfunctions.functions.list.",
     # )
     # -----------------------------------------------------------------
-    raise NotImplementedError(
-        "Implement gcp path — see docstring and attack map above."
-    )
+    return {
+        "provider": "gcp",
+        "status": "not_implemented",
+        "note": "GCP implementation pending.",
+    }
 def _oci(ctx: ExecutionContext) -> dict[str, Any]:
     """
     Requires FUNCTIONS_FUNCTION_READ. Extracts the configuration block
@@ -278,7 +282,8 @@ def _oci(ctx: ExecutionContext) -> dict[str, Any]:
     #     detection_log="OCI Audit: ListFunctions pulling detailed config metrics.",
     # )
     # -----------------------------------------------------------------
-    raise NotImplementedError(
-        "Implement oci path — see docstring and attack map above."
-    )
-
+    return {
+        "provider": "oci",
+        "status": "not_implemented",
+        "note": "OCI implementation pending.",
+    }

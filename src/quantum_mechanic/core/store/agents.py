@@ -1,7 +1,7 @@
 # ================================================================
 # MODULE: quantum_mechanic.core.store.agents
 # ----------------------------------------------------------------
-# PURPOSE:   Neutrino C2 agent management and task queue operations
+# PURPOSE:   Remote agent management and task queue operations
 #            for a workspace. Extracted from workspace.py (RC-2).
 #
 # AR-3: Dual-path — sqlite3 (default) or SQLAlchemy (QM_DATABASE_URL).
@@ -65,7 +65,7 @@ class AgentStore:
     # ================================================================
 
     def register(self, agent: Agent) -> None:
-        """Register or update a Neutrino agent (upsert by agent.id)."""
+        """Register or update a remote agent (upsert by agent.id)."""
         if self._use_orm:
             self._register_orm(agent)
         else:

@@ -35,9 +35,7 @@ from quantum_mechanic.providers.oci.auth import OCIAuthProvider
 from quantum_mechanic.shell import formatters
 from quantum_mechanic.shell.commands import COMMAND_HELP, COMMANDS, ShellState
 
-# Load private commands (exploits, payloads, connect, disconnect) if available.
-# In the public build commands_private.py does not exist — the import fails
-# silently and the public shell starts without those commands.
+# Load optional extended command handlers when available.
 try:
     from quantum_mechanic.shell.commands_private import (
         PRIVATE_COMMAND_HELP,

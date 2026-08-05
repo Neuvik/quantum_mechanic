@@ -2856,15 +2856,8 @@ def _capture_gcp_token() -> dict[str, Any]:
 
 
 # ================================================================
-# Private commands (exploits, payloads, connect, disconnect, lois)
-# are in shell/commands_private.py — NOT shipped in the public build.
-# app.py loads them via try/except import if the file is present.
-# ================================================================
-
-
-# Command registry — public commands only.
-# Private commands (exploits, payloads, connect, disconnect, lois)
-# are injected by app.py at startup from commands_private.py.
+# Command registry — baseline commands. Additional environment-
+# specific commands may be injected by app.py at startup.
 # ================================================================
 COMMANDS: dict[str, Any] = {
     "workspace": cmd_workspace,

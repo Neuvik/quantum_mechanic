@@ -1,8 +1,8 @@
 -- ================================================================
 -- MIGRATION: 006_agents
 -- ----------------------------------------------------------------
--- PURPOSE:   Creates the tracking table for Neutrino agents
---            connected via qmx.
+-- PURPOSE:   Creates the tracking table for remote agents
+--            connected to a QM remote execution plane.
 -- ================================================================
 
 CREATE TABLE agents (

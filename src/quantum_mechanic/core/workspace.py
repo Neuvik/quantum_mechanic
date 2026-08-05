@@ -236,7 +236,7 @@ class Workspace:
     # ================================================================
 
     def register_agent(self, agent: Agent) -> None:
-        """Register or update a Neutrino agent."""
+        """Register or update a remote agent."""
         return self._agents.register(agent)
 
     def heartbeat_agent(self, agent_id: str, latency_ms: int) -> None:
