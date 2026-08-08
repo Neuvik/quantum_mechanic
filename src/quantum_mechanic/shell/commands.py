@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -243,6 +244,9 @@ def cmd_import(state: ShellState, args: list[str]) -> None:
         console.print(
             "    import azure --client-id <id> --client-secret <secret> --tenant-id <tid>"
         )
+        console.print(
+            "    import azure --access-token <jwt> [--expires-on <unix-epoch>]"
+        )
         console.print("    import gcp --default")
         console.print("    import gcp --key-file /path/to/sa.json")
         console.print("    import oci --default")
@@ -412,7 +416,58 @@ def _import_azure(state: ShellState, opts: dict[str, str]) -> None:
     persists it. The credential is then isolated from later az login changes.
 
     For --client-id/--client-secret: persists service-principal creds.
+    For --access-token: persists a captured ARM token directly.
     """
+    if "access-token" in opts:
+        token = opts.get("access-token", "").strip()
+        if not token:
+            console.print("  [red]✗[/red] --access-token requires a JWT value")
+            return
+
+        claims: dict[str, Any] = {}
+        try:
+            parts = token.split(".")
+            if len(parts) >= 2:
+                payload = parts[1]
+                payload += "=" * (-len(payload) % 4)
+                claims = json.loads(base64.urlsafe_b64decode(payload.encode()).decode())
+        except Exception:
+            claims = {}
+
+        expires_on = opts.get("expires-on")
+        if expires_on is None:
+            exp = claims.get("exp")
+            if exp is None:
+                console.print(
+                    "  [red]✗[/red] Could not derive token expiration from JWT. "
+                    "Pass --expires-on <unix-epoch>."
+                )
+                return
+            expires_on = str(exp)
+
+        try:
+            expires_on_int = int(expires_on)
+        except ValueError:
+            console.print("  [red]✗[/red] --expires-on must be a unix epoch integer")
+            return
+
+        principal = (
+            claims.get("appid")
+            or claims.get("upn")
+            or claims.get("oid")
+            or "azure-access-token"
+        )
+        secret: dict[str, Any] = {
+            "method": "captured_token",
+            "access_token": token,
+            "expires_on": expires_on_int,
+            "captured_principal": principal,
+        }
+        friendly = opts.get("friendly", f"TOKEN:{str(principal)[:24]}")
+        cred_type = "captured_token"
+        _validate_and_import(state, "azure", cred_type, secret, friendly)
+        return
+
     if "client-id" in opts:
         if not all(k in opts for k in ["client-id", "client-secret", "tenant-id"]):
             console.print(
