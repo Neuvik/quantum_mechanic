@@ -95,7 +95,7 @@ class GCPAuthProvider(AuthProvider):
             from datetime import UTC, datetime, timedelta
             # Provide an arbitrary future expiry so Google SDK clients don't
             # attempt to automatically refresh this static token.
-            future_expiry = datetime.now(UTC) + timedelta(hours=1)
+            future_expiry = datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=1)
             class StaticTokenCredentials(TokenCredentials):
                 def refresh(self, request):
                     raise ValueError(

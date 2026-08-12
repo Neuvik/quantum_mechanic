@@ -26,6 +26,7 @@ class TestGCPAuthenticate:
         })
         # TokenCredentials stores the bearer token on .token
         assert getattr(creds, "token", None) == "ya29.fake-token"
+        assert creds.valid
 
     def test_authenticate_captured_token_missing_access_token(
         self, provider: GCPAuthProvider
