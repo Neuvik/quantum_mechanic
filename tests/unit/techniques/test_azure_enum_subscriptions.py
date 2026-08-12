@@ -6,123 +6,53 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from quantum_mechanic.core.context import ExecutionContext
-from quantum_mechanic.providers.entra.token_store import ARM, EntraToken, EntraTokenStore
 from quantum_mechanic.techniques.discovery.azure_enum_subscriptions import execute
 
+
+def _make_sdk_sub(sub_id: str, display_name: str, state: str) -> MagicMock:
+    """Build a fake azure.mgmt.subscription.models.Subscription object.
+
+    The real SDK returns a `state` field that may be a plain string or an
+    enum-like object exposing `.value` — mirror that ambiguity via a plain
+    str here since the technique's `hasattr(state, "value")` guard handles
+    both.
+    """
+    sub = MagicMock()
+    sub.subscription_id = sub_id
+    sub.display_name = display_name
+    sub.state = state
+    return sub
+
+
 _SAMPLE_SUBS = [
-    {
-        "subscriptionId": "sub-1111",
-        "displayName": "Production",
-        "state": "Enabled",
-        "tenantId": "tenant-abc",
-        "authorizationSource": "RoleBased",
-    },
-    {
-        "subscriptionId": "sub-2222",
-        "displayName": "Dev",
-        "state": "Enabled",
-        "tenantId": "tenant-abc",
-        "authorizationSource": "RoleBased",
-    },
-    {
-        "subscriptionId": "sub-3333",
-        "displayName": "Old",
-        "state": "Disabled",
-        "tenantId": "tenant-abc",
-        "authorizationSource": "RoleBased",
-    },
+    _make_sdk_sub("sub-1111", "Production", "Enabled"),
+    _make_sdk_sub("sub-2222", "Dev", "Enabled"),
+    _make_sdk_sub("sub-3333", "Old", "Disabled"),
 ]
 
 
-def _make_store(token: EntraToken) -> EntraTokenStore:
-    store = EntraTokenStore(tenant_id="tenant-abc")
-    store.add_token(token)
-    return store
-
-
-def _make_access_token(resource: str = ARM) -> EntraToken:
-    return EntraToken(
-        token_type="access_token",
-        resource=resource,
-        value="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0aWQiOiJ0ZW5hbnQtYWJjIn0.sig",
-        tenant_id="tenant-abc",
-        client_id="d3590ed6-52b3-4102-aeff-aad2292ab01c",
-        foci=False,
-    )
-
-
-def _make_foci_token() -> EntraToken:
-    return EntraToken(
-        token_type="refresh_token",
-        resource="",
-        value="foci-refresh-token-value",
-        tenant_id="tenant-abc",
-        client_id="d3590ed6-52b3-4102-aeff-aad2292ab01c",
-        foci=True,
-    )
-
-
-def _build_ctx(store: EntraTokenStore) -> MagicMock:
+def _build_ctx(provider_name: str = "azure") -> MagicMock:
     ctx = MagicMock(spec=ExecutionContext)
-    ctx.session = store
+    ctx.session = MagicMock()
+    ctx.provider_name = provider_name
+    ctx.whoami.return_value = MagicMock(tenant_id="tenant-abc")
     return ctx
 
 
-def _mock_http(subs: list[dict]) -> MagicMock:
-    http = MagicMock()
-    http.__enter__ = lambda s: http
-    http.__exit__ = MagicMock(return_value=False)
-    return http
-
-
-def _run(subs: list[dict] | None = None, foci: bool = False) -> dict:
-    if foci:
-        store = _make_store(_make_foci_token())
-    else:
-        store = _make_store(_make_access_token())
-    ctx = _build_ctx(store)
+def _run(subs: list | None = None, ctx: MagicMock | None = None) -> dict:
+    ctx = ctx if ctx is not None else _build_ctx()
     sub_list = subs if subs is not None else _SAMPLE_SUBS
-    http_mock = _mock_http(sub_list)
 
-    with patch(
-        "quantum_mechanic.techniques.discovery.azure_enum_subscriptions.arm_list",
-        return_value=sub_list,
-    ), patch(
-        "quantum_mechanic.techniques.discovery.azure_enum_subscriptions.httpx.Client",
-        return_value=http_mock,
-    ):
+    with patch("azure.mgmt.subscription.SubscriptionClient") as mock_sub_client:
+        mock_sub_client.return_value.subscriptions.list.return_value = sub_list
         return execute(ctx)
 
 
-class TestNoToken:
-    def test_returns_error_when_no_token(self):
-        store = EntraTokenStore(tenant_id="tenant-abc")
-        ctx = _build_ctx(store)
-        result = execute(ctx)
-        assert "error" in result
-        assert "ARM" in result["error"]
-
-    def test_returns_error_when_foci_expand_fails(self):
-        store = _make_store(_make_foci_token())
-        ctx = _build_ctx(store)
-        http_mock = MagicMock()
-        http_mock.__enter__ = lambda s: http_mock
-        http_mock.__exit__ = MagicMock(return_value=False)
-        with patch(
-            "quantum_mechanic.techniques.discovery.azure_enum_subscriptions.foci_expand",
-            return_value=None,
-        ):
-            result = execute(ctx)
-        assert "error" in result
-        assert "FOCI" in result["error"]
-
-
-class TestSuccessWithAccessToken:
+class TestSuccessPath:
     def test_returns_subscriptions(self):
         result = _run()
+        assert "error" not in result
         assert result["total"] == 3
         assert len(result["subscriptions"]) == 3
 
@@ -134,8 +64,22 @@ class TestSuccessWithAccessToken:
         result = _run()
         assert result["tenant_id"] == "tenant-abc"
 
-    def test_provider_field(self):
-        result = _run()
+    def test_provider_field_reflects_azure(self):
+        """Proves the fix: an 'azure'-provider credential can run this technique
+        and the returned provider field reflects the actual active provider,
+        not a hardcoded 'entra'."""
+        ctx = _build_ctx(provider_name="azure")
+        result = _run(ctx=ctx)
+        assert "error" not in result
+        assert result["provider"] == "azure"
+
+    def test_provider_field_reflects_entra_bridge(self):
+        """The same technique also succeeds when reached via the entra→azure
+        bridge (ctx.provider_name == 'entra', ctx.session already resolved to
+        a TokenCredential-compatible object by the runner)."""
+        ctx = _build_ctx(provider_name="entra")
+        result = _run(ctx=ctx)
+        assert "error" not in result
         assert result["provider"] == "entra"
 
     def test_empty_subscriptions(self):
@@ -145,7 +89,7 @@ class TestSuccessWithAccessToken:
         assert result["subscriptions"] == []
 
     def test_all_disabled(self):
-        disabled = [{"subscriptionId": "x", "state": "Disabled"}]
+        disabled = [_make_sdk_sub("x", "X", "Disabled")]
         result = _run(subs=disabled)
         assert result["enabled_count"] == 0
 
@@ -155,52 +99,60 @@ class TestSuccessWithAccessToken:
         assert first["subscriptionId"] == "sub-1111"
         assert first["displayName"] == "Production"
         assert first["state"] == "Enabled"
+        assert first["tenantId"] == "tenant-abc"
 
-
-class TestFociExpansion:
-    def test_foci_token_triggers_expand(self):
-        store = _make_store(_make_foci_token())
-        ctx = _build_ctx(store)
-        http_mock = MagicMock()
-        http_mock.__enter__ = lambda s: http_mock
-        http_mock.__exit__ = MagicMock(return_value=False)
-        expanded = _make_access_token(ARM)
-
-        with patch(
-            "quantum_mechanic.techniques.discovery.azure_enum_subscriptions.foci_expand",
-            return_value=expanded,
-        ) as mock_expand, patch(
-            "quantum_mechanic.techniques.discovery.azure_enum_subscriptions.arm_list",
-            return_value=_SAMPLE_SUBS,
-        ), patch(
-            "quantum_mechanic.techniques.discovery.azure_enum_subscriptions.httpx.Client",
-            return_value=http_mock,
-        ):
-            result = execute(ctx)
-
-        mock_expand.assert_called_once_with(store, ARM)
-        assert result["total"] == 3
-
-    def test_result_uses_expanded_token(self):
-        result = _run(foci=True)
-        # With patched arm_list, result should still be correct
-        assert "total" in result
+    def test_state_enum_value_extracted(self):
+        """The SDK may return `state` as an enum-like object exposing `.value`
+        (SubscriptionState.enabled) rather than a plain string — the technique
+        must normalize it to the plain string the formatter/loot schema expect."""
+        enum_state = MagicMock()
+        enum_state.value = "Enabled"
+        sub = _make_sdk_sub("sub-enum", "EnumSub", "placeholder")
+        sub.state = enum_state
+        result = _run(subs=[sub])
+        assert result["subscriptions"][0]["state"] == "Enabled"
+        assert result["enabled_count"] == 1
 
 
 class TestMixedStates:
     def test_counts_only_enabled(self):
         subs = [
-            {"subscriptionId": "a", "state": "Enabled"},
-            {"subscriptionId": "b", "state": "Warned"},
-            {"subscriptionId": "c", "state": "PastDue"},
-            {"subscriptionId": "d", "state": "Disabled"},
-            {"subscriptionId": "e", "state": "Enabled"},
+            _make_sdk_sub("a", "A", "Enabled"),
+            _make_sdk_sub("b", "B", "Warned"),
+            _make_sdk_sub("c", "C", "PastDue"),
+            _make_sdk_sub("d", "D", "Disabled"),
+            _make_sdk_sub("e", "E", "Enabled"),
         ]
         result = _run(subs=subs)
         assert result["enabled_count"] == 2
         assert result["total"] == 5
 
     def test_missing_state_not_counted_as_enabled(self):
-        subs = [{"subscriptionId": "a"}]
+        subs = [_make_sdk_sub("a", "A", None)]
         result = _run(subs=subs)
         assert result["enabled_count"] == 0
+        assert result["subscriptions"][0]["state"] is None
+
+
+class TestErrorHandling:
+    def test_returns_error_dict_on_sdk_failure(self):
+        ctx = _build_ctx()
+        with patch("azure.mgmt.subscription.SubscriptionClient") as mock_sub_client:
+            mock_sub_client.return_value.subscriptions.list.side_effect = Exception(
+                "AuthorizationFailed"
+            )
+            result = execute(ctx)
+        assert "error" in result
+        assert "AuthorizationFailed" in result["error"]
+        assert result["subscriptions"] == []
+
+    def test_whoami_failure_does_not_abort_execution(self):
+        """If tenant_id resolution via ctx.whoami() fails, subscriptions should
+        still be returned with tenant_id omitted/None rather than the whole
+        technique erroring out."""
+        ctx = _build_ctx()
+        ctx.whoami.side_effect = Exception("whoami failed")
+        result = _run(ctx=ctx)
+        assert "error" not in result
+        assert result["tenant_id"] is None
+        assert result["total"] == 3

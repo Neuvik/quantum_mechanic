@@ -13,19 +13,21 @@
 #            resource group scope (vm_execute_command, keyvault
 #            enumeration, storage enumeration).
 #
-# PROVIDERS: Entra (ARM REST, same pattern as azure_enum_subscriptions)
+# PROVIDERS: Azure, Entra (Azure SDK, same pattern as azure_enum_subscriptions)
 #
 # HOW IT WORKS:
-#   1. Acquires an ARM bearer token from the active EntraTokenStore
-#      (direct access token or FOCI expansion).
-#   2. Calls GET /subscriptions?api-version=2022-12-01 to discover
-#      all accessible subscriptions.
-#   3. For each subscription, calls:
-#        GET /subscriptions/{sub}/resourcegroups?api-version=2021-04-01
-#      to enumerate all resource groups.
-#   4. In the same pass, fetches resources per subscription
-#        GET /subscriptions/{sub}/resources?api-version=2021-04-01
-#      and groups the count by resource group name.
+#   1. Builds an azure.mgmt.subscription.SubscriptionClient directly
+#      off ctx.session (a TokenCredential) and calls
+#      subscriptions.list() to discover all accessible subscriptions.
+#   2. For each enabled subscription, builds an
+#      azure.mgmt.resource.ResourceManagementClient and calls
+#      resource_groups.list() to enumerate all resource groups.
+#   3. In the same pass, calls resources.list() and groups the count
+#      by resource group name (parsed out of each resource's `.id`).
+#   This works transparently whether the active credential is a
+#   native "azure" TokenCredential or an "entra" credential bridged
+#   to Azure by core/runner.py (EntraTokenCredential) — no
+#   FOCI/EntraTokenStore access is required.
 #
 # DETECTION (Blue Team):
 #   ARM Activity Logs:
@@ -40,19 +42,13 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
-
-import httpx
 
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
-from quantum_mechanic.providers.entra.arm import arm_list
-from quantum_mechanic.providers.entra.foci import foci_expand
-from quantum_mechanic.providers.entra.token_store import ARM, EntraTokenStore
 
-_SUBSCRIPTIONS_URL = "https://management.azure.com/subscriptions?api-version=2022-12-01"
-_RG_URL = "https://management.azure.com/subscriptions/{sub}/resourcegroups?api-version=2021-04-01"
-_RESOURCES_URL = "https://management.azure.com/subscriptions/{sub}/resources?api-version=2021-04-01"
+logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------
 # Loot schema
@@ -112,7 +108,7 @@ def _format_resource_groups(result: Any) -> None:
     technique_id="discovery/azure_enum_resource_groups",
     tactic="discovery",
     mitre_id="T1580",
-    providers=["entra"],
+    providers=["azure", "entra"],
     severity="info",
     safe=True,
     description=(
@@ -124,69 +120,95 @@ def _format_resource_groups(result: Any) -> None:
     loot_items_key=LOOT_ITEMS_KEY,
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
-    """Enumerate Azure resource groups via ARM."""
-    store: EntraTokenStore = ctx.session
+    """Enumerate Azure resource groups via the Azure SDK.
 
-    token = store.best_token(ARM)
-    if token is None:
-        return {"error": "No ARM token available. Run: acquire entra arm"}
+    Uses SubscriptionClient to discover subscriptions and
+    ResourceManagementClient (per subscription) to enumerate resource
+    groups and count resources per group.
+    """
+    try:
+        from azure.mgmt.resource.resources import ResourceManagementClient
+        from azure.mgmt.subscription import SubscriptionClient
+    except ImportError:
+        return {
+            "error": "azure-mgmt-resource / azure-mgmt-subscription not installed.",
+            "resource_groups": [],
+        }
 
-    if token.token_type == "refresh_token":
-        token = foci_expand(store, ARM)
-        if token is None:
-            return {"error": "FOCI expansion for ARM failed."}
+    try:
+        tenant_id = None
+        try:
+            tenant_id = ctx.whoami().tenant_id
+        except Exception as whoami_err:
+            logger.debug("whoami() failed while resolving tenant_id: %s", whoami_err)
 
-    headers = {"Authorization": f"Bearer {token.value}"}
+        def _state_str(state: Any) -> str | None:
+            if state is None:
+                return None
+            return state.value if hasattr(state, "value") else str(state)
 
-    with httpx.Client(timeout=60) as http:
-        subscriptions = arm_list(http, _SUBSCRIPTIONS_URL, headers)
-        enabled_subs = [s for s in subscriptions if s.get("state") == "Enabled"]
+        sub_client = SubscriptionClient(ctx.session)
+        raw_subs = list(sub_client.subscriptions.list())
+        enabled_subs = [s for s in raw_subs if _state_str(s.state) == "Enabled"]
 
         ctx.info(f"Enumerating resource groups across {len(enabled_subs)} subscription(s)...")
 
         resource_groups: list[dict] = []
         for sub in enabled_subs:
-            sub_id = sub["subscriptionId"]
-            sub_name = sub.get("displayName", sub_id)
+            sub_id = sub.subscription_id
+            sub_name = sub.display_name or sub_id
+
+            resource_client = ResourceManagementClient(ctx.session, sub_id)
 
             # 1. Enumerate resource groups in this subscription
-            rgs = arm_list(http, _RG_URL.format(sub=sub_id), headers)
+            rgs = list(resource_client.resource_groups.list())
 
             # 2. Count resources per RG via single resources list call
             resource_counts: dict[str, int] = {}
             try:
-                resources = arm_list(http, _RESOURCES_URL.format(sub=sub_id), headers)
+                resources = list(resource_client.resources.list())
                 for r in resources:
                     # Resource IDs contain the RG name: /subscriptions/.../resourceGroups/{rg}/...
-                    rid = r.get("id", "")
+                    rid = r.id or ""
                     parts = rid.split("/")
                     try:
                         rg_name = parts[parts.index("resourceGroups") + 1].lower()
                         resource_counts[rg_name] = resource_counts.get(rg_name, 0) + 1
                     except (ValueError, IndexError):
                         pass
-            except Exception:
-                pass
+            except Exception as resources_err:
+                logger.debug(
+                    "Listing resources for subscription %s failed: %s", sub_id, resources_err
+                )
 
             for rg in rgs:
-                name = rg.get("name", "")
+                name = rg.name or ""
+                provisioning_state = (
+                    rg.properties.provisioning_state
+                    if rg.properties and getattr(rg.properties, "provisioning_state", None)
+                    else ""
+                )
                 resource_groups.append({
                     "name": name,
-                    "location": rg.get("location", ""),
+                    "location": rg.location or "",
                     "subscription_id": sub_id,
                     "subscription_name": sub_name,
-                    "provisioning_state": rg.get("properties", {}).get("provisioningState", ""),
-                    "tags": rg.get("tags", {}),
+                    "provisioning_state": provisioning_state,
+                    "tags": rg.tags or {},
                     "resource_count": resource_counts.get(name.lower(), 0),
-                    "id": rg.get("id", ""),
+                    "id": rg.id or "",
                 })
 
             ctx.info(f"  {sub_name}: {len(rgs)} resource group(s)")
 
-    return {
-        "provider": "entra",
-        "tenant_id": store.tenant_id,
-        "subscription_count": len(enabled_subs),
-        "total": len(resource_groups),
-        "resource_groups": resource_groups,
-    }
+        return {
+            "provider": ctx.provider_name,
+            "tenant_id": tenant_id,
+            "subscription_count": len(enabled_subs),
+            "total": len(resource_groups),
+            "resource_groups": resource_groups,
+        }
+
+    except Exception as e:
+        logger.error("Azure enum_resource_groups failed: %s", e)
+        return {"error": str(e), "resource_groups": []}

@@ -10,13 +10,17 @@
 #            every subscription where the principal holds any
 #            RBAC role is returned.
 #
-# PROVIDERS: Entra
+# PROVIDERS: Azure, Entra
 #
 # HOW IT WORKS:
-#   Uses the active EntraTokenStore to acquire an ARM bearer token
-#   (direct access token or FOCI expansion from a Graph refresh
-#   token). Calls GET /subscriptions?api-version=2022-12-01 and
-#   paginates via nextLink.
+#   Builds an azure.mgmt.subscription.SubscriptionClient directly off
+#   ctx.session (a TokenCredential). Calls
+#   subscriptions.list() to enumerate every subscription the current
+#   principal can see. This works transparently whether the active
+#   credential is a native "azure" TokenCredential or an "entra"
+#   credential bridged to Azure by core/runner.py (which wraps it in
+#   EntraTokenCredential — itself a TokenCredential implementation) —
+#   no FOCI/EntraTokenStore access is required.
 #
 # DETECTION (Blue Team):
 #   ARM Activity Logs: Microsoft.Resources/subscriptions/read.
@@ -29,19 +33,13 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
-
-import httpx
 
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
-from quantum_mechanic.providers.entra.arm import arm_list
-from quantum_mechanic.providers.entra.foci import foci_expand
-from quantum_mechanic.providers.entra.token_store import ARM, EntraTokenStore
 
-_SUBSCRIPTIONS_URL = (
-    "https://management.azure.com/subscriptions?api-version=2022-12-01"
-)
+logger = logging.getLogger(__name__)
 
 _STATE_LABELS = {
     "Enabled": "[green]Enabled[/green]",
@@ -106,7 +104,7 @@ def _format_azure_enum_subscriptions(result: Any) -> None:
     technique_id="discovery/azure_enum_subscriptions",
     tactic="discovery",
     mitre_id="T1580",
-    providers=["entra"],
+    providers=["azure", "entra"],
     severity="info",
     safe=True,
     description=(
@@ -117,33 +115,47 @@ def _format_azure_enum_subscriptions(result: Any) -> None:
     loot_items_key=LOOT_ITEMS_KEY,
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
-    """Enumerate Azure subscriptions via ARM /subscriptions."""
-    store: EntraTokenStore = ctx.session
-    token = store.best_token(ARM)
-    if token is None:
+    """Enumerate Azure subscriptions via azure.mgmt.subscription.SubscriptionClient."""
+    try:
+        from azure.mgmt.subscription import SubscriptionClient
+    except ImportError:
+        return {"error": "azure-mgmt-subscription not installed.", "subscriptions": []}
+
+    try:
+        sub_client = SubscriptionClient(ctx.session)
+        raw_subs = list(sub_client.subscriptions.list())
+
+        tenant_id = None
+        try:
+            tenant_id = ctx.whoami().tenant_id
+        except Exception as whoami_err:
+            logger.debug("whoami() failed while resolving tenant_id: %s", whoami_err)
+
+        def _state_str(state: Any) -> str | None:
+            if state is None:
+                return None
+            return state.value if hasattr(state, "value") else str(state)
+
+        subscriptions = []
+        for s in raw_subs:
+            state = _state_str(s.state)
+            subscriptions.append({
+                "subscriptionId": s.subscription_id,
+                "displayName": s.display_name,
+                "state": state,
+                "tenantId": tenant_id,
+            })
+
+        enabled_count = sum(1 for s in subscriptions if s["state"] == "Enabled")
+
         return {
-            "error": (
-                "No ARM token available. "
-                "Run: acquire entra arm"
-            )
+            "provider": ctx.provider_name,
+            "tenant_id": tenant_id,
+            "total": len(subscriptions),
+            "enabled_count": enabled_count,
+            "subscriptions": subscriptions,
         }
 
-    if token.token_type == "refresh_token":
-        token = foci_expand(store, ARM)
-        if token is None:
-            return {"error": "FOCI expansion for ARM failed."}
-
-    headers = {"Authorization": f"Bearer {token.value}"}
-
-    with httpx.Client(timeout=60) as http:
-        subscriptions = arm_list(http, _SUBSCRIPTIONS_URL, headers)
-
-    enabled_count = sum(1 for s in subscriptions if s.get("state") == "Enabled")
-
-    return {
-        "provider": "entra",
-        "tenant_id": store.tenant_id,
-        "total": len(subscriptions),
-        "enabled_count": enabled_count,
-        "subscriptions": subscriptions,
-    }
+    except Exception as e:
+        logger.error("Azure enum_subscriptions failed: %s", e)
+        return {"error": str(e), "subscriptions": []}
