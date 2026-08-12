@@ -11,6 +11,8 @@ from azure.identity import ClientSecretCredential
 
 from quantum_mechanic.providers.azure.auth import AzureAuthProvider
 from quantum_mechanic.providers.azure.static_token import StaticTokenCredential
+from quantum_mechanic.providers.entra.arm_credential import EntraTokenCredential
+from quantum_mechanic.providers.entra.token_store import EntraTokenStore
 
 
 @pytest.fixture
@@ -63,6 +65,25 @@ class TestAzureAuthenticate:
         }
         with pytest.raises(ValueError, match="requires 'tenant_id'"):
             provider.authenticate(data)
+
+    def test_authenticate_token_store_returns_entra_token_credential_no_import_error(
+        self, provider: AzureAuthProvider
+    ) -> None:
+        """OUTCOME: token_store branch must wrap a real EntraTokenStore in
+        EntraTokenCredential and must NOT raise ModuleNotFoundError.
+
+        This is the regression test for the broken `azure.token_adapter` import
+        (module never existed). Uses a real EntraTokenStore round-tripped through
+        to_dict()/from_dict() to exercise the actual deserialization path, not a
+        bare mock.
+        """
+        store = EntraTokenStore(tenant_id="t-123", user_upn="user@example.com")
+        secret_data = {"token_store": store.to_dict()}
+
+        cred = provider.authenticate(secret_data)
+
+        assert isinstance(cred, EntraTokenCredential)
+        assert hasattr(cred, "get_token") and callable(cred.get_token)
 
 
 class TestAzureWhoAmI:

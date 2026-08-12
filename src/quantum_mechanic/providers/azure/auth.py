@@ -67,10 +67,10 @@ class AzureAuthProvider(AuthProvider):
 
         # EntraTokenStore support (FOCI / Refresh Token Reuse)
         if "token_store" in secret_data:
-            from quantum_mechanic.providers.azure.token_adapter import AzureTokenAdapter
+            from quantum_mechanic.providers.entra.arm_credential import EntraTokenCredential
             from quantum_mechanic.providers.entra.token_store import EntraTokenStore
             store = EntraTokenStore.from_dict(secret_data["token_store"])
-            return AzureTokenAdapter(store)
+            return EntraTokenCredential(store)
 
         # Captured token (new — primary path for `import azure --default`)
         if method == "captured_token":
