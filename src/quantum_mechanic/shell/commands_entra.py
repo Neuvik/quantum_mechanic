@@ -37,11 +37,12 @@ _IMPORT_USAGE = """\
 
   Import subcommands:
     browserdump <path>                              Parse browserdump JSON output
-    browser_cdp  [--browser edge|chrome]            Print local Chrome/Edge CDP launch guidance
-                 [--os windows|linux|macos]         for operator-assisted browser import
-                 [--port <n>] [--browser-path <p>]
-                 [--user-data-dir <p>]
-                 [--launch] [--attach] [--host <h>]
+    browser_cdp                                     Operator-assisted browser import, TWO phases:
+      phase 1: [--browser edge|chrome] [--launch]     launch a CDP-enabled Chrome/Edge (or print its
+               [--os windows|linux|macos] [--port <n>]  command); sign in to the Microsoft app,
+               [--browser-path <p>] [--user-data-dir <p>]  leave it open
+      phase 2: --attach [--host <h>] [--port <n>]     harvest cookies from that live session and
+                                                        exchange them into a credential
     roadtools   <path>                              Import .roadtools_auth file
     access_token <jwt>                              Raw JWT access token
     refresh_token <token> --tenant <id>             Raw refresh token
@@ -309,8 +310,12 @@ def _import_browser_cdp(state: ShellState, opts: dict[str, str]) -> None:
     console.print("  2. In that launched browser, sign in to the Microsoft app/page")
     console.print("     that demonstrates the visibility you need (Entra portal, Azure portal, PIM, etc.).")
     console.print()
-    console.print("  3. Keep that browser session open. Phase 2 will attach to the")
-    console.print("     CDP endpoint and import usable auth artifacts.")
+    console.print("  3. Keep that browser session open, then attach (Phase 2) to")
+    console.print("     harvest cookies from the live session and import a credential:")
+    attach_cmd = "import entra browser_cdp --attach"
+    if plan.port != 9222:
+        attach_cmd += f" --port {plan.port}"
+    console.print(f"     [cyan]{attach_cmd}[/cyan]")
     console.print()
     console.print(
         "  [dim]Port:[/dim] "
@@ -320,10 +325,6 @@ def _import_browser_cdp(state: ShellState, opts: dict[str, str]) -> None:
         "  [dim]This is separate from `acquire entra interactive` — the "
         "browser session may see data through a different Microsoft app or "
         "backend token path.[/dim]"
-    )
-    console.print(
-        "  [dim]Next step after launch/sign-in: rerun `import entra browser_cdp` "
-        "once the attach/import slice lands.[/dim]"
     )
 
 
