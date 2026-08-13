@@ -6,9 +6,20 @@ from websocket._exceptions import WebSocketBadStatusException
 
 from quantum_mechanic.providers.entra.browser_cdp import (
     build_launch_plan,
+    default_browser_for_os,
     import_browser_session,
     launch_browser,
 )
+
+
+def test_default_browser_is_edge_on_windows_chrome_elsewhere():
+    """OUTCOME: the default browser is OS-aware — Edge only on Windows, Chrome on
+    macOS/Linux (where Edge is uncommon and its default path usually absent)."""
+    assert default_browser_for_os("windows") == "edge"
+    assert default_browser_for_os("macos") == "chrome"
+    assert default_browser_for_os("linux") == "chrome"
+    # normalization: case/whitespace-insensitive
+    assert default_browser_for_os("  Windows ") == "edge"
 
 
 def test_build_launch_plan_macos_edge_uses_app_bundle_binary():

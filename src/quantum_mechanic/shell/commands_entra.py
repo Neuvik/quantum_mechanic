@@ -211,13 +211,14 @@ def _import_browser_cdp(state: ShellState, opts: dict[str, str]) -> None:
     from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
     from quantum_mechanic.providers.entra.browser_cdp import (
         build_launch_plan,
+        default_browser_for_os,
         detect_os_name,
         import_browser_session,
         launch_browser,
     )
 
-    browser = opts.get("browser", "edge")
     os_name = opts.get("os") or detect_os_name()
+    browser = opts.get("browser") or default_browser_for_os(os_name)
     port = int(opts.get("port", "9222"))
     host = opts.get("host", "127.0.0.1")
     browser_path = opts.get("browser-path")

@@ -80,6 +80,19 @@ def detect_os_name() -> str:
     return "linux"
 
 
+def default_browser_for_os(os_name: str) -> str:
+    """Pick the sensible default browser for an OS.
+
+    Edge is the Microsoft-native browser and is always present on Windows, so
+    it is the natural default there. On macOS/Linux Edge is uncommon (and its
+    default app path usually does not exist), while Chrome is the prevalent
+    Chromium browser — and since the launch uses a fresh throwaway profile with
+    manual sign-in, there is no existing-Edge-profile advantage to preserve.
+    Operators can always override with `--browser`.
+    """
+    return "edge" if os_name.strip().lower() == "windows" else "chrome"
+
+
 def build_launch_plan(
     *,
     browser: str,
