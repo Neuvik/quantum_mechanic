@@ -80,6 +80,63 @@ Before opening a Pull Request, ensure your module passes these checks:
 
 ---
 
+## 🕸 Code Graph (`qm graph`)
+
+QM ships a static **code graph** of every module, class, function, and method,
+plus their call/dispatch edges. Two views are committed at the repo root and are
+the source of truth for "does this already exist?" and "what's dead?":
+
+- **`graph.json`** — the machine-readable graph (nodes + edges), deterministic
+  and diffable.
+- **`FUNCTION_INDEX.md`** — the human-readable index rendered from that graph
+  (consult it before writing new helpers, to avoid duplication).
+
+### After you change code
+
+Run:
+
+```bash
+qm graph build      # or: python tools/gen_function_index.py (retired shim → same thing)
+```
+
+This re-emits **both** `graph.json` and `FUNCTION_INDEX.md` from a static AST
+pass. It is deterministic — commit the refreshed artifacts alongside your code.
+(The old `tools/gen_function_index.py` scraper has been retired; it now just
+forwards to `qm graph build`.)
+
+### Refreshing reachability (optional, local only)
+
+```bash
+qm graph trace      # SLOW — runs tests/unit + tests/integration under coverage + the in-binary tracer
+```
+
+`qm graph trace` produces **`trace.json`**, a dynamic overlay (coverage-derived
+"covered" nodes + observed call edges from the traced test scope). It is **slow**
+(it runs the suite twice), **non-deterministic**, and therefore **git-ignored** —
+never commit it. Query subcommands (`qm graph unused|callers|callees|path|
+undocumented`) automatically merge `trace.json` when it is present beside
+`graph.json`.
+
+### ⚠️ Honest caveat on `qm graph unused`
+
+`qm graph unused` lists nodes that are **statically unreachable from any
+entrypoint AND not covered by the traced scope**. Read it as **strong candidates
+for review, NOT an authoritative dead-code list**:
+
+- **Untested-live code** appears as "unused": a function only reached through a
+  path the (mocked, scope-limited) test suite never exercises still shows up.
+  `chaos_e2e` is excluded from the trace scope, so anything only reached there
+  looks unused.
+- **Resolver gaps** appear as "unused": a call the static builder can't resolve
+  (dynamic dispatch, reflection, string-keyed registries) leaves its target
+  looking unreachable unless the tracer happened to observe it.
+
+So: triage the list, don't bulk-delete it. A node is a confident deletion
+candidate only when it is unused **and** you've confirmed by hand that nothing
+reaches it dynamically.
+
+---
+
 ## 🤝 Module Parity Principle
 
 QM aims for four-cloud coverage. If you implement a technique for one cloud (e.g., AWS), consider if an analogous service exists on Azure, GCP, or OCI. We prefer modules that follow universal cloud patterns over provider-specific quirks.
