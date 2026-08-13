@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from quantum_mechanic import __version__
 from quantum_mechanic.core.loader import TechniqueLoader
 from quantum_mechanic.core.runner import TechniqueRunner
 from quantum_mechanic.core.workspace import Workspace
@@ -188,7 +189,7 @@ def _cmd_capabilities(
         {
             "ok": True,
             "capabilities": {
-                "version": "0.1.0",
+                "version": __version__,
                 "providers": providers,
                 "techniques": techniques,
                 "workspace": workspace_info,

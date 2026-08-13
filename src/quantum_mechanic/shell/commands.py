@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -243,6 +244,9 @@ def cmd_import(state: ShellState, args: list[str]) -> None:
         console.print(
             "    import azure --client-id <id> --client-secret <secret> --tenant-id <tid>"
         )
+        console.print(
+            "    import azure --access-token <jwt> [--expires-on <unix-epoch>]"
+        )
         console.print("    import gcp --default")
         console.print("    import gcp --key-file /path/to/sa.json")
         console.print("    import oci --default")
@@ -412,7 +416,58 @@ def _import_azure(state: ShellState, opts: dict[str, str]) -> None:
     persists it. The credential is then isolated from later az login changes.
 
     For --client-id/--client-secret: persists service-principal creds.
+    For --access-token: persists a captured ARM token directly.
     """
+    if "access-token" in opts:
+        token = opts.get("access-token", "").strip()
+        if not token:
+            console.print("  [red]✗[/red] --access-token requires a JWT value")
+            return
+
+        claims: dict[str, Any] = {}
+        try:
+            parts = token.split(".")
+            if len(parts) >= 2:
+                payload = parts[1]
+                payload += "=" * (-len(payload) % 4)
+                claims = json.loads(base64.urlsafe_b64decode(payload.encode()).decode())
+        except Exception:
+            claims = {}
+
+        expires_on = opts.get("expires-on")
+        if expires_on is None:
+            exp = claims.get("exp")
+            if exp is None:
+                console.print(
+                    "  [red]✗[/red] Could not derive token expiration from JWT. "
+                    "Pass --expires-on <unix-epoch>."
+                )
+                return
+            expires_on = str(exp)
+
+        try:
+            expires_on_int = int(expires_on)
+        except ValueError:
+            console.print("  [red]✗[/red] --expires-on must be a unix epoch integer")
+            return
+
+        principal = (
+            claims.get("appid")
+            or claims.get("upn")
+            or claims.get("oid")
+            or "azure-access-token"
+        )
+        secret: dict[str, Any] = {
+            "method": "captured_token",
+            "access_token": token,
+            "expires_on": expires_on_int,
+            "captured_principal": principal,
+        }
+        friendly = opts.get("friendly", f"TOKEN:{str(principal)[:24]}")
+        cred_type = "captured_token"
+        _validate_and_import(state, "azure", cred_type, secret, friendly)
+        return
+
     if "client-id" in opts:
         if not all(k in opts for k in ["client-id", "client-secret", "tenant-id"]):
             console.print(
@@ -546,16 +601,16 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
         console.print("  [red]✗[/red] No active workspace.")
         return
 
-    # Subcommand validation — print suggestion if unknown
-    err = _check_subcommand("creds", args)
-    if err:
-        console.print(err)
-        return
-
     # `creds <id>` — bare int arg → detail view for one credential.
     if args and args[0].isdigit():
         cred_id = int(args[0])
         _cmd_creds_detail(state, cred_id)
+        return
+
+    # Subcommand validation — print suggestion if unknown
+    err = _check_subcommand("creds", args)
+    if err:
+        console.print(err)
         return
 
     # Handle subcommands
@@ -1039,13 +1094,13 @@ def _maybe_offer_scope_retry(state: "ShellState", result, technique_id: str, par
 
 
 def cmd_run(state: ShellState, args: list[str]) -> None:
-    """Run a technique: run <technique_id> [--param key=value ...]"""
+    """Run a technique: run <technique_id> [--safe] [--param key=value ...]."""
     if state.transport is None:
         console.print("  [red]✗[/red] No active workspace.")
         return
 
     if not args:
-        console.print("  Usage: run <technique_id> [--param key=value]", style="yellow")
+        console.print("  Usage: run <technique_id> [--safe] [--param key=value]", style="yellow")
         return
 
     technique_id = args[0]
@@ -1061,18 +1116,27 @@ def cmd_run(state: ShellState, args: list[str]) -> None:
     # OPSEC-sensitive engagements can disable the semi-automatic FOCI
     # scope expansion by passing --no-auto-scope.
     auto_scope = True
+    safe_mode = False
     i = 1
     while i < len(args):
         arg = args[i]
-        if arg == "--param" and i + 1 < len(args):
+        if arg == "--param":
+            if i + 1 >= len(args) or "=" not in args[i + 1]:
+                console.print("  [yellow]--param requires key=value[/yellow] — see `help run`")
+                return
             kv = args[i + 1]
-            if "=" in kv:
-                k, v = kv.split("=", 1)
-                params[k.strip()] = v.strip()
+            k, v = kv.split("=", 1)
+            params[k.strip()] = v.strip()
             i += 2
-        elif arg == "--note" and i + 1 < len(args):
+        elif arg == "--note":
+            if i + 1 >= len(args):
+                console.print("  [yellow]--note requires a value[/yellow] — see `help run`")
+                return
             note = args[i + 1]
             i += 2
+        elif arg == "--safe":
+            safe_mode = True
+            i += 1
         elif arg == "--no-auto-scope":
             auto_scope = False
             i += 1
@@ -1080,58 +1144,71 @@ def cmd_run(state: ShellState, args: list[str]) -> None:
             k, v = arg.split("=", 1)
             params[k.strip()] = v.strip()
             i += 1
+        elif arg.startswith("--"):
+            console.print(f"  [yellow]Unknown flag: {arg}[/yellow] — see `help run`")
+            return
         else:
-            i += 1
+            console.print(f"  [yellow]Unexpected argument: {arg}[/yellow] — see `help run`")
+            return
 
     if note:
         params["_run_note"] = note
 
-    # ── Parameter hint / interactive picker for missing required params ─────
-    if state.loader:
-        registered = state.loader.get(technique_id)
-        if registered and registered.metadata.parameters:
-            missing = [
-                p for p in registered.metadata.parameters
-                if p.required and p.name not in params
-            ]
-            for p in list(missing):
-                picker_cfg = _LOOT_PICKERS.get((technique_id, p.name))
-                file_cfg = _FILE_PICKERS.get((technique_id, p.name))
-                if picker_cfg:
-                    value = _loot_pick(
-                        state,
-                        picker_cfg["loot_technique"],
-                        picker_cfg["value_col"],
-                        picker_cfg["display_cols"],
-                        picker_cfg.get("state_col"),
-                    )
-                    if value:
-                        params[p.name] = value
-                        missing.remove(p)
-                elif file_cfg:
-                    value = _file_pick(
-                        file_cfg["directory"],
-                        file_cfg["extension"],
-                        file_cfg["label"],
-                    )
-                    if value:
-                        params[p.name] = value
-                        missing.remove(p)
-                else:
-                    # Plain inline prompt for other missing params
-                    value = _prompt_param(p.name, p.example)
-                    if value:
-                        params[p.name] = value
-                        missing.remove(p)
+    # ── Validate check-only availability before the technique can run ───────
+    registered = state.loader.get(technique_id) if state.loader else None
+    if safe_mode and (
+        registered is None or not registered.metadata.safe_mode_available
+    ):
+        console.print(
+            f"  [yellow]{technique_id} does not support --safe[/yellow] "
+            "— run it without the flag or choose a technique that advertises check-only mode."
+        )
+        return
 
-            if missing:
-                names = ", ".join(f"[bold yellow]{p.name}[/bold yellow]" for p in missing)
-                console.print(f"  [yellow]⚠[/yellow]  Required parameter(s) not provided: {names}")
-                parts = " ".join(
-                    f"{p.name}={p.example or '<value>'}" for p in missing
+    # ── Parameter hint / interactive picker for missing required params ─────
+    if registered and registered.metadata.parameters:
+        missing = [
+            p for p in registered.metadata.parameters
+            if p.required and p.name not in params
+        ]
+        for p in list(missing):
+            picker_cfg = _LOOT_PICKERS.get((technique_id, p.name))
+            file_cfg = _FILE_PICKERS.get((technique_id, p.name))
+            if picker_cfg:
+                value = _loot_pick(
+                    state,
+                    picker_cfg["loot_technique"],
+                    picker_cfg["value_col"],
+                    picker_cfg["display_cols"],
+                    picker_cfg.get("state_col"),
                 )
-                console.print(f"  [dim]Usage: run {technique_id} {parts}[/dim]")
-                return
+                if value:
+                    params[p.name] = value
+                    missing.remove(p)
+            elif file_cfg:
+                value = _file_pick(
+                    file_cfg["directory"],
+                    file_cfg["extension"],
+                    file_cfg["label"],
+                )
+                if value:
+                    params[p.name] = value
+                    missing.remove(p)
+            else:
+                # Plain inline prompt for other missing params
+                value = _prompt_param(p.name, p.example)
+                if value:
+                    params[p.name] = value
+                    missing.remove(p)
+
+        if missing:
+            names = ", ".join(f"[bold yellow]{p.name}[/bold yellow]" for p in missing)
+            console.print(f"  [yellow]⚠[/yellow]  Required parameter(s) not provided: {names}")
+            parts = " ".join(
+                f"{p.name}={p.example or '<value>'}" for p in missing
+            )
+            console.print(f"  [dim]Usage: run {technique_id} {parts}[/dim]")
+            return
 
     # ── Auto-pivot entra → azure when technique requires it ─────────────────
     # If the active credential is entra and the technique supports azure (but
@@ -1168,6 +1245,7 @@ def cmd_run(state: ShellState, args: list[str]) -> None:
         try:
             _result[0] = state.transport.run_technique(
                 technique_id,
+                safe_mode=safe_mode,
                 params=params if params else None,
                 credential_id=state.active_credential_id,
                 on_event=lambda e: event_queue.put(e),
@@ -2755,6 +2833,7 @@ def cmd_acquire(state: ShellState, args: list[str]) -> None:
     if not args:
         console.print("  Usage: acquire <provider> <method> [options]", style="yellow")
         console.print("    acquire entra device_code [--tenant <tid>] [--client <id>] [--resource <url>]")
+        console.print("    acquire entra interactive [--tenant <tid>] [--client <id>] [--resource <url>]")
         console.print("    acquire entra ropc --username <upn> --password <pw> [--tenant <tid>]")
         console.print("    acquire entra refresh [--tenant <tid>] [--resource <url>]")
         console.print("    acquire entra arm                                  Pivot to Azure ARM via FOCI")
@@ -2856,15 +2935,8 @@ def _capture_gcp_token() -> dict[str, Any]:
 
 
 # ================================================================
-# Private commands (exploits, payloads, connect, disconnect, lois)
-# are in shell/commands_private.py — NOT shipped in the public build.
-# app.py loads them via try/except import if the file is present.
-# ================================================================
-
-
-# Command registry — public commands only.
-# Private commands (exploits, payloads, connect, disconnect, lois)
-# are injected by app.py at startup from commands_private.py.
+# Command registry — baseline commands. Additional environment-
+# specific commands may be injected by app.py at startup.
 # ================================================================
 COMMANDS: dict[str, Any] = {
     "workspace": cmd_workspace,
@@ -2983,7 +3055,10 @@ COMMAND_HELP: dict[str, CommandHelp] = {
         name="creds",
         category="credentials",
         synopsis="List or manage workspace credentials",
-        description="Shows imported credentials and lets you delete them by ID.",
+        description=(
+            "Shows imported credentials, renders per-credential detail with "
+            "`creds <id>`, and lets you delete them by ID."
+        ),
         subcommands=[
             SubcommandHelp(
                 name="delete",
@@ -2996,7 +3071,7 @@ COMMAND_HELP: dict[str, CommandHelp] = {
             FlagHelp(name="--provider", value="<name>", synopsis="Filter by provider"),
             FlagHelp(name="--active", synopsis="Show only active credentials"),
         ],
-        examples=["creds", "creds --provider aws", "creds delete 2"],
+        examples=["creds", "creds 2", "creds --provider aws", "creds delete 2"],
     ),
     "use": CommandHelp(
         name="use",
@@ -3108,8 +3183,8 @@ COMMAND_HELP: dict[str, CommandHelp] = {
         description="Runs the named technique against the active credential.",
         flags=[
             FlagHelp(
-                name="--dry-run",
-                synopsis="Simulate without making changes (where supported)",
+                name="--safe",
+                synopsis="Validate without state changes (where supported)",
             ),
             FlagHelp(
                 name="--param",

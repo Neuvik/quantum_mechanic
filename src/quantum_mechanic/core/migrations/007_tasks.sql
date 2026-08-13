@@ -1,7 +1,7 @@
 -- ================================================================
 -- MIGRATION: 007_tasks
 -- ----------------------------------------------------------------
--- PURPOSE:   Creates the tracking table for Neutrino agent tasks.
+-- PURPOSE:   Creates the tracking table for remote agent tasks.
 -- ================================================================
 
 CREATE TABLE tasks (

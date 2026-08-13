@@ -250,7 +250,7 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
         for binding in policy.bindings:
             if binding.role in ADMIN_ROLES:
                 for member in binding.members:
-                    # e.g. user:moses@acme.com -> moses@acme.com
+                    # e.g. user:alice@acme.com -> alice@acme.com
                     name = member.split(":", 1)[-1] if ":" in member else member
                     mtype = member.split(":", 1)[0].title() if ":" in member else "Unknown"
                     

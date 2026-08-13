@@ -67,6 +67,7 @@ def format_ssh_push_result(result: Any) -> None:
     providers=["gcp", "oci"],
     severity="critical",
     safe=False,
+    safe_mode_available=True,
     description="Inject a public SSH key into a cloud VM via control plane metadata.",
     formatter=format_ssh_push_result,
     parameters=[

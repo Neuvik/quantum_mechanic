@@ -2,10 +2,33 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc2 |
-| **Issued** | 2026-08-04 |
-| **Last reviewed** | 2026-08-04 |
+| **Version** | v1.0-rc3 |
+| **Issued** | 2026-08-07 |
+| **Last reviewed** | 2026-08-07 |
 | **Status** | Active |
+
+---
+
+## v1.0-rc3 — 2026-08-07
+
+Public release candidate.
+
+### What changed
+
+- Corrected the public release packaging metadata and documentation to identify
+  `v1.0-rc3`.
+- Added authorized-use guidance, a security disclosure policy, a contributor
+  code of conduct, and continuous-integration checks.
+- Corrected the Azure service-principal import example, safe-check technique
+  example, evidence-path tactic example, report technique ID, and state-location
+  documentation.
+
+### Install
+
+```bash
+uv sync
+uv run qm
+```
 
 ---
 
@@ -46,10 +69,14 @@ Optional local RAG support:
 uv sync --extra agent
 ```
 
+> **Note:** The optional local RAG dependencies can require a substantial
+> download. They are not needed for the base shell or JSON agent interface.
+
 ---
 
 ## Change Log
 
 | Rev | Date | Change |
 |-----|------|--------|
+| v1.0-rc3 | 2026-08-07 | Documented rc3 release changes. |
 | v1.0-rc2 | 2026-08-04 | Public release-candidate documentation and packaging aligned to the shipped command set and optional agent extra |

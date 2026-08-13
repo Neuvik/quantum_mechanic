@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc2 |
-| **Issued** | 2026-08-04 |
-| **Last reviewed** | 2026-08-04 |
+| **Version** | v1.0-rc3 |
+| **Issued** | 2026-08-07 |
+| **Last reviewed** | 2026-08-07 |
 | **Status** | Active |
 
 The `report` command renders the full engagement narrative inline in the terminal.
@@ -39,7 +39,7 @@ Chronological log of every technique run in this engagement:
 #   Timestamp        Technique                Provider  Principal
 1   2026-03-09 14:02 discovery/whoami         AWS       svc-deploy
 2   2026-03-09 14:03 discovery/enum_iam       AWS       svc-deploy
-3   2026-03-09 14:08 escalation/assume_role   AWS       BackupAdminRole
+3   2026-03-09 14:08 escalation/assume_role_chain AWS    BackupAdminRole
 ```
 
 ### Findings
@@ -61,4 +61,5 @@ Severity levels: `critical` · `high` · `medium` · `low` · `info`
 
 | Rev | Date | Change |
 |-----|------|--------|
+| v1.0-rc3 | 2026-08-07 | Corrected the technique ID in the timeline example. |
 | v1.0-rc2 | 2026-08-04 | Public report guide aligned to the shipped inline engagement narrative |

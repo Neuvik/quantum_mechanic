@@ -58,6 +58,7 @@ LOOT_SCHEMA = [
     providers=["aws", "azure", "gcp", "oci"],
     severity="high",
     safe=False,
+    safe_mode_available=True,
     description="Unified module to create additional cloud credentials for persistence.",
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,

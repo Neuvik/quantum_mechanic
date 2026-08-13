@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc2 |
-| **Issued** | 2026-08-04 |
-| **Last reviewed** | 2026-08-04 |
+| **Version** | v1.0-rc3 |
+| **Issued** | 2026-08-07 |
+| **Last reviewed** | 2026-08-07 |
 | **Status** | Active |
 
 ---
@@ -26,6 +26,18 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # From a checkout of the public repository:
 cd /path/to/quantum_mechanic
 uv sync
+```
+
+### Choose a state location (optional)
+
+By default, QM stores its local state under `~/.quantum_mechanic`. Set
+`QM_HOME` to relocate that state, or set `QM_WORKSPACE_DIR` to place workspace
+databases and evidence artifacts in a specific directory:
+
+```bash
+export QM_HOME=/secure/qm-state
+export QM_WORKSPACE_DIR=/secure/qm-workspaces
+uv run qm
 ```
 
 ---
@@ -153,5 +165,6 @@ qm> exit
 
 | Rev | Date | Change |
 |-----|------|--------|
+| v1.0-rc3 | 2026-08-07 | Documented state-location environment variables and updated release metadata. |
 | 0.1 | 2026-03-07 | Initial draft |
 | 0.2 | 2026-03-09 | Fixed entry point (`uv run qm`), Python 3.12+, added version table and change log |

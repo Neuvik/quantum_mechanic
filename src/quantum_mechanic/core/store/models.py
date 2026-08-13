@@ -55,7 +55,7 @@ class Principal:
 
 @dataclass
 class Agent:
-    """Represents a Neutrino C2 agent."""
+    """Represents a remote agent."""
 
     id: str
     hostname: str | None
@@ -74,7 +74,7 @@ class Agent:
 
 @dataclass
 class Task:
-    """Represents a job queued for a Neutrino agent."""
+    """Represents a job queued for a remote agent."""
 
     id: str
     agent_id: str

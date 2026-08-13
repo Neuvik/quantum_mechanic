@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc2 |
-| **Issued** | 2026-08-04 |
-| **Last reviewed** | 2026-08-04 |
+| **Version** | v1.0-rc3 |
+| **Issued** | 2026-08-07 |
+| **Last reviewed** | 2026-08-07 |
 | **Status** | Active |
 
 ---
@@ -46,7 +46,7 @@ qm[ws][aws:1]> run discovery/enum_iam --param max_roles=50
 ### Safe-check mode (read-only validation)
 For techniques that support it, `--safe` validates conditions without making any state changes:
 ```
-qm[ws][aws:1]> run escalation/compute_identity_abuse --safe
+qm[ws][aws:1]> run escalation/assume_role_chain --safe
 
   ✓ Would succeed: AdminRole is attachable to EC2 instances you control
   ✗ Dry run — no changes made
@@ -64,7 +64,7 @@ These metrics are visible in the JSON output when using the `qm --agent` API and
 ## Reading Technique Documentation
 
 Every technique ships with inline metadata and source-level header comments.
-In the public `v1.0-rc2` shell, `help <technique>` shows the concise
+In the public `v1.0-rc3` shell, `help <technique>` shows the concise
 operator-facing summary: technique ID, tactic, MITRE mapping, providers,
 safety, parameters, and examples.
 
@@ -97,4 +97,5 @@ qm[ws]> reload
 
 | Rev | Date | Change |
 |-----|------|--------|
+| v1.0-rc3 | 2026-08-07 | Corrected the safe-check example and updated release metadata. |
 | v1.0-rc2 | 2026-08-04 | Public technique guide aligned to the shipped shell output, including execution metrics and current command behavior |

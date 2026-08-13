@@ -57,7 +57,7 @@ def _load_graph_preconsent() -> list[dict[str, Any]]:
     if not _GRAPH_PRECONSENT_PATH.exists():
         logger.warning(
             "Entra refs missing: %s. Detectors will fall back to a small "
-            "baseline FOCI list. Run `tools/update_entra_refs.py` to fetch.",
+            "baseline FOCI list. Refresh the vendored Entra reference data to restore full coverage.",
             _GRAPH_PRECONSENT_PATH,
         )
         return []

@@ -418,9 +418,8 @@ def format_help_menu(commands: dict | None = None, command_help_registry=None) -
 
     Args:
         commands: The active COMMANDS registry. When provided, the
-                  Private / Advanced panel is only shown if the private
-                  commands (exploits, payloads) are registered — i.e. the
-                  private build. In the public build they are absent.
+                  Advanced panel is only shown if extended command
+                  handlers are registered in the current environment.
         command_help_registry: When provided, renders from the CommandHelp
                   registry (the new path) instead of the hardcoded layout.
     """
@@ -486,18 +485,18 @@ def format_help_menu(commands: dict | None = None, command_help_registry=None) -
     report_table.add_row("ask <question>", "Ask the autonomous RAG Agent for advice")
     console.print(Panel(report_table, title="[bold]Report & Agent[/bold]", title_align="left", border_style="cyan"))
 
-    # Private/Advanced — only shown when private commands are loaded
+    # Extended commands — only shown when additional command handlers are loaded
     if commands is not None and "exploits" in commands:
         adv_table = Table(box=box.SIMPLE, border_style="dim", show_header=False)
         adv_table.add_column("Command", style="bold cyan", width=35)
         adv_table.add_column("Description")
-        adv_table.add_row("exploits list", "List exploit pack (initial access CVEs)")
-        adv_table.add_row("exploits run <id> --param target=<url>", "Run an exploit (--safe for check-only)")
-        adv_table.add_row("payloads list", "List injectable LOIS payload scripts")
-        adv_table.add_row("payloads generate <name>", "Generate a keyed injection payload")
-        adv_table.add_row("connect <qm://token>", "Connect to a qmd control plane (thin-client)")
+        adv_table.add_row("exploits list", "List available exploit techniques")
+        adv_table.add_row("exploits run <id> --param target=<url>", "Run an exploit")
+        adv_table.add_row("payloads list", "List available payload scripts")
+        adv_table.add_row("payloads generate <name>", "Generate a payload")
+        adv_table.add_row("connect <qm://token>", "Connect to a remote control plane")
         adv_table.add_row("disconnect", "Return to local mode")
-        console.print(Panel(adv_table, title="[bold red]Private / Advanced[/bold red]", title_align="left", border_style="red"))
+        console.print(Panel(adv_table, title="[bold red]Advanced[/bold red]", title_align="left", border_style="red"))
 
     # General
     gen_table = Table(box=box.SIMPLE, border_style="dim", show_header=False)

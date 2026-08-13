@@ -2,9 +2,16 @@
 
 A cross-cloud offensive security framework for cloud and identity operations.
 
-Current public release: `v1.0-rc2` (2026-08-04).
+Current public release: `v1.0-rc3` (2026-08-07).
 
 QM gives you a single shell to run discovery, privilege escalation, lateral movement, and identity assessment workflows across AWS, Azure, Entra, GCP, and OCI — with structured evidence capture, credential chain tracking, and engagement reporting built in.
+
+## Authorized Use
+
+Quantum Mechanic is intended only for authorized security assessments, lab
+environments, and other activities for which you have documented permission.
+You are responsible for complying with applicable law, contracts, and the rules
+of the systems you assess.
 
 ## TL;DR
 
@@ -57,6 +64,10 @@ agent extra:
 ```bash
 uv sync --extra agent
 ```
+
+> **Note:** The `agent` extra includes local machine-learning dependencies and
+> can require a substantial download. It is not needed for the shell, agent
+> JSON interface, or cloud techniques.
 
 If you want a non-interactive JSON interface for automation:
 

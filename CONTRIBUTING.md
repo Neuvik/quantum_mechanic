@@ -15,9 +15,8 @@ license notice, attribution, and redistribution requirements.
 
 ## 🚀 Quick Start: Start from a Nearby Technique
 
-The public repository does not ship the private scaffolding helpers. Start by
-copying a nearby technique that matches your provider and tactic, then rename
-it and adjust the metadata:
+Start by copying a nearby technique that matches your provider and tactic, then
+rename it and adjust the metadata:
 
 - `src/quantum_mechanic/techniques/<tactic>/<name>.py`
 - `tests/unit/techniques/<tactic>/test_<name>.py`
@@ -73,10 +72,18 @@ This is where your attack logic lives. You use the `ctx` object to interact with
 Before opening a Pull Request, ensure your module passes these checks:
 
 1. **Unit Tests**: Place tests in `tests/unit/techniques/`. Mock all cloud responses.
-2. **Public validation**: Run `uv run pytest tests/unit/ -q` or `make test`
-3. **Safety**: If your module changes state (creates/deletes resources), it **must** be marked `safe=False`.
-4. **Coverage**: Add focused tests for the code you changed. The repository's
+2. **Public validation**: Run `uv run pytest tests/unit/ -q` or `make test`.
+3. **Lint**: Run `uv run ruff check src/ tests/`.
+4. **Safety**: If your module changes state (creates/deletes resources), it **must** be marked `safe=False`.
+5. **Coverage**: Add focused tests for the code you changed. The repository's
    broader coverage gate is maintained separately from this quick-start path.
+
+## Pull Requests
+
+Open a focused pull request with a clear description of the operator impact,
+tests run, and any safety considerations. Keep unrelated formatting or
+refactoring changes separate. Maintainers review changes for correctness,
+operator safety, documentation, and public-release boundary compatibility.
 
 ---
 
@@ -84,4 +91,6 @@ Before opening a Pull Request, ensure your module passes these checks:
 
 QM aims for four-cloud coverage. If you implement a technique for one cloud (e.g., AWS), consider if an analogous service exists on Azure, GCP, or OCI. We prefer modules that follow universal cloud patterns over provider-specific quirks.
 
-**Questions?** Check the internal `docs/` directory or join our development discussions.
+**Questions?** Open a GitHub issue with the relevant provider, command or
+technique, and a sanitized reproduction. Do not include credentials, customer
+names, tenant identifiers, or other engagement data.

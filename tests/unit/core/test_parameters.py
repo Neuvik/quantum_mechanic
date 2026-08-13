@@ -38,9 +38,10 @@ def test_parameter_validation_required_missing():
     assert result.status == "error"
     assert "Missing required parameter: 'target'" in result.error
 
-def test_parameter_validation_type_conversion():
+def test_parameter_validation_type_conversion(tmp_path):
     """Verify that the runner converts types according to the schema."""
     mock_workspace = MagicMock()
+    mock_workspace.workspace_dir = tmp_path
     mock_loader = MagicMock()
     mock_registry = MagicMock()
     

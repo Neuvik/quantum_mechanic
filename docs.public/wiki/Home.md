@@ -2,14 +2,20 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc2 |
-| **Issued** | 2026-08-04 |
-| **Last reviewed** | 2026-08-04 |
+| **Version** | v1.0-rc3 |
+| **Issued** | 2026-08-07 |
+| **Last reviewed** | 2026-08-07 |
 | **Status** | Active |
 
 Quantum Mechanic (QM) is a cross-cloud offensive security framework covering
 cloud and identity workflows across AWS, Azure, Entra, GCP, and OCI from a
 single shell.
+
+## Authorized Use
+
+Use QM only for authorized security assessments, lab environments, or other
+activities for which you have documented permission. You are responsible for
+complying with applicable law, contracts, and system-owner requirements.
 
 ```
 qm[acme-prod][aws:AKIA...]> run discovery/enum_iam
@@ -39,4 +45,10 @@ qm[acme-prod][aws:AKIA...]> run discovery/enum_iam
 
 See [Release Notes](./Release-Notes.md) for what changed in each version.
 
-**Current:** `v1.0-rc2` — public release candidate (2026-08-04)
+**Current:** `v1.0-rc3` — public release candidate (2026-08-07)
+
+## Change Log
+
+| Rev | Date | Change |
+|-----|------|--------|
+| v1.0-rc3 | 2026-08-07 | Added authorized-use guidance and updated release metadata. |

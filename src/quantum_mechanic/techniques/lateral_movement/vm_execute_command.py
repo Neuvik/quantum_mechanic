@@ -77,6 +77,7 @@ def format_exec_result(result: Any) -> None:
     providers=["aws", "azure"],
     severity="critical",
     safe=False,
+    safe_mode_available=True,
     description="Execute remote commands on a cloud VM using native administrative agents.",
     formatter=format_exec_result,
     parameters=[

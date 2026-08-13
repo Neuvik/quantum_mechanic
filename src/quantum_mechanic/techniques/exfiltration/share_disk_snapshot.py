@@ -68,6 +68,7 @@ LOOT_SCHEMA = [
     providers=["aws", "azure", "gcp", "oci"],
     severity="critical",
     safe=False,
+    safe_mode_available=True,
     description="Exfiltrate disk data by sharing snapshots or generating export links.",
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,

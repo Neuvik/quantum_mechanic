@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 class Transport(ABC):
     """Abstract base: the surface every QM client uses to run techniques.
 
-    An operator's shell command, an AI agent, and a Neutrino implant
+    An operator's shell command, an AI agent, and a remote agent
     all talk through a Transport. The concrete implementation decides
     whether execution happens in-process or over the network.
 
@@ -309,7 +309,7 @@ class RemoteTransport(Transport):
 
     Used by:
       - qm connect <token>   (human operator, remote mode)
-      - Neutrino implant     (autonomous agent, remote mode)
+      - Remote agent         (autonomous remote mode)
 
     Wire protocol: JSON over HTTPS with mutual TLS. The engagement CA cert
     is pinned — the system trust store is intentionally ignored.

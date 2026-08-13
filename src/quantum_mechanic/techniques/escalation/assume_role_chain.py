@@ -107,6 +107,7 @@ def format_chain_result(result: Any) -> None:
     providers=["aws"],
     severity="high",
     safe=False,
+    safe_mode_available=True,
     description="Enumerate and follow IAM role trust chains via sts:AssumeRole to extract derived credentials.",
     formatter=format_chain_result,
 )

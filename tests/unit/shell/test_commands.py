@@ -239,6 +239,12 @@ class TestCmdCredsAndUse:
         mock_format.assert_called_once()
         assert len(mock_format.call_args[0][0]) == 1
 
+    @patch("quantum_mechanic.shell.commands.formatters.format_credential_detail")
+    def test_creds_detail_by_id(self, mock_format, state_with_ws, mock_console):
+        cid = state_with_ws.workspace.add_credential("aws", "ak", "{}", "detail-cred")
+        cmd_creds(state_with_ws, [str(cid)])
+        mock_format.assert_called_once()
+
     def test_creds_no_workspace(self, state, mock_console):
         cmd_creds(state, [])
         assert "No active workspace" in str(mock_console.call_args[0][0])
@@ -294,6 +300,43 @@ class TestCmdRunAndTechniques:
     def test_run_no_args(self, state_with_ws, mock_console):
         cmd_run(state_with_ws, [])
         assert "Usage:" in str(mock_console.call_args[0][0])
+
+    @patch("quantum_mechanic.shell.commands.formatters.format_technique_result")
+    def test_run_safe_passes_safe_mode_to_transport(self, mock_format, state_with_ws):
+        """The --safe flag reaches the runner instead of executing normally."""
+        state_with_ws._transport = MagicMock()
+        state_with_ws._transport.run_technique.return_value = MagicMock()
+        state_with_ws.loader = MagicMock()
+        state_with_ws.loader.get.return_value = MagicMock(
+            metadata=MagicMock(safe_mode_available=True, parameters=[])
+        )
+
+        cmd_run(state_with_ws, ["discovery/whoami", "--safe"])
+
+        assert state_with_ws.transport.run_technique.call_args.kwargs["safe_mode"] is True
+        mock_format.assert_called_once()
+
+    def test_run_unknown_flag_is_rejected_before_execution(self, state_with_ws, mock_console):
+        """Unknown options never fall through to a potentially live technique run."""
+        state_with_ws._transport = MagicMock()
+
+        cmd_run(state_with_ws, ["discovery/whoami", "--typo"])
+
+        assert "Unknown flag: --typo" in str(mock_console.call_args[0][0])
+        state_with_ws.transport.run_technique.assert_not_called()
+
+    def test_run_safe_rejects_unsupported_technique(self, state_with_ws, mock_console):
+        """An unsupported --safe flag cannot fall through to a live run."""
+        state_with_ws._transport = MagicMock()
+        state_with_ws.loader = MagicMock()
+        state_with_ws.loader.get.return_value = MagicMock(
+            metadata=MagicMock(safe_mode_available=False, parameters=[])
+        )
+
+        cmd_run(state_with_ws, ["discovery/whoami", "--safe"])
+
+        assert "does not support --safe" in str(mock_console.call_args[0][0])
+        state_with_ws.transport.run_technique.assert_not_called()
 
     @patch("quantum_mechanic.shell.commands.formatters.format_technique_result")
     @patch("quantum_mechanic.providers.aws.auth.AWSAuthProvider.authenticate")
@@ -483,6 +526,3 @@ class TestCmdLoot:
         
         panel = [c for c in calls if isinstance(c, Panel)][0]
         assert "Block Legacy Auth" in str(panel.title)
-
-
-

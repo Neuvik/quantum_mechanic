@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc2 |
-| **Issued** | 2026-08-04 |
-| **Last reviewed** | 2026-08-04 |
+| **Version** | v1.0-rc3 |
+| **Issued** | 2026-08-07 |
+| **Last reviewed** | 2026-08-07 |
 | **Status** | Active |
 
 Quantum Mechanic strictly enforces evidence retention. Every technique run, API call, and finding is persistently recorded in the workspace.
@@ -27,7 +27,7 @@ Every time a technique is executed, a Markdown file is created (or updated with 
     discovery/
       whoami.md
       enum_iam.md
-    escalation/
+    privilege_escalation/
       compute_identity_abuse.md
 ```
 
@@ -73,4 +73,5 @@ This file is a structured narrative of the entire engagement up to the current m
 
 | Rev | Date | Change |
 |-----|------|--------|
+| v1.0-rc3 | 2026-08-07 | Corrected the technique-artifact tactic directory example. |
 | v1.0-rc2 | 2026-08-04 | Public evidence guide aligned to the shipped workspace artifact layout and report pipeline |

@@ -1,13 +1,26 @@
 [project]
 name = "quantum-mechanic"
-version = "1.0-rc2"
+version = "1.0rc3"
 description = "Offensive security assessment framework"
+keywords = ["cloud-security", "offensive-security", "aws", "azure", "entra", "gcp", "oci"]
 authors = [
     { name = "Moses Frost", email = "moses@neuvik.com" },
 ]
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-or-later"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: System :: Systems Administration",
+]
 
 dependencies = [
     "boto3>=1.35.0",
@@ -18,6 +31,8 @@ dependencies = [
     "google-api-python-client>=2.160.0",
     "google-cloud-resource-manager>=1.14.0",
     "google-cloud-iam>=2.16.0",
+    "google-cloud-kms>=3.5.1",
+    "google-cloud-secret-manager>=2.24.0",
     "oci>=2.145.0",
     "prompt-toolkit>=3.0.50",
     "cryptography>=44.0.0",
@@ -45,6 +60,12 @@ dependencies = [
     "sqlalchemy>=2.0",
     "pyyaml>=6.0.3",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Neuvik/quantum_mechanic"
+Repository = "https://github.com/Neuvik/quantum_mechanic"
+Issues = "https://github.com/Neuvik/quantum_mechanic/issues"
+Company = "https://neuvik.com"
 
 [project.optional-dependencies]
 agent = [

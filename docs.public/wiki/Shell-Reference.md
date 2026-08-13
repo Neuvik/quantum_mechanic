@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc2 |
-| **Issued** | 2026-08-04 |
-| **Last reviewed** | 2026-08-04 |
+| **Version** | v1.0-rc3 |
+| **Issued** | 2026-08-07 |
+| **Last reviewed** | 2026-08-07 |
 | **Status** | Active |
 
 Complete reference for every command available in the `qm` interactive shell.
@@ -32,7 +32,7 @@ Complete reference for every command available in the `qm` interactive shell.
 | `import aws --profile <name>` | Import an AWS CLI named profile |
 | `import aws --access-key` | Import AWS access key + secret interactively |
 | `import azure --default` | Import Azure CLI session credentials |
-| `import azure --client-id <id> --client-secret <s> --tenant <t>` | Import service principal |
+| `import azure --client-id <id> --client-secret <s> --tenant-id <tenant-id>` | Import service principal |
 | `import gcp --default` | Import GCP application default credentials |
 | `import gcp --key-file <path>` | Import GCP service account key JSON |
 | `import oci --default` | Import OCI config file (DEFAULT profile) |
@@ -108,4 +108,5 @@ The report shows:
 
 | Rev | Date | Change |
 |-----|------|--------|
+| v1.0-rc3 | 2026-08-07 | Corrected the Azure service-principal tenant flag and updated release metadata. |
 | v1.0-rc2 | 2026-08-04 | Shell command reference aligned to the shipped public command set, including Entra acquire/export, playbooks, loot, activity, and CA bypass analysis |

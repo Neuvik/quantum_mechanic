@@ -27,6 +27,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="qm",
         description="Quantum Mechanic — Cross-cloud offensive security framework",
+        epilog=(
+            "Interactive commands: workspace, import, acquire, creds, use, "
+            "techniques, run, info, report, and help. Launch `qm` without a "
+            "command to use the interactive shell."
+        ),
     )
     parser.add_argument(
         "--agent",

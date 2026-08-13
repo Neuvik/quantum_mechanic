@@ -236,7 +236,7 @@ class Workspace:
     # ================================================================
 
     def register_agent(self, agent: Agent) -> None:
-        """Register or update a Neutrino agent."""
+        """Register or update a remote agent."""
         return self._agents.register(agent)
 
     def heartbeat_agent(self, agent_id: str, latency_ms: int) -> None:
@@ -482,8 +482,10 @@ class Workspace:
 
     @property
     def workspace_dir(self) -> Path:
-        """Parent directory of the workspace database."""
-        return self.db.db_path.parent
+        """Per-workspace artifact directory alongside the workspace database."""
+        artifact_dir = self.db.db_path.parent / self.name
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        return artifact_dir
 
     def list_agent_ids(self) -> list[str]:
         """Return all agent IDs (used by transport/server for listing)."""
