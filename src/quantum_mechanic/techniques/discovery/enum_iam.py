@@ -382,12 +382,66 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
     if whoami_res.principal_type == "service_account":
         member_str = f"serviceAccount:{principal_id}"
 
+    from google.api_core import exceptions as gapi_exceptions
+    from google.auth import exceptions as gauth_exceptions
+    from google.auth.transport.requests import Request
+
+    # Auth-layer failures (bad/expired/malformed credentials) must NOT be
+    # treated the same as a per-project permission denial. A permission
+    # denial on one project is expected during enumeration — the caller may
+    # legitimately lack access to some projects. A credential that can't
+    # authenticate at all must surface as status=error, not fall through
+    # to an empty-but-"successful" result.
+    auth_failure_types = (
+        gauth_exceptions.GoogleAuthError,
+        gapi_exceptions.Unauthenticated,
+    )
+
+    # Proactively validate/refresh the credential BEFORE constructing the
+    # gRPC client (resourcemanager_v3.ProjectsClient uses gRPC transport by
+    # default). gRPC's AuthMetadataPlugin swallows any exception raised
+    # during credential refresh and re-surfaces it to callers as a generic
+    # ServiceUnavailable("...Getting metadata from plugin failed...") — a
+    # 503 that's indistinguishable from a real GCP outage and isn't a
+    # subclass of any auth-specific exception, so it would otherwise slip
+    # past auth_failure_types and be silently swallowed below. Checking here
+    # means an expired/invalid credential raises with its real type first.
+    try:
+        if getattr(ctx.session, "expired", False):
+            ctx.session.refresh(Request())
+    except auth_failure_types as e:
+        return {
+            "status": "error",
+            "error": f"GCP authentication failed: {e}",
+            "principal": whoami_res.friendly_name,
+            "principal_type": whoami_res.principal_type,
+            "project_roles": [],
+        }
+    except ValueError as e:
+        # StaticTokenCredentials.refresh() raises ValueError with a clear
+        # re-import message when a captured token has genuinely expired.
+        return {
+            "status": "error",
+            "error": str(e),
+            "principal": whoami_res.friendly_name,
+            "principal_type": whoami_res.principal_type,
+            "project_roles": [],
+        }
+
     client = resourcemanager_v3.ProjectsClient(credentials=ctx.session)
     projects = []
 
     try:
         for p in client.search_projects():
             projects.append(p.project_id)
+    except auth_failure_types as e:
+        return {
+            "status": "error",
+            "error": f"GCP authentication failed while searching projects: {e}",
+            "principal": whoami_res.friendly_name,
+            "principal_type": whoami_res.principal_type,
+            "project_roles": [],
+        }
     except Exception as e:
         logger.warning(f"Failed to search projects: {e}")
         if whoami_res.account_id and whoami_res.account_id != "unknown":
@@ -403,6 +457,7 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         }
 
     roles_found = []
+    auth_failures = []
 
     for pid in set(projects):
         try:
@@ -421,8 +476,24 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
                             "condition": condition,
                         }
                     )
+        except auth_failure_types as e:
+            auth_failures.append(pid)
+            logger.warning(f"GCP authentication failed for project {pid}: {e}")
         except Exception as e:
             logger.warning(f"Could not get IAM policy for project {pid}: {e}")
+
+    if auth_failures and len(auth_failures) == len(set(projects)):
+        return {
+            "status": "error",
+            "error": (
+                f"GCP authentication failed for all {len(auth_failures)} project(s) "
+                "— credentials may be invalid or expired. Re-import via "
+                "`import gcp --default`."
+            ),
+            "principal": friendly_name,
+            "principal_type": whoami_res.principal_type,
+            "project_roles": [],
+        }
 
     return {
         "status": "success",

@@ -2933,6 +2933,10 @@ def _capture_gcp_token() -> dict[str, Any]:
         "access_token": live.token,
         "captured_principal": captured_principal,
         "project_id": project or "",
+        # The real token expiry, captured at import time — GCPAuthProvider
+        # uses this instead of fabricating an arbitrary one, so the stored
+        # credential's freshness actually reflects the live token's lifetime.
+        "expiry": live.expiry.isoformat() if live.expiry else None,
     }
 
 

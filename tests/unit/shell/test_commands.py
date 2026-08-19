@@ -198,9 +198,13 @@ class TestCmdImport:
     @patch("quantum_mechanic.providers.gcp.auth.GCPAuthProvider.authenticate")
     def test_import_gcp_default(self, mock_auth, mock_default, state_with_ws, mock_console):
         # google.auth.default returns (credentials, project_id)
+        from datetime import UTC, datetime, timedelta
+
+        real_expiry = (datetime.now(UTC) + timedelta(hours=1)).replace(tzinfo=None)
         fake_cred = MagicMock()
         fake_cred.service_account_email = "alice@example.iam.gserviceaccount.com"
         fake_cred.token = "ya29.fake-token"
+        fake_cred.expiry = real_expiry
         mock_default.return_value = (fake_cred, "my-project")
 
         cmd_import(state_with_ws, ["gcp", "--default"])
@@ -211,6 +215,9 @@ class TestCmdImport:
         assert secret["access_token"] == "ya29.fake-token"
         assert secret["captured_principal"] == "alice@example.iam.gserviceaccount.com"
         assert secret["project_id"] == "my-project"
+        # OUTCOME: the real ADC token expiry is captured at import time,
+        # not discarded in favor of a later fabricated one (issue #1).
+        assert secret["expiry"] == real_expiry.isoformat()
 
     @patch("quantum_mechanic.providers.gcp.auth.GCPAuthProvider.authenticate")
     def test_import_gcp_keyfile(self, mock_auth, state_with_ws, mock_console):
