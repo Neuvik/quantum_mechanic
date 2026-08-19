@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -30,7 +29,6 @@ from quantum_mechanic.providers.entra.token_store import (
     GRAPH,
     EntraTokenStore,
     decode_jwt_claims,
-    token_from_jwt,
 )
 
 logger = logging.getLogger(__name__)

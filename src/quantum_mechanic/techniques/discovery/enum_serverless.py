@@ -160,7 +160,7 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
                 for page in paginator.paginate():
                     for f in page.get("Functions", []):
                         env_vars = f.get("Environment", {}).get("Variables", {})
-                        
+
                         code_location = None
                         try:
                             # Try to get function details to extract the pre-signed code download URL
@@ -213,8 +213,8 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
     # -----------------------------------------------------------------
     # Requires Microsoft.Web/sites/read and optionally Microsoft.Web/sites/config/Read. Calls WebSiteManagementClient.web_apps.list() filtering for objects where kind contains 'functionapp'. Extracts Managed Identity configurations and attempts to pull list_application_settings() to discover plaintext connection strings.
     try:
-        from azure.mgmt.web import WebSiteManagementClient
         from azure.mgmt.subscription import SubscriptionClient
+        from azure.mgmt.web import WebSiteManagementClient
     except ImportError:
         return {"error": "azure-mgmt-web not installed.", "functions": []}
 

@@ -19,6 +19,7 @@ import logging
 import os
 import queue
 from contextlib import nullcontext
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -581,6 +582,7 @@ def _cmd_creds_detail(state: ShellState, cred_id: int) -> None:
 
     if provider == "entra" and ctype == "token_store":
         import json as _json
+
         from quantum_mechanic.providers.entra.token_store import EntraTokenStore as _ETS
         try:
             raw = state.workspace.get_credential_secret(cred_id)
@@ -649,8 +651,9 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
     # Enrich Entra token_store entries with token summary and recovered identity.
     if state.workspace:
         import json as _json
-        from quantum_mechanic.shell.commands_entra import _entra_friendly_name
+
         from quantum_mechanic.providers.entra.token_store import EntraTokenStore as _ETS
+        from quantum_mechanic.shell.commands_entra import _entra_friendly_name
         for cred in creds:
             if cred.get("provider") == "entra" and cred.get("credential_type") == "token_store":
                 try:
@@ -713,7 +716,7 @@ def _try_restore_arm_pivot(state: ShellState) -> None:
     # resilient to import / ORM issues.
     try:
         import json as _json
-        from datetime import datetime as _dt, timezone as _tz
+        from datetime import datetime as _dt
 
         raw = state.workspace.get_credential_secret(state.active_credential_id)
         if not raw:
@@ -732,8 +735,8 @@ def _try_restore_arm_pivot(state: ShellState) -> None:
                 if exp_str:
                     exp_dt = _dt.fromisoformat(exp_str)
                     if exp_dt.tzinfo is None:
-                        exp_dt = exp_dt.replace(tzinfo=_tz.utc)
-                    if _dt.now(_tz.utc) >= exp_dt:
+                        exp_dt = exp_dt.replace(tzinfo=UTC)
+                    if _dt.now(UTC) >= exp_dt:
                         continue  # expired, skip
                 state._extra_providers = ["azure"]
                 console.print("  [dim]↳ ARM token found — Azure techniques unlocked.[/dim]")
@@ -893,7 +896,7 @@ _STATE_COLORS = {
 
 
 def _loot_pick(
-    state: "ShellState",
+    state: ShellState,
     loot_technique: str,
     value_col: str,
     display_cols: list[str],
@@ -990,7 +993,7 @@ def _prompt_param(name: str, example: str | None = None) -> str | None:
         return None
 
 
-def _maybe_offer_scope_retry(state: "ShellState", result, technique_id: str, params: dict):
+def _maybe_offer_scope_retry(state: ShellState, result, technique_id: str, params: dict):
     """If `result` is a scope-denied Entra technique with a FOCI RT available,
     prompt the operator to attempt FOCI scope expansion and re-run once.
 
@@ -1399,10 +1402,10 @@ def cmd_techniques(state: ShellState, args: list[str]) -> None:
 
 def cmd_loot(state: ShellState, args: list[str]) -> None:
     """Display saved loot from previous technique runs: loot [technique_id]"""
-    import csv
     from pathlib import Path
-    from rich.table import Table
+
     from rich import box
+    from rich.table import Table
 
     if state.workspace is None:
         console.print("  [red]✗[/red] No active workspace.")
@@ -1422,7 +1425,7 @@ def cmd_loot(state: ShellState, args: list[str]) -> None:
         if not loot_dir.exists():
             console.print(f"  [red]✗[/red] No loot for '{target_id}'.")
             return
-        
+
         if target_id == "discovery/entra_enum_conditional_access_policies":
             _interactive_ca_policies_viewer(loot_dir, state.workspace)
             return
@@ -1465,8 +1468,9 @@ def _render_loot_dir(loot_dir, tech_id: str) -> None:
     import csv
     import importlib
     from pathlib import Path
-    from rich.table import Table
+
     from rich import box
+    from rich.table import Table
 
     csv_path = Path(loot_dir) / "loot.csv"
     if not csv_path.exists():
@@ -1522,11 +1526,15 @@ def _interactive_ca_policies_viewer(loot_dir, workspace: Workspace | Path | None
     """Render an interactive menu to inspect Conditional Access policies from loot."""
     import csv
     from pathlib import Path
-    from rich.table import Table
-    from rich.panel import Panel
-    from rich.console import Group
+
     from rich import box
-    from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import load_loot_mappings
+    from rich.console import Group
+    from rich.panel import Panel
+    from rich.table import Table
+
+    from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import (
+        load_loot_mappings,
+    )
 
     csv_path = Path(loot_dir) / "loot.csv"
     if not csv_path.exists():
@@ -1548,14 +1556,14 @@ def _interactive_ca_policies_viewer(loot_dir, workspace: Workspace | Path | None
     mapping = load_loot_mappings(workspace) if workspace else {}
 
     console.print(f"  [bold cyan]discovery/entra_enum_conditional_access_policies[/bold cyan] [dim]({len(rows)} policies)[/dim]\n")
-    
+
     def render_summary_table():
         summary = Table(box=box.ROUNDED, border_style="dim")
         summary.add_column("#", style="bold cyan", width=4)
         summary.add_column("Policy Name", style="bold white")
         summary.add_column("State", style="bold")
         summary.add_column("Access Controls", style="yellow")
-        
+
         for i, row in enumerate(rows, 1):
             state = row.get("state", "unknown")
             state_style = "green" if state == "enabled" else ("yellow" if "report" in state.lower() else "dim")
@@ -1568,17 +1576,17 @@ def _interactive_ca_policies_viewer(loot_dir, workspace: Workspace | Path | None
         console.print(summary)
 
     render_summary_table()
-    
+
     while True:
         try:
             choice = input("\n  Select a policy number to view detailed rules & bypass guidance (or type 'list' to show table, press Enter to exit) > ").strip()
         except (EOFError, KeyboardInterrupt):
             console.print()
             break
-            
+
         if not choice:
             break
-            
+
         if choice.lower() in ["list", "l", "table", "show", "help", "?", "h"]:
             render_summary_table()
             continue
@@ -1587,7 +1595,7 @@ def _interactive_ca_policies_viewer(loot_dir, workspace: Workspace | Path | None
             idx = int(choice) - 1
             if 0 <= idx < len(rows):
                 p = rows[idx]
-                
+
                 # Helper to clean and resolve GUIDs in a value
                 def clean_val(val_str):
                     if not val_str or val_str == "None":
@@ -1622,7 +1630,7 @@ def _interactive_ca_policies_viewer(loot_dir, workspace: Workspace | Path | None
                     incls.append(f"[bold]Locations:[/bold] {inc_locations}")
                 if client_apps_str != "None" and client_apps_str != "All":
                     incls.append(f"[bold]Client Apps:[/bold] {client_apps_str}")
-                
+
                 excls = []
                 exc_users = clean_val(p.get("excluded_users"))
                 exc_groups = clean_val(p.get("excluded_groups"))
@@ -1643,17 +1651,17 @@ def _interactive_ca_policies_viewer(loot_dir, workspace: Workspace | Path | None
                     excls.append(f"[bold]Platforms:[/bold] {exc_platforms}")
                 if exc_locations != "None":
                     excls.append(f"[bold]Locations:[/bold] {exc_locations}")
-                
+
                 # Analyze policy for bypass opportunities
                 bypass_tips = []
                 state_val = p.get("state", "")
                 controls = p.get("grant_controls", "")
-                
+
                 if state_val == "disabled":
                     bypass_tips.append(f"[bold yellow]• Policy is disabled.[/bold yellow] The configured controls ({controls}) are not active.")
                 elif "report" in state_val.lower():
                     bypass_tips.append(f"[bold yellow]• Policy is in Report-Only mode.[/bold yellow] Its controls ({controls}) are not enforced.")
-                
+
                 # Specific exclusions (resolving names at display time)
                 for u in [x.strip() for x in p.get("excluded_users", "").split(",") if x.strip() and x.strip() != "None"]:
                     u_res = mapping.get(u.lower(), mapping.get(u, u))
@@ -1678,14 +1686,16 @@ def _interactive_ca_policies_viewer(loot_dir, workspace: Workspace | Path | None
                 if "exchangeactivesync" in client_apps or "other" in client_apps:
                     legacy = [c for c in client_apps if c in ["exchangeactivesync", "other"]]
                     bypass_tips.append(f"[bold yellow]• Legacy Auth Allowed:[/bold yellow] Legacy client type ({', '.join(legacy)}) allowed. Bypasses modern MFA.")
-                
+
                 guidance_tips = list(bypass_tips)
-                from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import explain_controls
+                from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import (
+                    explain_controls,
+                )
                 for exp in explain_controls(controls):
                     guidance_tips.append(f"[bold cyan]• Control Explanation:[/bold cyan] {exp}")
-                
+
                 guidance_str = "\n".join(guidance_tips) if guidance_tips else "No direct exclusion bypasses identified."
-                
+
                 detail_group = Group(
                     f"[bold white]State:[/bold white] {p.get('state', 'unknown')}",
                     f"[bold white]Access Controls:[/bold white] {controls}",
@@ -1699,7 +1709,7 @@ def _interactive_ca_policies_viewer(loot_dir, workspace: Workspace | Path | None
                     "[bold yellow]Bypass & Penetration Testing Guidance:[/bold yellow]",
                     guidance_str
                 )
-                
+
                 console.print(Panel(
                     detail_group,
                     title=f"[bold white]Policy: {p.get('display_name', '—')}[/bold white]",
@@ -1717,9 +1727,10 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
     import csv
     import json
     from pathlib import Path
-    from rich.table import Table
-    from rich.panel import Panel
+
     from rich import box
+    from rich.panel import Panel
+    from rich.table import Table
 
     if state.workspace is None:
         console.print("  [red]✗[/red] No active workspace.")
@@ -1736,7 +1747,7 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
             if ev.get("technique_id") == "discovery/entra_enum_conditional_access_policies":
                 ca_evidence = ev
                 break
-        
+
         if ca_evidence and ca_evidence.get("output_json"):
             payload = json.loads(ca_evidence["output_json"])
             policies = payload.get("policies", [])
@@ -1748,7 +1759,7 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
         ws_db = Path(state.workspace.db_path)
         loot_dir = ws_db.parent / ws_db.stem / "loot" / "discovery" / "entra_enum_conditional_access_policies"
         csv_path = loot_dir / "loot.csv"
-        
+
         if csv_path.exists():
             try:
                 with csv_path.open(newline="", encoding="utf-8") as fh:
@@ -1763,7 +1774,9 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
         return
 
     # Load mapping for on-the-fly GUID resolution
-    from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import load_loot_mappings
+    from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import (
+        load_loot_mappings,
+    )
     mapping = load_loot_mappings(state.workspace) if state.workspace else {}
 
     # Helper to coerce list or comma-separated string
@@ -1790,7 +1803,7 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
         controls = p.get("grant_controls") or p.get("grantControls") or "None"
         if isinstance(controls, list):
             controls = ", ".join(controls)
-        
+
         # Inactive policies
         if p_state == "disabled" or "report" in str(p_state).lower():
             disabled_policies.append((name, str(p_state), controls))
@@ -1887,7 +1900,7 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
 
     # 5.1 Rule-Based Bypass Detectors
     from quantum_mechanic.shell.ca_bypass_detectors import run_all_detectors
-    
+
     detector_findings = run_all_detectors(policies)
 
     if detector_findings:
@@ -1937,14 +1950,14 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
     domain_users = build_domain("included_users", "excluded_users", "generic_user@tenant.com")
     if "guest_user" not in domain_users:
         domain_users.append("guest_user")
-        
+
     domain_groups = build_domain("included_groups", "excluded_groups", "None")
     domain_roles = build_domain("included_roles", "excluded_roles", "None")
     domain_apps = build_domain("included_apps", "excluded_apps", "generic_app")
     domain_platforms = ["windows", "macos", "ios", "android", "linux", "unknown"]
     domain_locations = build_domain("included_locations", "excluded_locations", "untrusted_ip")
     domain_clients = ["browser", "mobileAppsAndDesktopClients", "exchangeActiveSync", "other"]
-    
+
     # New domains
     domain_sign_in_risk = ["none", "low", "medium", "high"]
     domain_user_risk = ["none", "low", "medium", "high"]
@@ -1990,7 +2003,7 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
         user_matched = False
         if "All" in inc_u or u in inc_u or g in inc_g or r in inc_r:
             user_matched = True
-            
+
         # Handle guest users
         if u == "guest_user":
             inc_guests = p_dict.get("include_guest_types", "")
@@ -2005,13 +2018,13 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
 
         inc_a = get_list(p_dict.get("included_apps") or p_dict.get("includeApplications") or p_dict.get("includedApplications"))
         exc_a = get_list(p_dict.get("excluded_apps") or p_dict.get("excludeApplications") or p_dict.get("excludedApplications"))
-        
+
         # Expand Office365 to individual apps if targeted
         # Exchange Online, SharePoint Online, Teams, etc.
         o365_apps = ["00000002-0000-0ff1-ce00-000000000000", "00000003-0000-0ff1-ce00-000000000000"]
         if "Office365" in inc_a and app in o365_apps:
             inc_a.append(app)
-            
+
         if not matches_val(app, inc_a, exc_a):
             return False
 
@@ -2034,13 +2047,13 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
             inc_c = ["all"]
         if "all" not in inc_c and client.lower() not in inc_c:
             return False
-            
+
         # Risk levels
         p_sign_in_risk = [x.lower() for x in get_list(p_dict.get("sign_in_risk_levels"))]
         if p_sign_in_risk and p_sign_in_risk != ["none"]:
             if sign_in_risk not in p_sign_in_risk:
                 return False
-                
+
         p_user_risk = [x.lower() for x in get_list(p_dict.get("user_risk_levels"))]
         if p_user_risk and p_user_risk != ["none"]:
             if user_risk not in p_user_risk:
@@ -2105,7 +2118,7 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
                     if mfa_in_policy:
                         mfa_enforced = True
                         break
-            
+
             if not mfa_enforced:
                 sweep_gaps.append({
                     "user": u, "group": g, "role": r,
@@ -2160,7 +2173,6 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
         console.print(tbl)
 
     # ── Executive Summary ────────────────────────────────────────────────────
-    from rich.panel import Panel
     n_critical = sum(1 for f in detector_findings if f.severity == "CRITICAL")
     n_high = sum(1 for f in detector_findings if f.severity == "HIGH")
     n_medium = sum(1 for f in detector_findings if f.severity == "MEDIUM")
@@ -2232,6 +2244,7 @@ def cmd_ask(state: ShellState, args: list[str]) -> None:
 
     try:
         from rich.markdown import Markdown
+
         from quantum_mechanic.agent.orchestrator import AgentOrchestrator
     except ImportError:
         console.print("\n[red]✗ Agent Dependencies Missing[/red]")
@@ -2266,7 +2279,7 @@ def cmd_activity(state: ShellState, args: list[str]) -> None:
     opts = _parse_opts(args)
     limit = int(opts.get("limit", 50))
     level = opts.get("level")
-    
+
     # Filter by tech ID if provided (first positional arg)
     tech_id = None
     if args and not args[0].startswith("--"):
@@ -2282,8 +2295,8 @@ def cmd_activity(state: ShellState, args: list[str]) -> None:
         console.print("  [dim]No activity log entries found.[/dim]")
         return
 
-    from rich.table import Table
     from rich import box
+    from rich.table import Table
 
     pager_ctx = console.pager(styles=True) if os.environ.get("TERM") != "dumb" else nullcontext()
     with pager_ctx:
@@ -2310,21 +2323,20 @@ def cmd_activity(state: ShellState, args: list[str]) -> None:
             lvl = log["level"].upper()
             style = _LEVEL_STYLES.get(lvl, "white")
             ts = log["timestamp"][11:19] # Show HH:MM:SS
-            
+
             tbl.add_row(
                 ts,
                 log["technique_id"],
                 f"[{style}]{lvl}[/{style}]",
                 log["message"]
             )
-        
+
         console.print(tbl)
 
 
 def _show_check_ca_bypasses_help() -> None:
     """Display comprehensive help for the check-ca-bypasses command."""
     from rich import box
-    from rich.panel import Panel
     from rich.table import Table
 
     console.print("\n[bold white]COMMAND: check-ca-bypasses[/bold white]")
@@ -2551,6 +2563,7 @@ def _render_command_help(h: CommandHelp) -> None:
 def cmd_report(state: ShellState, args: list[str]) -> None:
     """Render the engagement narrative inline in the terminal using Rich tables."""
     import json
+
     from rich.panel import Panel
     from rich.table import Table
     from rich.tree import Tree
@@ -2569,7 +2582,7 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
         now_str = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
         creds_all = transport.list_credentials()
         providers = ", ".join(sorted({c.get("provider", "unknown").upper() for c in creds_all})) or "none"
-        
+
         console.print(Panel(
             f"[bold white]Attack Path — {ws_name}[/bold white]\n"
             f"[dim]Updated: {now_str}   Providers: {providers}[/dim]",
@@ -2631,7 +2644,7 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
                 try:
                     data = json.loads(row.get("output_json", "{}"))
                     provider = (data.get("provider") or "?").upper()
-                    
+
                     # --------------------------------------------------------
                     # Extract principal identity from evidence output JSON,
                     # defaulting to credential metadata if not present.

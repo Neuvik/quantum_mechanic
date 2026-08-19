@@ -147,8 +147,9 @@ def get_list_from_policy(policy: dict, key: str) -> list[str]:
 
 def format_conditional_access_policies_result(result: Any) -> None:
     """Formatter for Entra CA Policy enumeration results."""
-    from rich.table import Table
     from rich import box
+    from rich.table import Table
+
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
@@ -195,7 +196,7 @@ def format_conditional_access_policies_result(result: Any) -> None:
         "  [dim]Use `run discovery/entra_enum_ca_policy --name <policy>` or "
         "`--id <id>` for full per-policy detail.[/dim]"
     )
-    
+
     tbl = Table(box=box.ROUNDED, border_style="dim")
     tbl.add_column("Policy Name", style="bold cyan")
     tbl.add_column("State", style="bold white")
@@ -206,7 +207,7 @@ def format_conditional_access_policies_result(result: Any) -> None:
     for p in tbl_data(policies):
         state_style = "green" if p.get("state") == "enabled" else "dim"
         controls = ", ".join(p.get("grant_controls", [])) or "None"
-        
+
         # Summarize scope
         incls = []
         if p.get("included_users"):
@@ -233,7 +234,7 @@ def format_conditional_access_policies_result(result: Any) -> None:
         if p.get("excluded_locations") and p["excluded_locations"] != "None":
             excls.append(f"Locations: {p['excluded_locations']}")
         excls_str = " | ".join(excls) or "None"
-        
+
         tbl.add_row(
             p.get("display_name", "Untitled"),
             f"[{state_style}]{p.get('state', 'unknown')}[/{state_style}]",
@@ -241,7 +242,7 @@ def format_conditional_access_policies_result(result: Any) -> None:
             incls_str,
             excls_str
         )
-            
+
     console.print(tbl)
 
     # Print Bypass Guidance
@@ -250,20 +251,20 @@ def format_conditional_access_policies_result(result: Any) -> None:
         name = p.get("display_name", "Untitled")
         state = p.get("state", "unknown")
         controls = ", ".join(get_list(p.get("grant_controls"))) or "None"
-        
+
         if state == "disabled":
             bypass_tips.append(f"  • [bold yellow]Disabled Policy:[/bold yellow] Policy [cyan]'{name}'[/cyan] is disabled. Controls ({controls}) are not active.")
         elif "report" in state.lower():
             bypass_tips.append(f"  • [bold yellow]Report-Only Mode:[/bold yellow] Policy [cyan]'{name}'[/cyan] is in report-only mode. Controls ({controls}) are logged but not actively enforced.")
-            
+
         ex_users = get_list(p.get("excluded_users"))
         for u in ex_users:
             bypass_tips.append(f"  • [bold red]Excluded User:[/bold red] User [white]'{u}'[/white] is excluded from [cyan]'{name}'[/cyan]. Authenticating as this user bypasses controls ({controls}).")
-            
+
         ex_groups = get_list(p.get("excluded_groups"))
         for g in ex_groups:
             bypass_tips.append(f"  • [bold red]Excluded Group:[/bold red] Group [white]'{g}'[/white] is excluded from [cyan]'{name}'[/cyan]. Members bypass controls ({controls}). Target group members or add compromised users to this group.")
-            
+
         ex_roles = get_list(p.get("excluded_roles"))
         for r in ex_roles:
             bypass_tips.append(f"  • [bold red]Excluded Role:[/bold red] Role [white]'{r}'[/white] is excluded from [cyan]'{name}'[/cyan]. Members bypass controls ({controls}).")
@@ -377,12 +378,12 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
     mapping = {}
     if not workspace_db_path:
         return mapping
-    
+
     from quantum_mechanic.core.workspace import Workspace
 
     is_workspace = isinstance(workspace_db_path, Workspace)
     db_path = workspace_db_path.db_path if is_workspace else workspace_db_path
-    
+
     def add_to_mapping(key: str, val: str):
         if not key or not val:
             return
@@ -407,9 +408,9 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
 
         try:
             target_techs = {
-                'discovery/entra_enum_users', 
-                'discovery/unified_enum_users', 
-                'discovery/entra_enum_groups', 
+                'discovery/entra_enum_users',
+                'discovery/unified_enum_users',
+                'discovery/entra_enum_groups',
                 'discovery/unified_enum_groups',
                 'discovery/entra_enum_apps',
                 'discovery/unified_enum_apps',
@@ -433,7 +434,7 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
             conn = sqlite3.connect(str(db_path))
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            
+
             # Query principals table
             try:
                 cursor.execute("SELECT id, friendly_name FROM principals")
@@ -627,7 +628,7 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
     # 2. Fallback: load from local CSV loot files
     try:
         loot_dir = db_path.parent / db_path.stem / "loot"
-        
+
         # Load from all potential user CSVs
         for sub in ["entra_enum_users", "unified_enum_users"]:
             users_csv = loot_dir / "discovery" / sub / "loot.csv"
@@ -643,7 +644,7 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
                                 add_to_mapping(uid, upn)
                 except Exception as csv_err:
                     logger.debug("Failed to load user CSV map from %s: %s", sub, csv_err)
-                    
+
         # Load from all potential group CSVs
         for sub in ["entra_enum_groups", "unified_enum_groups"]:
             groups_csv = loot_dir / "discovery" / sub / "loot.csv"
@@ -755,7 +756,7 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
         logger.debug("Failed to process local loot folder fallback: %s", path_ex)
     except Exception as path_ex:
         logger.debug("Failed to process local loot folder fallback: %s", path_ex)
-            
+
     return mapping
 
 def _resolve_directory_objects_with_diagnostics(
@@ -781,7 +782,7 @@ def _resolve_directory_objects_with_diagnostics(
         re.IGNORECASE
     )
     valid_ids = [x for x in ids if x and uuid_pattern.match(str(x))]
-    
+
     if not valid_ids:
         return {}, {
             "attempted": 0,
@@ -1034,13 +1035,13 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             policies = graph_list(http, "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies", headers)
         except GraphError as e:
             return graph_error_to_result(e, parsed_policies=[])
-        
+
         # Collect all unique GUIDs referenced in policy targets
         guids = set()
         for p in policies:
             conditions = p.get("conditions") or {}
             users = conditions.get("users") or {}
-            
+
             for item in users.get("includeUsers") or []:
                 if item not in ["All", "None", "GuestsOrExternalUsers"]:
                     guids.add(item)
@@ -1075,11 +1076,11 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             for item in locs_cond.get("excludeLocations") or []:
                 if item not in ["All", "AllTrusted", "None"]:
                     guids.add(item)
-        
+
         # Build resolution map
         resolved = BUILTIN_ENTRA_ROLES.copy()
         resolved.update(WELL_KNOWN_APPS)
-        
+
         # Resolve named locations first
         try:
             ctx.info("Fetching named locations from Graph...")
@@ -1099,7 +1100,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                     countries = loc.get("countriesAndRegions") or []
                     for c in countries:
                         details.append(c)
-                    
+
                     if details:
                         if len(details) > 5:
                             display_str = ", ".join(details[:5]) + f", ... (+{len(details) - 5} more)"
@@ -1132,7 +1133,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             workspace = ctx.workspace
 
         resolved.update(load_loot_mappings(workspace))
-        
+
         unresolved = [g for g in guids if g not in resolved]
         if unresolved:
             ctx.info(f"Resolving {len(unresolved)} unique object ID(s) via Graph API...")
@@ -1157,7 +1158,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             grant = p.get("grantControls") or {}
             grant_operator = grant.get("operator") or "OR"
             built_in = grant.get("builtInControls") or []
-            
+
             controls_all = list(built_in)
 
             # 1.1 Authentication Strength
@@ -1248,13 +1249,13 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             # 2. Scope - Users, Groups, Roles
             conditions = p.get("conditions") or {}
             users = conditions.get("users") or {}
-            
+
             include_users = users.get("includeUsers") or []
             exclude_users = users.get("excludeUsers") or []
-            
+
             include_groups = users.get("includeGroups") or []
             exclude_groups = users.get("excludeGroups") or []
-            
+
             include_roles = users.get("includeRoles") or []
             exclude_roles = users.get("excludeRoles") or []
 
@@ -1281,11 +1282,11 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             user_risk_levels = conditions.get("userRiskLevels") or []
             sp_risk_levels = conditions.get("servicePrincipalRiskLevels") or []
             insider_risk_levels = conditions.get("insiderRiskLevels") or ""
-            
+
             auth_flows = ""
             if conditions.get("authenticationFlows"):
                 auth_flows = conditions["authenticationFlows"].get("transferMethods", "")
-            
+
             devices_cond = conditions.get("devices") or {}
             device_filter = devices_cond.get("deviceFilter") or {}
             device_filter_mode = device_filter.get("mode") or ""
@@ -1376,7 +1377,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                 name = p.get("display_name")
                 state = p.get("state")
                 controls = p.get("grant_controls")
-                
+
                 # Active bypass findings
                 if state == "enabled":
                     # Explain controls to append to description
@@ -1506,7 +1507,7 @@ def explain_controls(controls_str: str) -> list[str]:
     for part in parts:
         if not part:
             continue
-        
+
         # 1. persistentBrowser
         pb_match = re.match(r"persistentBrowser\((.+?)\)", part, re.IGNORECASE)
         if pb_match:
@@ -1524,7 +1525,7 @@ def explain_controls(controls_str: str) -> list[str]:
                     f"persistentBrowser({mode}): Persistent browser session control is set to '{mode}'."
                 )
             continue
-            
+
         # 2. signInFrequency
         sif_match = re.match(r"signInFrequency\((.+?)\)", part, re.IGNORECASE)
         if sif_match:

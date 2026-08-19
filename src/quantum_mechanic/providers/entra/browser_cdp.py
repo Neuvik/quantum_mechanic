@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import platform
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from typing import Any
 
 import httpx

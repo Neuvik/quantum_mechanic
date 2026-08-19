@@ -15,7 +15,7 @@
 #      Request can indicate a valid key but invalid parameters).
 #   3. Categorizes accessible APIs by Risk Level (CRITICAL, HIGH, etc.).
 #
-# OPSEC:     LOW — Keys are meant for client-side use; probes look 
+# OPSEC:     LOW — Keys are meant for client-side use; probes look
 #            like legitimate application traffic.
 # SAFE:      Yes
 # ================================================================
@@ -29,7 +29,7 @@ from typing import Any
 import httpx
 
 from quantum_mechanic.core.context import ExecutionContext
-from quantum_mechanic.core.technique import technique, Parameter, ParameterType
+from quantum_mechanic.core.technique import Parameter, ParameterType, technique
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ PROBES = [
         "risk": "CRITICAL",
         "hint": "Ability to run expensive image analysis. High billing risk.",
     },
-    
+
     # --- HIGH RISK ---
     {
         "service": "Firebase Auth (Sign Up)",
@@ -134,19 +134,20 @@ LOOT_SCHEMA = [
 
 def format_gcp_api_audit(result: Any) -> None:
     """Formatter for GCP API Key Audit results."""
-    from rich.table import Table
     from rich import box
+    from rich.table import Table
+
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
     findings = data.get("findings", [])
-    
+
     if not findings:
         console.print("  [bold red]✗[/bold red] No accessible services found for this API key.")
         return
 
     console.print(f"  [bold green]✓[/bold green] Discovered [bold cyan]{len(findings)}[/bold cyan] Accessible Service(s)")
-    
+
     tbl = Table(box=box.ROUNDED, border_style="dim")
     tbl.add_column("Service", style="bold white")
     tbl.add_column("Risk Level")
@@ -161,7 +162,7 @@ def format_gcp_api_audit(result: Any) -> None:
             f"[{risk_style}]{f['risk']}[/{risk_style}]",
             f["hint"]
         )
-            
+
     console.print(tbl)
 
 @technique(
@@ -205,26 +206,26 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         url = probe["url"].format(key=api_key)
         method = probe["method"]
         payload = probe.get("payload")
-        
+
         try:
             with httpx.Client(timeout=10.0) as client:
                 if method == "GET":
                     resp = client.get(url)
                 else:
                     resp = client.post(url, json=payload)
-                
+
                 accessible = False
-                
+
                 # Success Logic 1: Standard HTTP Success
                 if resp.status_code in (200, 201, 204, 429):
                     accessible = True
-                
+
                 # Success Logic 2: Specific JSON error codes (Firebase/FCM logic)
                 elif "success_msg" in probe:
                     body = resp.text
                     if any(msg in body for msg in probe["success_msg"]):
                         accessible = True
-                
+
                 status_label = f"[{resp.status_code}]"
                 if accessible:
                     ctx.success(f"Accessible: {probe['service']} {status_label}")

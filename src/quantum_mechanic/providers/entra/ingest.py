@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -184,11 +185,11 @@ def ingest_prt_cookie(jwt: str) -> EntraToken:
     """
     claims = decode_jwt_claims(jwt)
     # PRT cookies use "exp" for nonce expiry.
-    from datetime import datetime, timezone
+    from datetime import datetime
     expires_at = None
     if "exp" in claims:
         try:
-            expires_at = datetime.fromtimestamp(claims["exp"], tz=timezone.utc)
+            expires_at = datetime.fromtimestamp(claims["exp"], tz=UTC)
         except (ValueError, OSError):
             pass
 
@@ -316,11 +317,11 @@ def ingest_roadtools(path: str | Path) -> EntraTokenStore:
         )
         # roadtools may not have expiry in the same field — try expiresOn.
         if not tok.expires_at and data.get("expiresOn"):
-            from datetime import datetime, timezone
+            from datetime import datetime
             try:
                 tok.expires_at = datetime.strptime(
                     data["expiresOn"], "%Y-%m-%d %H:%M:%S"
-                ).replace(tzinfo=timezone.utc)
+                ).replace(tzinfo=UTC)
             except ValueError:
                 pass
         store.add_token(tok)

@@ -16,8 +16,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import httpx
-
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 
@@ -37,6 +35,7 @@ LOOT_SCHEMA = [
 def format_unified_users(result: Any) -> None:
     """Formatter for Unified User discovery results."""
     from rich.table import Table
+
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
@@ -48,7 +47,7 @@ def format_unified_users(result: Any) -> None:
         return
 
     console.print(f"  [bold green]✓[/bold green] Discovered [bold cyan]{len(users)}[/bold cyan] {provider} User(s)")
-    
+
     tbl = Table(box=None, padding=(0, 2), show_header=True)
     tbl.add_column("Username/UPN", style="bold cyan")
     tbl.add_column("Type", style="white")
@@ -63,7 +62,7 @@ def format_unified_users(result: Any) -> None:
             u.get("id", "—"),
             u.get("info", "—")
         )
-            
+
     console.print(tbl)
     if len(users) > 100:
         console.print(f"  [dim]... and {len(users) - 100} more users in result data[/dim]")
@@ -89,11 +88,11 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         "oci": _enum_oci,
         "entra": _enum_entra,
     }
-    
+
     handler = dispatch.get(ctx.provider_name)
     if handler is None:
         return {"error": f"Provider {ctx.provider_name} not implemented.", "users": []}
-        
+
     return handler(ctx)
 
 # ================================================================
@@ -128,6 +127,7 @@ def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
 
 from quantum_mechanic.techniques.discovery import entra_enum_users
 
+
 def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
     return _enum_entra(ctx)
 
@@ -146,10 +146,10 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
 
     users = []
     client = resourcemanager_v3.ProjectsClient(credentials=ctx.session)
-    
+
     whoami = ctx.whoami()
     project_id = whoami.account_id
-    
+
     if not project_id or project_id == "unknown":
         return {"error": "No GCP project identified.", "users": []}
 
@@ -198,7 +198,7 @@ def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
     users = []
     config = ctx.session["config"]
     signer = ctx.session.get("signer")
-    
+
     identity = oci.identity.IdentityClient(config, signer=signer) if signer else oci.identity.IdentityClient(config)
     tenancy_id = config.get("tenancy")
 

@@ -42,9 +42,7 @@ from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 from quantum_mechanic.providers.entra.foci import foci_expand
 from quantum_mechanic.providers.entra.graph import (
-    GraphAccessError,
     GraphError,
-    GraphTransientError,
     graph_error_to_result,
     graph_list,
 )

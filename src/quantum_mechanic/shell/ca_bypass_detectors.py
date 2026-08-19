@@ -166,15 +166,15 @@ def detect_break_glass_over_exclusion(policies: list[dict[str, Any]]) -> list[By
     tenant-wide finding naming the over-excluded users."""
     if not policies:
         return []
-    
+
     exclusion_counts = {}
     for p in policies:
         for u in get_list(p.get("excluded_users")):
             exclusion_counts[u] = exclusion_counts.get(u, 0) + 1
-            
+
     total_enabled = len(policies)
     over_excluded = [u for u, count in exclusion_counts.items() if count == total_enabled and u != "None"]
-    
+
     if over_excluded:
         return [BypassFinding(
             severity="HIGH",
@@ -196,7 +196,7 @@ def detect_grant_or_weakness(policies: list[dict[str, Any]]) -> list[BypassFindi
     for p in policies:
         grant_op = str(p.get("grant_operator", "OR")).upper()
         controls = [x.lower() for x in get_list(p.get("grant_controls"))]
-        
+
         if grant_op == "OR" and len(controls) > 1:
             mfa_present = any("mfa" in c or "authstrength" in c for c in controls)
             if mfa_present:
@@ -263,7 +263,7 @@ def detect_no_workload_ca(policies: list[dict[str, Any]]) -> list[BypassFinding]
         if p.get("sp_risk_levels") and p.get("sp_risk_levels") != "None":
             sp_policies = True
             break
-            
+
     if not sp_policies and policies:
         return [BypassFinding(
             severity="MEDIUM",

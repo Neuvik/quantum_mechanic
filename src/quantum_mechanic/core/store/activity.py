@@ -34,7 +34,7 @@ class ActivityStore:
         """Add a log entry to the activity log."""
         now = datetime.now(UTC).isoformat()
         data_json = json.dumps(data) if data else None
-        
+
         row = self._db.fetchone(
             """
             INSERT INTO activity_log
@@ -60,7 +60,7 @@ class ActivityStore:
         if technique_id:
             query += " AND technique_id = ?"
             params.append(technique_id)
-        
+
         if level:
             query += " AND level = ?"
             params.append(level.upper())

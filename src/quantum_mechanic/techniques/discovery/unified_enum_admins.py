@@ -27,8 +27,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import httpx
-
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 
@@ -47,9 +45,10 @@ LOOT_SCHEMA = [
 
 def format_unified_admins(result: Any) -> None:
     """Formatter for Unified Admin discovery results."""
-    from rich.table import Table
-    from rich.panel import Panel
     from rich import box
+    from rich.panel import Panel
+    from rich.table import Table
+
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
@@ -74,7 +73,7 @@ def format_unified_admins(result: Any) -> None:
         return
 
     console.print(f"  [bold green]✓[/bold green] Discovered [bold cyan]{len(admins)}[/bold cyan] obvious {provider} Admin(s)")
-    
+
     tbl = Table(box=box.ROUNDED, border_style="dim")
     tbl.add_column("Principal", style="bold cyan")
     tbl.add_column("Type", style="white")
@@ -88,7 +87,7 @@ def format_unified_admins(result: Any) -> None:
             a.get("role", "—"),
             a.get("reason", "—")
         )
-            
+
     console.print(tbl)
 
 @technique(
@@ -112,11 +111,11 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         "oci": _enum_oci,
         "entra": _enum_entra,
     }
-    
+
     handler = dispatch.get(ctx.provider_name)
     if handler is None:
         return {"error": f"Provider {ctx.provider_name} not implemented.", "admins": []}
-        
+
     return handler(ctx)
 
 # ================================================================
@@ -132,7 +131,7 @@ def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
         arn = "arn:aws:iam::aws:policy/AdministratorAccess"
         ctx.debug(f"Checking for entities with {arn}")
         resp = iam.list_entities_for_policy(PolicyArn=arn)
-        
+
         for u in resp.get("PolicyUsers", []):
             admins.append({
                 "principal": u["UserName"],
@@ -183,7 +182,7 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
 
     admins = []
     sub_client = SubscriptionClient(ctx.session)
-    
+
     # Track which IDs we've seen to avoid duplicates across subs
     seen = set()
 
@@ -191,7 +190,7 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
         for sub in sub_client.subscriptions.list():
             sub_id = sub.subscription_id
             ctx.info(f"Scanning subscription: {sub.display_name}...")
-            
+
             auth_client = AuthorizationManagementClient(ctx.session, sub_id)
             # Filter for Owners (8e3af657...) and Contributors (b24988ac...)
             # and User Access Admins (18d7d81d...)
@@ -203,7 +202,7 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
 
             for assignment in auth_client.role_assignments.list_for_subscription():
                 role_id = assignment.role_definition_id.split("/")[-1]
-                
+
                 if role_id in HIGH_VALUE_ROLES:
                     pname = assignment.principal_name or assignment.principal_id
                     key = f"{pname}-{role_id}"
@@ -232,11 +231,11 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
 
     admins = []
     client = resourcemanager_v3.ProjectsClient(credentials=ctx.session)
-    
+
     # We probe the current project from the whoami context
     whoami = ctx.whoami()
     project_id = whoami.account_id
-    
+
     if not project_id or project_id == "unknown":
         return {"error": "No GCP project identified."}
 
@@ -253,7 +252,7 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
                     # e.g. user:alice@acme.com -> alice@acme.com
                     name = member.split(":", 1)[-1] if ":" in member else member
                     mtype = member.split(":", 1)[0].title() if ":" in member else "Unknown"
-                    
+
                     admins.append({
                         "principal": name,
                         "type": mtype,
@@ -278,7 +277,7 @@ def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
     admins = []
     config = ctx.session["config"]
     signer = ctx.session.get("signer")
-    
+
     identity = oci.identity.IdentityClient(config, signer=signer) if signer else oci.identity.IdentityClient(config)
     tenancy_id = config.get("tenancy")
 
@@ -286,7 +285,7 @@ def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
         # 1. Identify the 'Administrators' group (built-in)
         groups = identity.list_groups(tenancy_id).data
         admin_group = next((g for g in groups if g.name == "Administrators"), None)
-        
+
         if admin_group:
             memberships = identity.list_user_group_memberships(tenancy_id, group_id=admin_group.id).data
             for m in memberships:
@@ -307,6 +306,7 @@ def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
 # ================================================================
 
 from quantum_mechanic.techniques.discovery import entra_enum_privileged_roles
+
 
 def _enum_entra(ctx: ExecutionContext) -> dict[str, Any]:
     result = entra_enum_privileged_roles.execute(ctx)

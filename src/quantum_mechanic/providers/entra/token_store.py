@@ -19,7 +19,7 @@ import base64
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -87,13 +87,13 @@ class EntraToken:
     def is_expired(self) -> bool:
         if self.expires_at is None:
             return False
-        return datetime.now(timezone.utc) >= self.expires_at
+        return datetime.now(UTC) >= self.expires_at
 
     @property
     def minutes_remaining(self) -> float | None:
         if self.expires_at is None:
             return None
-        delta = self.expires_at - datetime.now(timezone.utc)
+        delta = self.expires_at - datetime.now(UTC)
         return delta.total_seconds() / 60
 
 
@@ -411,7 +411,7 @@ def token_from_jwt(
     expires_at = None
     if "exp" in claims:
         try:
-            expires_at = datetime.fromtimestamp(claims["exp"], tz=timezone.utc)
+            expires_at = datetime.fromtimestamp(claims["exp"], tz=UTC)
         except (ValueError, OSError):
             pass
 

@@ -306,7 +306,7 @@ class TechniqueRunner:
         ctx,
         cred,
         denied_result,
-        on_prompt: "Callable[[str], bool]",
+        on_prompt: Callable[[str], bool],
     ) -> dict | None:
         """If `denied_result` is a scope-denial and the session can attempt
         FOCI expansion, prompt the operator and (on yes) retry the technique.

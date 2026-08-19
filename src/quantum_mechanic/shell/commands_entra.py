@@ -204,11 +204,6 @@ def _import_browserdump(
 
 def _import_browser_cdp(state: ShellState, opts: dict[str, str]) -> None:
     """Phase 1: print cross-platform browser CDP launch guidance."""
-    from quantum_mechanic.providers.entra.exchange import (
-        exchange_ests_cookie,
-        exchange_prt_cookie,
-    )
-    from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
     from quantum_mechanic.providers.entra.browser_cdp import (
         build_launch_plan,
         default_browser_for_os,
@@ -216,6 +211,11 @@ def _import_browser_cdp(state: ShellState, opts: dict[str, str]) -> None:
         import_browser_session,
         launch_browser,
     )
+    from quantum_mechanic.providers.entra.exchange import (
+        exchange_ests_cookie,
+        exchange_prt_cookie,
+    )
+    from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
 
     os_name = opts.get("os") or detect_os_name()
     browser = opts.get("browser") or default_browser_for_os(os_name)
@@ -810,7 +810,7 @@ def _acquire_arm(state: ShellState, opts: dict[str, str]) -> None:
     if existing and existing.token_type == "access_token" and not existing.is_expired:
         mins = existing.minutes_remaining
         console.print(
-            f"  [green]✓[/green] ARM token already present "
+            "  [green]✓[/green] ARM token already present "
             + (f"({mins:.0f}m remaining)" if mins else "")
         )
         return
