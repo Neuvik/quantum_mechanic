@@ -18,6 +18,12 @@ jobs:
           enable-cache: true
           python-version: "3.12"
       - run: uv sync --extra agent
-      - run: uv run pytest tests/unit/ -q
+      - run: uv run pytest tests/unit/ tests/vcr/ -q
       - run: uv run ruff check .
       - run: uv run pyright src/quantum_mechanic/core/playbook.py src/quantum_mechanic/daemon/__main__.py src/quantum_mechanic/techniques/discovery/whoami.py
+      - run: uv run python tools/check-test-domain-hygiene.py
+      - run: uv run python tools/check-public-boundary.py
+      - name: pip-audit
+        run: |
+          uv export --format requirements-txt --no-hashes --no-emit-project > /tmp/requirements.txt
+          uv run pip-audit --requirement /tmp/requirements.txt
