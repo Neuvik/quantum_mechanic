@@ -76,6 +76,7 @@ class TechniqueMetadata:
     description: str = ""  # One-line description
     safe_mode_available: bool = False  # Can this run in check-only mode?
     exploit_pack: bool = False  # Hidden from main menu; use 'exploits' submenu
+    capabilities: frozenset[str] = frozenset()
     formatter_func: Callable | None = None  # Function to render rich output in shell
     loot_schema: list[tuple[str, str | None, str | None]] | None = None  # Declarative table schema
     loot_items_key: str | None = None  # Key in result data containing the list of items
@@ -93,6 +94,7 @@ def technique(
     description: str = "",
     safe_mode_available: bool = False,
     exploit_pack: bool = False,
+    capabilities: frozenset[str] | None = None,
     formatter: Callable | None = None,
     loot_schema: list[tuple[str, str | None, str | None]] | None = None,
     loot_items_key: str | None = None,
@@ -140,6 +142,7 @@ def technique(
         description=description,
         safe_mode_available=safe_mode_available,
         exploit_pack=exploit_pack,
+        capabilities=capabilities or frozenset(),
         formatter_func=formatter,
         loot_schema=loot_schema,
         loot_items_key=loot_items_key,

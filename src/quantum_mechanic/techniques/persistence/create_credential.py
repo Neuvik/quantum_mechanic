@@ -60,6 +60,7 @@ LOOT_SCHEMA = [
     safe=False,
     safe_mode_available=True,
     description="Unified module to create additional cloud credentials for persistence.",
+    capabilities=frozenset({"url_open"}),
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,
     parameters=[

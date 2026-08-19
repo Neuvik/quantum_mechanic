@@ -63,6 +63,7 @@ LOOT_SCHEMA = [
     safe=False,
     safe_mode_available=True,
     description="Traverse cloud boundaries via Workload Identity Federation or OIDC.",
+    capabilities=frozenset({"url_open"}),
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,
     parameters=[
