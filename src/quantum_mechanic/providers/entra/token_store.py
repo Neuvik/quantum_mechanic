@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import logging
 from dataclasses import dataclass, field
@@ -177,9 +178,12 @@ class EntraTokenStore:
     def refresh_token(self, resource: str | None = None) -> EntraToken | None:
         """Return the best refresh token, optionally scoped to a resource."""
         for tok in self.tokens:
-            if tok.token_type == OAUTH_REFRESH and not tok.is_expired:
-                if resource is None or _resource_matches(tok.resource, resource):
-                    return tok
+            if (
+                tok.token_type == OAUTH_REFRESH
+                and not tok.is_expired
+                and (resource is None or _resource_matches(tok.resource, resource))
+            ):
+                return tok
         return None
 
     def prt_material(self) -> EntraToken | None:
@@ -426,10 +430,8 @@ def token_from_jwt(
 
     expires_at = None
     if "exp" in claims:
-        try:
+        with contextlib.suppress(ValueError, OSError):
             expires_at = datetime.fromtimestamp(claims["exp"], tz=UTC)
-        except (ValueError, OSError):
-            pass
 
     scopes: list[str] = []
     if "scp" in claims:

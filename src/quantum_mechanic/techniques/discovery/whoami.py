@@ -50,6 +50,7 @@ from typing import Any
 
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
+from quantum_mechanic.providers.base import WhoAmIResult
 
 # ----------------------------------------------------------------
 # Loot schema — CloudFox-style output (loot.csv / table.txt)
@@ -63,7 +64,6 @@ LOOT_SCHEMA = [
     ("provider", "provider"),
     ("notes", None),
 ]
-from quantum_mechanic.providers.base import WhoAmIResult
 
 
 def format_whoami(result: Any) -> None:

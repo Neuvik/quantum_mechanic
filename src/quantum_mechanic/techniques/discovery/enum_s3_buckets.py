@@ -275,7 +275,7 @@ def _load_wordlist(param: str | None) -> list[str] | None:
 
 def _summarise_acl(grants: list[dict]) -> str:
     """Collapse raw ACL grants into a readable summary string."""
-    _GROUP_URIS = {
+    group_uris = {
         "http://acs.amazonaws.com/groups/global/AllUsers": "AllUsers",
         "http://acs.amazonaws.com/groups/global/AuthenticatedUsers": "AuthUsers",
     }
@@ -283,7 +283,7 @@ def _summarise_acl(grants: list[dict]) -> str:
     for grant in grants:
         grantee = grant.get("Grantee", {})
         uri = grantee.get("URI", "")
-        label = _GROUP_URIS.get(uri)
+        label = group_uris.get(uri)
         if label:
             perm = grant.get("Permission", "")
             summary.setdefault(label, []).append(perm)

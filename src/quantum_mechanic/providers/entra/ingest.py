@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from datetime import UTC
@@ -70,10 +71,7 @@ def ingest_browserdump(path: str | Path) -> list[EntraTokenStore]:
     # Support two output shapes from browserdump:
     #   { "profiles": [ { ... }, ... ] }   ← multi-profile
     #   { "tokens": [...], "tenant": ... } ← single-profile flat
-    if "profiles" in data:
-        profiles = data["profiles"]
-    else:
-        profiles = [data]
+    profiles = data.get("profiles", [data])
 
     stores: list[EntraTokenStore] = []
     for profile_data in profiles:
@@ -188,10 +186,8 @@ def ingest_prt_cookie(jwt: str) -> EntraToken:
 
     expires_at = None
     if "exp" in claims:
-        try:
+        with contextlib.suppress(ValueError, OSError):
             expires_at = datetime.fromtimestamp(claims["exp"], tz=UTC)
-        except (ValueError, OSError):
-            pass
 
     return EntraToken(
         token_type=PRT_COOKIE,
@@ -320,12 +316,10 @@ def ingest_roadtools(path: str | Path) -> EntraTokenStore:
         if not tok.expires_at and data.get("expiresOn"):
             from datetime import datetime
 
-            try:
+            with contextlib.suppress(ValueError):
                 tok.expires_at = datetime.strptime(data["expiresOn"], "%Y-%m-%d %H:%M:%S").replace(
                     tzinfo=UTC
                 )
-            except ValueError:
-                pass
         store.add_token(tok)
 
     if data.get("refreshToken"):

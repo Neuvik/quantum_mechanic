@@ -556,9 +556,8 @@ class TechniqueRunner:
                             val = val.lower() in ("true", "yes", "1")
                         else:
                             val = bool(val)
-                    elif p_def.type == ParameterType.LIST:
-                        if isinstance(val, str):
-                            val = [v.strip() for v in val.split(",")]
+                    elif p_def.type == ParameterType.LIST and isinstance(val, str):
+                        val = [v.strip() for v in val.split(",")]
                 except (ValueError, TypeError):
                     return {}, f"Invalid type for parameter '{p_def.name}': expected {p_def.type}"
 
@@ -843,7 +842,7 @@ class TechniqueRunner:
         """
         import json as _json
 
-        _HIGH_SEVERITY_FLAGS = {
+        high_severity_flags = {
             "AdministratorAccess",
             "IAMFullAccess",
             "PowerUserAccess",
@@ -859,7 +858,7 @@ class TechniqueRunner:
         for flag in agent_summary.risk_flags:
             if any(h in flag for h in ("rce:", "root")):
                 sev = "critical"
-            elif any(h in flag for h in _HIGH_SEVERITY_FLAGS):
+            elif any(h in flag for h in high_severity_flags):
                 sev = "high"
             else:
                 sev = "medium"

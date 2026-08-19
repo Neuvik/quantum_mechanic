@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import subprocess
 import tempfile
@@ -39,14 +40,16 @@ _DEFAULT_EXECUTABLES: dict[str, dict[str, str]] = {
     },
 }
 
+_TMPDIR = tempfile.gettempdir()
+
 _DEFAULT_PROFILES: dict[str, dict[str, str]] = {
     "macos": {
-        "edge": "/tmp/qm-edge-cdp",
-        "chrome": "/tmp/qm-chrome-cdp",
+        "edge": os.path.join(_TMPDIR, "qm-edge-cdp"),
+        "chrome": os.path.join(_TMPDIR, "qm-chrome-cdp"),
     },
     "linux": {
-        "edge": "/tmp/qm-edge-cdp",
-        "chrome": "/tmp/qm-chrome-cdp",
+        "edge": os.path.join(_TMPDIR, "qm-edge-cdp"),
+        "chrome": os.path.join(_TMPDIR, "qm-chrome-cdp"),
     },
     "windows": {
         "edge": r"$Env:TEMP\qm-edge-cdp",
@@ -292,9 +295,7 @@ def _is_real_page_target(target: dict[str, Any]) -> bool:
     url = str(target.get("url", "")).strip().lower()
     if target_type != "page":
         return False
-    if not (url.startswith("http://") or url.startswith("https://")):
-        return False
-    return True
+    return url.startswith("http://") or url.startswith("https://")
 
 
 def _get_cookies_via_target_ws(ws_url: str) -> list[dict[str, Any]]:

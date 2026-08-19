@@ -175,7 +175,7 @@ def _enum_aws(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
     """Enumerate AWS permissions using IAM Policy Simulator and DryRuns."""
 
     # High-value targets for QM v1
-    ACTIONS_TO_TEST = [
+    actions_to_test = [
         "iam:PassRole",
         "sts:AssumeRole",
         "ec2:RunInstances",
@@ -198,7 +198,7 @@ def _enum_aws(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
     # Approach 1: Try IAM Policy Simulator natively
     try:
         paginator = iamv2.get_paginator("simulate_principal_policy")
-        for page in paginator.paginate(PolicySourceArn=arn, ActionNames=ACTIONS_TO_TEST):
+        for page in paginator.paginate(PolicySourceArn=arn, ActionNames=actions_to_test):
             for result in page.get("EvaluationResults", []):
                 action = result.get("EvalActionName")
                 decision = result.get("EvalDecision")
@@ -360,7 +360,7 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
             "denied_actions": [],
         }
 
-    ACTIONS_TO_TEST = [
+    actions_to_test = [
         "iam.serviceAccounts.actAs",
         "iam.serviceAccountKeys.create",
         "compute.instances.create",
@@ -400,7 +400,7 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
 
     for pid in set(projects):
         try:
-            req = {"resource": f"projects/{pid}", "permissions": ACTIONS_TO_TEST}
+            req = {"resource": f"projects/{pid}", "permissions": actions_to_test}
             response = client.test_iam_permissions(request=req)
 
             perms = (
@@ -408,7 +408,7 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
                 if hasattr(response, "permissions")
                 else response.get("permissions", [])
             )
-            for action in ACTIONS_TO_TEST:
+            for action in actions_to_test:
                 if action in perms:
                     allowed_actions.add(action)
                 else:

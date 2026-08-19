@@ -24,19 +24,16 @@ from quantum_mechanic.core.store.assets import AssetStore
 from quantum_mechanic.core.store.credentials import CredentialStore
 from quantum_mechanic.core.store.evidence import EvidenceStore
 from quantum_mechanic.core.store.findings import FindingStore
-from quantum_mechanic.core.store.principals import PrincipalStore
-
-logger = logging.getLogger(__name__)
-
-
-from quantum_mechanic.core.store.models import (  # noqa: F401 — re-exported for callers
+from quantum_mechanic.core.store.models import (
     Account,
     Agent,
-    ApiLogEntry,
     Credential,
     Principal,
     Task,
 )
+from quantum_mechanic.core.store.principals import PrincipalStore
+
+logger = logging.getLogger(__name__)
 
 
 class CredentialMismatchError(RuntimeError):

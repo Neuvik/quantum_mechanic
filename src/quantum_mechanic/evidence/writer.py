@@ -32,7 +32,7 @@ def _now() -> str:
 
 def _detection_block(technique_id: str) -> str:
     """Return the blue team detection block for a technique."""
-    _DETECTIONS: dict[str, str] = {
+    detections: dict[str, str] = {
         "discovery/whoami": textwrap.dedent("""\
             | Provider | Event |
             |----------|-------|
@@ -58,7 +58,7 @@ def _detection_block(technique_id: str) -> str:
             | OCI      | OCI Audit: `instance.list` |
         """),
     }
-    return _DETECTIONS.get(
+    return detections.get(
         technique_id, "_Detection signatures not yet documented for this technique._\n"
     )
 

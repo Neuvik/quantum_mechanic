@@ -589,12 +589,12 @@ def _cmd_creds_detail(state: ShellState, cred_id: int) -> None:
     if provider == "entra" and ctype == "token_store":
         import json as _json
 
-        from quantum_mechanic.providers.entra.token_store import EntraTokenStore as _ETS
+        from quantum_mechanic.providers.entra.token_store import EntraTokenStore as _Ets
 
         try:
             raw = state.workspace.get_credential_secret(cred_id)
             data = _json.loads(raw) if raw else {}
-            store = _ETS.from_dict(data.get("token_store", data))
+            store = _Ets.from_dict(data.get("token_store", data))
             details = store.token_details()
         except Exception as e:
             console.print(f"  [red]✗[/red] Failed to load token store: {e}")
@@ -659,7 +659,7 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
     if state.workspace:
         import json as _json
 
-        from quantum_mechanic.providers.entra.token_store import EntraTokenStore as _ETS
+        from quantum_mechanic.providers.entra.token_store import EntraTokenStore as _Ets
         from quantum_mechanic.shell.commands_entra import _entra_friendly_name
 
         for cred in creds:
@@ -669,7 +669,7 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
                     if not raw:
                         continue
                     data = _json.loads(raw)
-                    store = _ETS.from_dict(data.get("token_store", data))
+                    store = _Ets.from_dict(data.get("token_store", data))
                     # Compact summary + soonest-expiring AT so the operator
                     # knows at a glance how much time is left on the active
                     # working token. Full breakdown via `creds <id>`.
@@ -2105,9 +2105,7 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
             return False
         if not includes or "None" in includes:
             return False
-        if "All" in includes or val in includes:
-            return True
-        return False
+        return bool("All" in includes or val in includes)
 
     def matches_loc(val: str, includes: list[str], excludes: list[str]) -> bool:
         if "All" in excludes or val in excludes:
@@ -2119,10 +2117,7 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
             return False
         if "All" in includes:
             return True
-        for incl in includes:
-            if incl.split(" (")[0] in val:
-                return True
-        return False
+        return any(incl.split(" (")[0] in val for incl in includes)
 
     def matches_policy(
         p_dict: dict,
@@ -2232,25 +2227,19 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
 
         # Risk levels
         p_sign_in_risk = [x.lower() for x in get_list(p_dict.get("sign_in_risk_levels"))]
-        if p_sign_in_risk and p_sign_in_risk != ["none"]:
-            if sign_in_risk not in p_sign_in_risk:
-                return False
+        if p_sign_in_risk and p_sign_in_risk != ["none"] and sign_in_risk not in p_sign_in_risk:
+            return False
 
         p_user_risk = [x.lower() for x in get_list(p_dict.get("user_risk_levels"))]
-        if p_user_risk and p_user_risk != ["none"]:
-            if user_risk not in p_user_risk:
-                return False
+        if p_user_risk and p_user_risk != ["none"] and user_risk not in p_user_risk:
+            return False
 
         # Auth flows
         p_auth_flow = p_dict.get("auth_flows", "").lower()
-        if p_auth_flow:
-            if auth_flow not in p_auth_flow:
-                return False
-
-        return True
+        return not (p_auth_flow and auth_flow not in p_auth_flow)
 
     sweep_gaps = []
-    MAX_SWEEP = 500_000
+    max_sweep = 500_000
     space_size = 1
     for d in [
         domain_users,
@@ -2266,10 +2255,10 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
     ]:
         space_size *= len(d)
 
-    capped = space_size > MAX_SWEEP
+    capped = space_size > max_sweep
     if capped:
         console.print(
-            f"  [yellow]⚠[/yellow] Cartesian space is {space_size:,} combinations — capping sweep at {MAX_SWEEP:,} for performance."
+            f"  [yellow]⚠[/yellow] Cartesian space is {space_size:,} combinations — capping sweep at {max_sweep:,} for performance."
         )
 
     evaluated = 0
@@ -2285,7 +2274,7 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
         domain_user_risk,
         domain_auth_flow,
     ):
-        if evaluated >= MAX_SWEEP:
+        if evaluated >= max_sweep:
             break
         evaluated += 1
         u, g, r, app, platform, loc, client, sign_in_risk, user_risk, auth_flow = combo
@@ -2324,10 +2313,9 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
                     if mfa_in_policy and len(controls_list) == 1:
                         mfa_enforced = True
                         break
-                elif grant_op == "AND":
-                    if mfa_in_policy:
-                        mfa_enforced = True
-                        break
+                elif grant_op == "AND" and mfa_in_policy:
+                    mfa_enforced = True
+                    break
 
             if not mfa_enforced:
                 sweep_gaps.append(
@@ -2537,7 +2525,7 @@ def cmd_activity(state: ShellState, args: list[str]) -> None:
         tbl.add_column("Level")
         tbl.add_column("Message")
 
-        _LEVEL_STYLES = {
+        level_styles = {
             "DEBUG": "dim",
             "INFO": "white",
             "SUCCESS": "bold green",
@@ -2548,7 +2536,7 @@ def cmd_activity(state: ShellState, args: list[str]) -> None:
         # Reverse to show chronological order in the pager
         for log in reversed(logs):
             lvl = log["level"].upper()
-            style = _LEVEL_STYLES.get(lvl, "white")
+            style = level_styles.get(lvl, "white")
             ts = log["timestamp"][11:19]  # Show HH:MM:SS
 
             tbl.add_row(ts, log["technique_id"], f"[{style}]{lvl}[/{style}]", log["message"])
@@ -2914,10 +2902,7 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
                         if c:
                             raw_principal = c.get("friendly_name") or c.get("principal_id")
 
-                    if raw_principal:
-                        principal = str(raw_principal).split("/")[-1]
-                    else:
-                        principal = "?"
+                    principal = str(raw_principal).split("/")[-1] if raw_principal else "?"
                 except Exception:
                     pass
                 tbl.add_row(str(i), ts, tech, provider, principal)
@@ -2929,7 +2914,7 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
         if not findings:
             console.print("  [dim]No findings recorded yet.[/dim]")
         else:
-            _SEV_STYLE = {
+            sev_style = {
                 "critical": ("🔴", "bold red"),
                 "high": ("🟠", "bold yellow"),
                 "medium": ("🟡", "yellow"),
@@ -2951,7 +2936,7 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
             ):
                 fid = f.get("id", "?")
                 sev = f.get("severity", "info").lower()
-                emoji, style = _SEV_STYLE.get(sev, ("⚪", "dim"))
+                emoji, style = sev_style.get(sev, ("⚪", "dim"))
                 ftbl.add_row(
                     f"F{fid:03d}" if isinstance(fid, int) else str(fid),
                     f"[{style}]{emoji} {sev.upper()}[/{style}]",

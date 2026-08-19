@@ -207,7 +207,7 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
             auth_client = AuthorizationManagementClient(ctx.session, sub_id)
             # Filter for Owners (8e3af657...) and Contributors (b24988ac...)
             # and User Access Admins (18d7d81d...)
-            HIGH_VALUE_ROLES = {
+            high_value_roles = {
                 "8e3af657-a8ff-443c-a75c-2fe8c4bcb635": "Owner",
                 "b24988ac-6180-42a0-ab88-20f7382dd24c": "Contributor",
                 "18d7d81d-424b-4813-a006-27c0ad510ed2": "User Access Administrator",
@@ -216,7 +216,7 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
             for assignment in auth_client.role_assignments.list_for_subscription():
                 role_id = assignment.role_definition_id.split("/")[-1]
 
-                if role_id in HIGH_VALUE_ROLES:
+                if role_id in high_value_roles:
                     pname = assignment.principal_name or assignment.principal_id
                     key = f"{pname}-{role_id}"
                     if key not in seen:
@@ -224,7 +224,7 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
                             {
                                 "principal": pname,
                                 "type": assignment.principal_type or "Unknown",
-                                "role": HIGH_VALUE_ROLES[role_id],
+                                "role": high_value_roles[role_id],
                                 "reason": f"Subscription-level Control ({sub.display_name})",
                             }
                         )
@@ -261,10 +261,10 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
         policy = client.get_iam_policy(request=req)
 
         # Obvious Admin Roles
-        ADMIN_ROLES = ["roles/owner", "roles/editor"]
+        admin_roles = ["roles/owner", "roles/editor"]
 
         for binding in policy.bindings:
-            if binding.role in ADMIN_ROLES:
+            if binding.role in admin_roles:
                 for member in binding.members:
                     # e.g. user:alice@acme.com -> alice@acme.com
                     name = member.split(":", 1)[-1] if ":" in member else member

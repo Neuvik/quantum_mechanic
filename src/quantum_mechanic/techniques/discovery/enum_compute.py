@@ -187,9 +187,9 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
         return {"error": "azure-mgmt-compute not installed.", "instances": []}
 
     try:
-        from azure.mgmt.network import NetworkManagementClient as _NetworkClient
+        from azure.mgmt.network import NetworkManagementClient
     except ImportError:
-        _NetworkClient = None
+        NetworkManagementClient = None
 
     try:
         cred = ctx.session
@@ -204,7 +204,7 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
         instances = []
         for sub_id in subscriptions:
             compute = ComputeManagementClient(cred, sub_id)
-            network = _NetworkClient(cred, sub_id) if _NetworkClient else None
+            network = NetworkManagementClient(cred, sub_id) if NetworkManagementClient else None
 
             for vm in compute.virtual_machines.list_all():
                 identity = vm.identity

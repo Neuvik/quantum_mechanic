@@ -143,8 +143,8 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
     # Implementation steps (from attack map):
     # -----------------------------------------------------------------
     # Requires s3:ListAllMyBuckets. Executes boto3 s3.list_buckets(). For each bucket discovered, it optionally calls s3:GetBucketPolicy and s3:GetBucketAcl to determine if the bucket allows public read/write access.
-    _ALL_USERS = "http://acs.amazonaws.com/groups/global/AllUsers"
-    _AUTH_USERS = "http://acs.amazonaws.com/groups/global/AuthenticatedUsers"
+    all_users_uri = "http://acs.amazonaws.com/groups/global/AllUsers"
+    auth_users_uri = "http://acs.amazonaws.com/groups/global/AuthenticatedUsers"
 
     def _check_public(s3_client, bucket_name: str) -> str:
         """Return a human-readable public-exposure label or empty string."""
@@ -156,9 +156,9 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
             for g in grants:
                 uri = g.get("Grantee", {}).get("URI", "")
                 perm = g.get("Permission", "")
-                if uri == _ALL_USERS:
+                if uri == all_users_uri:
                     perms.append(f"AllUsers:{perm}")
-                elif uri == _AUTH_USERS:
+                elif uri == auth_users_uri:
                     perms.append(f"AuthUsers:{perm}")
             if perms:
                 return " | ".join(perms)

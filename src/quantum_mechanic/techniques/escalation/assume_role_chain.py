@@ -357,9 +357,10 @@ def _trust_allows(policy_doc: dict | str, principal_arn: str) -> bool:
         principal = stmt.get("Principal", {})
         if principal == "*":
             return True
-        if isinstance(principal, str):
-            if principal_arn in principal or (account_id and account_id in principal):
-                return True
+        if isinstance(principal, str) and (
+            principal_arn in principal or (account_id and account_id in principal)
+        ):
+            return True
         if isinstance(principal, dict):
             aws_principals = principal.get("AWS", [])
             if isinstance(aws_principals, str):

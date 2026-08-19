@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from quantum_mechanic.providers.entra.refs import foci_client_ids as _foci_client_ids
 from quantum_mechanic.providers.entra.token_store import OAUTH_ACCESS, OAUTH_REFRESH
 
 if TYPE_CHECKING:
@@ -38,7 +39,6 @@ logger = logging.getLogger(__name__)
 # import never blows up. See providers/entra/refs/README.md for
 # attribution + how to refresh.
 # ----------------------------------------------------------------
-from quantum_mechanic.providers.entra.refs import foci_client_ids as _foci_client_ids
 
 FOCI_CLIENT_IDS: dict[str, str] = _foci_client_ids()
 

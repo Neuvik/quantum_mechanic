@@ -217,10 +217,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
         try:
             with httpx.Client(timeout=10.0) as client:
-                if method == "GET":
-                    resp = client.get(url)
-                else:
-                    resp = client.post(url, json=payload)
+                resp = client.get(url) if method == "GET" else client.post(url, json=payload)
 
                 accessible = False
 

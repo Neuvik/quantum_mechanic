@@ -256,10 +256,12 @@ def _discover(ctx: ExecutionContext, whoami_res: Any) -> list[dict[str, Any]]:
                     try:
                         sa_policy = iam_client.get_iam_policy(request={"resource": sa.name})
                         for binding in sa_policy.bindings:
-                            if binding.role == "roles/iam.serviceAccountTokenCreator":
-                                if member_str in binding.members:
-                                    can_impersonate = True
-                                    break
+                            if (
+                                binding.role == "roles/iam.serviceAccountTokenCreator"
+                                and member_str in binding.members
+                            ):
+                                can_impersonate = True
+                                break
                     except Exception:
                         pass
 

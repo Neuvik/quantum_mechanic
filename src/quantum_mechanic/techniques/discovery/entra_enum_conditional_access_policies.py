@@ -478,12 +478,12 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
             # Query evidence table
             cursor.execute(
                 """
-                SELECT technique_id, output_json 
-                FROM evidence 
+                SELECT technique_id, output_json
+                FROM evidence
                 WHERE technique_id IN (
-                    'discovery/entra_enum_users', 
-                    'discovery/unified_enum_users', 
-                    'discovery/entra_enum_groups', 
+                    'discovery/entra_enum_users',
+                    'discovery/unified_enum_users',
+                    'discovery/entra_enum_groups',
                     'discovery/unified_enum_groups',
                     'discovery/entra_enum_apps',
                     'discovery/unified_enum_apps',

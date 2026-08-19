@@ -85,10 +85,9 @@ class PlaybookRunner:
                 result = self.runner.run(tech_id, params=params, on_event=self.on_event)
                 results.append(result)
 
-                if result.status == "error":
-                    if not step.get("continue_on_failure", False):
-                        logger.error("Playbook halted: step '%s' failed.", step_name)
-                        break
+                if result.status == "error" and not step.get("continue_on_failure", False):
+                    logger.error("Playbook halted: step '%s' failed.", step_name)
+                    break
             except Exception as e:
                 logger.error("Playbook error in step '%s': %s", step_name, e)
                 if not step.get("continue_on_failure", False):
