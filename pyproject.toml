@@ -99,6 +99,7 @@ dev = [
     "interrogate>=1.7.0",
     "vcrpy>=6.0.0",
     "pytest-recording>=0.13.1",
+    "pip-audit>=2.9.0",
 ]
 
 [tool.ruff]
