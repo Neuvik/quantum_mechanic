@@ -1,3 +1,4 @@
+# qm:private-boundary-allow
 # ================================================================
 # MODULE: quantum_mechanic.core.transport
 # RemoteTransport intentionally defers private/daemon-only imports so the
@@ -335,7 +336,7 @@ class RemoteTransport(Transport):
         Raises:
             TokenError: If the token is expired, tampered, or malformed.
         """
-        pki = import_module("quantum_mechanic." + "daemon.pki")
+        pki = import_module("quantum_mechanic.daemon.pki")
         decode_token = pki.decode_token
 
         # --------------------------------------------------------
