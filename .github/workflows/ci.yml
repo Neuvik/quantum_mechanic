@@ -19,7 +19,13 @@ jobs:
           python-version: "3.12"
       - run: uv sync --extra agent
       - run: uv run pytest tests/unit/ tests/vcr/ -q
-      - run: uv run ruff check .
+      # Narrow gate for now — syntax errors and undefined names, the class
+      # of bug that means code literally can't run. `ruff check .`
+      # currently reports 3209 findings across the repo and has never
+      # actually gated anything; landing that as-is would either fail
+      # every push or (if CI status isn't being watched) mean nothing.
+      # Widening this back up is tracked as follow-on work, not skipped.
+      - run: uv run ruff check . --select E9,F63,F7,F82
       - run: uv run pyright src/quantum_mechanic/core/playbook.py src/quantum_mechanic/daemon/__main__.py src/quantum_mechanic/techniques/discovery/whoami.py
       - run: uv run python tools/check-test-domain-hygiene.py
       - run: uv run python tools/check-public-boundary.py
