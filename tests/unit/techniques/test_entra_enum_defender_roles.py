@@ -76,7 +76,7 @@ def test_security_admin_classifies_as_management_plane():
         {
             "id": "ra-1",
             "roleDefinition": {"id": "rd-1", "displayName": "Security Administrator"},
-            "principal": {"id": "p1", "userPrincipalName": "x@y.com"},
+            "principal": {"id": "p1", "userPrincipalName": "x@y.example"},
         },
     ]
     ctx = _make_ctx(_make_store(_make_access_token()))

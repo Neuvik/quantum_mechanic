@@ -22,8 +22,8 @@ def test_entra_path_delegates_to_entra_enum_users():
         "guests": 1,
         "disabled": 0,
         "users": [
-            {"username": "a@b.com", "type": "Member", "id": "u1", "info": "—"},
-            {"username": "g@c.com", "type": "Guest", "id": "u2", "info": "—"},
+            {"username": "a@b.example", "type": "Member", "id": "u1", "info": "—"},
+            {"username": "g@c.example", "type": "Guest", "id": "u2", "info": "—"},
         ],
     }
     ctx = _make_ctx("entra")
@@ -36,12 +36,12 @@ def test_entra_path_delegates_to_entra_enum_users():
 
     mock_delegate.assert_called_once_with(ctx)
     assert result["total"] == 2
-    assert result["users"][0]["username"] == "a@b.com"
+    assert result["users"][0]["username"] == "a@b.example"
 
 
 def test_azure_path_delegates_to_entra_enum_users():
     """OUTCOME: azure path also delegates (Azure users are Entra principals)."""
-    fake_result = {"provider": "entra", "total": 1, "users": [{"username": "x@y.com"}]}
+    fake_result = {"provider": "entra", "total": 1, "users": [{"username": "x@y.example"}]}
     ctx = _make_ctx("azure")
 
     with patch(

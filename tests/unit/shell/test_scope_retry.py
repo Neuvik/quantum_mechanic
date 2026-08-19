@@ -34,7 +34,7 @@ def _future(mins: int = 60) -> datetime:
 
 
 def _store_with_foci() -> EntraTokenStore:
-    store = EntraTokenStore(tenant_id="tenant-1", user_upn="alice@x.com")
+    store = EntraTokenStore(tenant_id="tenant-1", user_upn="alice@x.example")
     store.add_token(EntraToken(
         token_type="refresh_token", value="rt", resource="",
         tenant_id="tenant-1", client_id=FOCI_DEFAULT_CLIENT, foci=True,
@@ -48,7 +48,7 @@ def _state_with_entra_cred(ws: Workspace, store: EntraTokenStore) -> MagicMock:
         provider="entra",
         credential_type="token_store",
         secret_data=json.dumps({"token_store": store.to_dict()}),
-        friendly_name="alice@x.com",
+        friendly_name="alice@x.example",
     )
     state = MagicMock()
     state.workspace = ws
@@ -57,7 +57,7 @@ def _state_with_entra_cred(ws: Workspace, store: EntraTokenStore) -> MagicMock:
     state.transport = MagicMock()
     state.transport.list_credentials.return_value = [{
         "id": cred_id, "provider": "entra", "credential_type": "token_store",
-        "friendly_name": "alice@x.com", "status": "active",
+        "friendly_name": "alice@x.example", "status": "active",
     }]
     return state
 
@@ -126,7 +126,7 @@ def test_no_retry_when_entra_store_has_no_foci_rt():
     with tempfile.TemporaryDirectory() as td:
         ws = Workspace.create("t", workspace_dir=Path(td))
         # Store without a FOCI RT.
-        empty_store = EntraTokenStore(tenant_id="t", user_upn="x@y.com")
+        empty_store = EntraTokenStore(tenant_id="t", user_upn="x@y.example")
         state = _state_with_entra_cred(ws, empty_store)
         assert _maybe_offer_scope_retry(state, _denied_result(), "x", {}) is None
 

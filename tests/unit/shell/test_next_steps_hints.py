@@ -92,7 +92,7 @@ def test_entra_users_emits_bloodhound_hint_after_success():
 
     with patch(
         "quantum_mechanic.techniques.discovery.entra_enum_users.graph_list",
-        return_value=[{"id": "u1", "userPrincipalName": "a@x.com", "userType": "Member"}],
+        return_value=[{"id": "u1", "userPrincipalName": "a@x.example", "userType": "Member"}],
     ):
         result = entra_enum_users.execute(ctx)
 

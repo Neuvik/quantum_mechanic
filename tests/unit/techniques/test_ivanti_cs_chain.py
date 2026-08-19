@@ -52,7 +52,7 @@ class TestIvantiCSCheckMode:
 
         from quantum_mechanic.techniques.initial_access.ivanti_cs_chain import _check
 
-        result = _check(_ctx("https://vpn.corp.com"))
+        result = _check(_ctx("https://vpn.corp.example"))
 
         # --------------------------------------------------------
         # A JSON API body — even a 400 error — proves the API dispatcher
@@ -77,7 +77,7 @@ class TestIvantiCSCheckMode:
 
         from quantum_mechanic.techniques.initial_access.ivanti_cs_chain import _check
 
-        result = _check(_ctx("https://vpn.corp.com"))
+        result = _check(_ctx("https://vpn.corp.example"))
 
         assert result["vulnerable"] is False
         assert result["evidence"]["response_status"] == 302

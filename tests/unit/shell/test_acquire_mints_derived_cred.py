@@ -34,7 +34,7 @@ def _future(mins: int = 60) -> datetime:
 def _make_store_with_foci_only() -> EntraTokenStore:
     """Store with a FOCI RT but no ARM AT — the scenario where `acquire arm`
     is meaningful."""
-    store = EntraTokenStore(tenant_id="tenant-1", user_upn="alice@x.com")
+    store = EntraTokenStore(tenant_id="tenant-1", user_upn="alice@x.example")
     store.add_token(EntraToken(
         token_type="refresh_token", value="rt-value", resource="",
         tenant_id="tenant-1", client_id=FOCI_DEFAULT_CLIENT, foci=True,
@@ -48,7 +48,7 @@ def _make_state_with(store: EntraTokenStore, ws: Workspace, cred_id: int):
     state.workspace = ws
     state.transport = MagicMock()
     state.active_credential_id = cred_id
-    state.active_credential_label = "alice@x.com"
+    state.active_credential_label = "alice@x.example"
     state._extra_providers = []
     return state
 
@@ -64,7 +64,7 @@ def test_acquire_arm_mints_new_credential_derived_from_current():
         parent_id = ws.add_credential(
             provider="entra", credential_type="token_store",
             secret_data=json.dumps({"token_store": store.to_dict()}),
-            friendly_name="alice@x.com",
+            friendly_name="alice@x.example",
         )
 
         state = _make_state_with(store, ws, parent_id)
@@ -111,7 +111,7 @@ def test_acquire_arm_when_arm_already_present_is_noop():
         parent_id = ws.add_credential(
             provider="entra", credential_type="token_store",
             secret_data=json.dumps({"token_store": store.to_dict()}),
-            friendly_name="alice@x.com",
+            friendly_name="alice@x.example",
         )
 
         state = _make_state_with(store, ws, parent_id)
@@ -134,7 +134,7 @@ def test_new_cred_carries_expires_at_matching_the_new_token():
         parent_id = ws.add_credential(
             provider="entra", credential_type="token_store",
             secret_data=json.dumps({"token_store": store.to_dict()}),
-            friendly_name="alice@x.com",
+            friendly_name="alice@x.example",
         )
         state = _make_state_with(store, ws, parent_id)
 
@@ -168,7 +168,7 @@ def test_new_cred_friendly_name_shows_pivot_arrow():
         parent_id = ws.add_credential(
             provider="entra", credential_type="token_store",
             secret_data=json.dumps({"token_store": store.to_dict()}),
-            friendly_name="alice@x.com",
+            friendly_name="alice@x.example",
         )
         state = _make_state_with(store, ws, parent_id)
 
@@ -199,7 +199,7 @@ def test_new_cred_records_obtained_via():
         parent_id = ws.add_credential(
             provider="entra", credential_type="token_store",
             secret_data=json.dumps({"token_store": store.to_dict()}),
-            friendly_name="alice@x.com",
+            friendly_name="alice@x.example",
         )
         state = _make_state_with(store, ws, parent_id)
 

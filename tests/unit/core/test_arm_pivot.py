@@ -41,7 +41,7 @@ def _make_entra_cred(workspace: Workspace) -> int:
     """Store an Entra credential with a FOCI refresh token and return its ID."""
     import json
 
-    store = EntraTokenStore(tenant_id="tenant-test", user_upn="pivot@test.com")
+    store = EntraTokenStore(tenant_id="tenant-test", user_upn="pivot@test.example")
     foci_rt = EntraToken(
         token_type="refresh_token",
         resource="",
@@ -56,7 +56,7 @@ def _make_entra_cred(workspace: Workspace) -> int:
         provider="entra",
         credential_type="token_store",
         secret_data=json.dumps({"token_store": store.to_dict()}),
-        friendly_name="entra:pivot@test.com",
+        friendly_name="entra:pivot@test.example",
     )
     return cred_id
 
@@ -65,7 +65,7 @@ def _make_entra_cred_with_arm(workspace: Workspace) -> int:
     """Store an Entra credential with a valid ARM access token and return its ID."""
     import json
 
-    store = EntraTokenStore(tenant_id="tenant-test", user_upn="pivot@test.com")
+    store = EntraTokenStore(tenant_id="tenant-test", user_upn="pivot@test.example")
     arm_token = EntraToken(
         token_type="access_token",
         resource=ARM,
@@ -80,7 +80,7 @@ def _make_entra_cred_with_arm(workspace: Workspace) -> int:
         provider="entra",
         credential_type="token_store",
         secret_data=json.dumps({"token_store": store.to_dict()}),
-        friendly_name="entra:pivot@test.com",
+        friendly_name="entra:pivot@test.example",
     )
     return cred_id
 

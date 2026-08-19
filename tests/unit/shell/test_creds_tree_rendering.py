@@ -60,12 +60,12 @@ def test_derived_row_shows_from_parent_marker():
     creds = [
         {
             "id": 1, "provider": "entra", "credential_type": "token_store",
-            "friendly_name": "alice@x.com", "status": "active",
+            "friendly_name": "alice@x.example", "status": "active",
             "derived_from_id": None,
         },
         {
             "id": 2, "provider": "entra", "credential_type": "token_store",
-            "friendly_name": "alice@x.com → ARM", "status": "active",
+            "friendly_name": "alice@x.example → ARM", "status": "active",
             "derived_from_id": 1,
         },
     ]
@@ -79,10 +79,10 @@ def test_hint_mentions_from_convention_when_lineage_exists():
     what `from #N` means."""
     creds = [
         {"id": 1, "provider": "entra", "credential_type": "token_store",
-         "friendly_name": "alice@x.com", "status": "active",
+         "friendly_name": "alice@x.example", "status": "active",
          "derived_from_id": None},
         {"id": 2, "provider": "entra", "credential_type": "token_store",
-         "friendly_name": "alice@x.com → ARM", "status": "active",
+         "friendly_name": "alice@x.example → ARM", "status": "active",
          "derived_from_id": 1},
     ]
     out = _capture(f.format_credentials, creds)
@@ -94,7 +94,7 @@ def test_no_from_marker_on_flat_cred_list():
     when there's actually a pivot chain to represent."""
     creds = [
         {"id": 1, "provider": "entra", "credential_type": "token_store",
-         "friendly_name": "alice@x.com", "status": "active",
+         "friendly_name": "alice@x.example", "status": "active",
          "derived_from_id": None},
     ]
     out = _capture(f.format_credentials, creds)

@@ -67,12 +67,12 @@ class TestArmListPagination:
 
     def test_three_pages(self):
         pages = [
-            _mock_resp(200, {"value": [{"id": str(i)}], "nextLink": f"https://x.com/p{i+1}"})
+            _mock_resp(200, {"value": [{"id": str(i)}], "nextLink": f"https://x.example/p{i+1}"})
             for i in range(2)
         ] + [_mock_resp(200, {"value": [{"id": "2"}]})]
         http = _mock_http(*pages)
 
-        result = arm_list(http, "https://x.com/p0", _HEADERS)
+        result = arm_list(http, "https://x.example/p0", _HEADERS)
         assert len(result) == 3
 
     def test_stops_at_max_pages(self):
