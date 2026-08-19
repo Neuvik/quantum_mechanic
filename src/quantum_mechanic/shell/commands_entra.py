@@ -1063,7 +1063,7 @@ def _entra_friendly_name(store: EntraTokenStore) -> str:
                 if upn and tid:
                     break
     except Exception:
-        pass
+        logger.debug("Failed to extract UPN/tenant from Entra token claims")
     if upn:
         return upn
     if tenant and tenant != "common":

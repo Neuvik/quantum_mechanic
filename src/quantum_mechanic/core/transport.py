@@ -632,7 +632,7 @@ class RemoteTransport(Transport):
                     if os.path.exists(p):
                         os.unlink(p)
                 except Exception:
-                    pass
+                    logger.debug("Failed to unlink temp key file %s", p)
 
         return httpx.Client(
             verify=ctx,

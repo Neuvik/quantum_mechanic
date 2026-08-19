@@ -708,7 +708,7 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
                                 friendly_name=recovered,
                             )
                 except Exception:
-                    pass
+                    logger.debug("Failed to recover Entra credential friendly name for cred %s", cred.get("id"))
 
     formatters.format_credentials(creds)
 
@@ -1528,7 +1528,7 @@ def _render_loot_dir(loot_dir, tech_id: str) -> None:
                 if key not in fieldnames:
                     fieldnames.append(key)
     except Exception:
-        pass
+        logger.debug("Failed to parse loot CSV fieldnames")
 
     if fieldnames:
         key_col = fieldnames[0]
@@ -2756,7 +2756,7 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
                     console.print(f"  [dim]{ln}[/dim]")
             console.print()
     except Exception:
-        pass
+        logger.debug("Failed to render technique usage examples")
 
 
 def _render_command_help(h: CommandHelp) -> None:
@@ -2904,7 +2904,7 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
 
                     principal = str(raw_principal).split("/")[-1] if raw_principal else "?"
                 except Exception:
-                    pass
+                    logger.debug("Failed to resolve principal for report row %d", i)
                 tbl.add_row(str(i), ts, tech, provider, principal)
 
             console.print(tbl)
