@@ -229,7 +229,6 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
     Account Reader.
     """
     try:
-        from azure.core.exceptions import ClientAuthenticationError
         from azure.mgmt.storage import StorageManagementClient
         from azure.mgmt.subscription import SubscriptionClient
     except ImportError:

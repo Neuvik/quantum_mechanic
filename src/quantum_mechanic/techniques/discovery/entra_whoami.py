@@ -42,7 +42,12 @@ import httpx
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 from quantum_mechanic.providers.entra.foci import foci_expand
-from quantum_mechanic.providers.entra.token_store import GRAPH, OAUTH_REFRESH, EntraTokenStore, decode_jwt_claims
+from quantum_mechanic.providers.entra.token_store import (
+    GRAPH,
+    OAUTH_REFRESH,
+    EntraTokenStore,
+    decode_jwt_claims,
+)
 
 logger = logging.getLogger(__name__)
 

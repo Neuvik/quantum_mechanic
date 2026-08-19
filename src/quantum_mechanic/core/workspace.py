@@ -285,7 +285,7 @@ class Workspace:
 
     def upsert_account(
         self,
-        id: str,
+        account_id: str,
         provider: str,
         name: str | None = None,
         account_type: str = "account",
@@ -295,9 +295,9 @@ class Workspace:
         """Convenience method to add or update a cloud account."""
         return self._accounts.add(
             Account(
-                id=id,
+                id=account_id,
                 provider=provider,
-                name=name or id,
+                name=name or account_id,
                 account_type=account_type,
                 parent_id=parent_id,
                 metadata=metadata,

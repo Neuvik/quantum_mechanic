@@ -817,8 +817,6 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
                     logger.debug("Failed to load devices CSV map from %s: %s", sub, csv_err)
     except Exception as path_ex:
         logger.debug("Failed to process local loot folder fallback: %s", path_ex)
-    except Exception as path_ex:
-        logger.debug("Failed to process local loot folder fallback: %s", path_ex)
 
     return mapping
 

@@ -272,7 +272,9 @@ def _abuse_aws(ctx: ExecutionContext) -> dict[str, Any]:
 
     region = params.get("region", "us-east-1")
     source_instance_id = params.get("source_instance_id", "").strip() or None
-    params.get("keep_instance", "").lower() in ("true", "1", "yes")
+    # AWS never auto-terminates the new instance (see the note near the end
+    # of this function) — unlike _abuse_azure/_abuse_gcp/_abuse_oci, there is
+    # no keep_instance branch to gate here.
 
     try:
         # Re-use the authenticated session; set region if the user specified one

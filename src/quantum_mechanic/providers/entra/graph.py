@@ -188,7 +188,7 @@ def _graph_call(
                 wait_time = retry_delay
 
             # Add jitter
-            wait_time *= random.uniform(0.5, 1.5)
+            wait_time *= random.SystemRandom().uniform(0.5, 1.5)
 
             client_id = _get_client_id(headers)
             logger.warning(

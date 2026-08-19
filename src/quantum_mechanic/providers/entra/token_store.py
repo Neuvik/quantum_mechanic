@@ -232,9 +232,9 @@ class EntraTokenStore:
                 else:
                     labels.append("AT")
         seen: list[str] = []
-        for l in labels:
-            if l not in seen:
-                seen.append(l)
+        for label in labels:
+            if label not in seen:
+                seen.append(label)
         return " ".join(seen) if seen else "no valid tokens"
 
     def token_details(self) -> list[dict[str, Any]]:
@@ -409,7 +409,7 @@ def decode_jwt_claims(token: str) -> dict[str, Any]:
             return json.loads(decoded)
         except json.JSONDecodeError as je:
             logger.debug("Failed to decode JWT payload JSON: %s (Body: %s)", je, decoded[:100])
-            raise ValueError(f"Invalid JWT payload JSON: {je}")
+            raise ValueError(f"Invalid JWT payload JSON: {je}") from je
     except Exception as e:
         logger.debug("JWT decode failed: %s", e)
         return {}

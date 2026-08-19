@@ -181,7 +181,7 @@ def _aws_to_gcp(ctx: ExecutionContext) -> dict[str, Any]:
         project_id = target_sa.split("@")[1].split(".")[0] if "@" in target_sa else "unknown"
 
         ctx.workspace.upsert_account(
-            id=project_id, provider="gcp", name=f"Project {project_id}", account_type="project"
+            account_id=project_id, provider="gcp", name=f"Project {project_id}", account_type="project"
         )
         ctx.workspace.add_credential(
             provider="gcp",

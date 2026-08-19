@@ -208,7 +208,7 @@ def _create_azure(ctx: ExecutionContext) -> dict[str, Any]:
         tenant_id = who.tenant_id
 
         ctx.workspace.upsert_account(
-            id=tenant_id, provider="azure", name=f"Tenant {tenant_id}", account_type="tenant"
+            account_id=tenant_id, provider="azure", name=f"Tenant {tenant_id}", account_type="tenant"
         )
         ctx.workspace.add_credential(
             provider="azure",
@@ -276,7 +276,7 @@ def _create_gcp(ctx: ExecutionContext) -> dict[str, Any]:
         project_id = key_dict.get("project_id", "unknown")
 
         ctx.workspace.upsert_account(
-            id=project_id, provider="gcp", name=project_id, account_type="project"
+            account_id=project_id, provider="gcp", name=project_id, account_type="project"
         )
         ctx.workspace.add_credential(
             provider="gcp",
@@ -347,7 +347,7 @@ def _create_oci(ctx: ExecutionContext) -> dict[str, Any]:
 
         if private_key:
             ctx.workspace.upsert_account(
-                id=tenancy_id, provider="oci", name=f"Tenancy {tenancy_id}", account_type="tenancy"
+                account_id=tenancy_id, provider="oci", name=f"Tenancy {tenancy_id}", account_type="tenancy"
             )
             ctx.workspace.add_credential(
                 provider="oci",
