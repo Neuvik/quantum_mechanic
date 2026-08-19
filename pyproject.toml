@@ -117,8 +117,12 @@ ignore = ["S101"]  # Allow assert in tests
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "--strict-markers"
 markers = [
     "integration: shell integration tests using pexpect (real qm binary)",
+    "smoke: canary tests against live provider APIs, no infra provisioning",
+    "e2e: terraform-sandbox end-to-end tests — provisions real cloud infra",
+    "chaos: chaos_e2e scenario tests — provisions real cloud infra via terraform",
 ]
 
 [tool.coverage.run]
