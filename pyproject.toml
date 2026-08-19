@@ -93,7 +93,7 @@ dev = [
     "ruff>=0.11.0",
     "pexpect>=4.9.0",
     "grpcio-tools>=1.62.0",
-    "bandit>=1.9.4",
+    "pre-commit>=4.0.0",
     "vulture>=2.15",
     "radon>=6.0.1",
     "interrogate>=1.7.0",
@@ -118,6 +118,16 @@ ignore = ["S101"]  # Allow assert in tests
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S"]  # Allow security warnings in tests
+"src/quantum_mechanic/techniques/initial_access/lois/*.py" = [
+    "S602",  # shell=True — intentional implant command execution
+    "S104",  # 0.0.0.0 bind — intentional callback listener
+    "S310",  # urllib.request — intentional exfil channel
+    "S110",  # try-except-pass — stdlib-only payload, no logging available
+]
+"src/quantum_mechanic/daemon/proto/*_pb2*.py" = ["N802"]  # generated gRPC stubs
+"src/quantum_mechanic/daemon/receiver/server.py" = ["N802"]  # gRPC method overrides
+"src/quantum_mechanic/techniques/discovery/enum_compute.py" = ["N806"]  # optional import fallback
+"src/quantum_mechanic/techniques/discovery/unified_enum_*.py" = ["E402"]  # sibling technique delegation
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -132,6 +142,7 @@ markers = [
 
 [tool.coverage.run]
 source = ["src/quantum_mechanic"]
+branch = true
 omit = ["*/migrations/*", "*/__main__.py"]
 
 [tool.coverage.report]
@@ -155,9 +166,6 @@ fail-under = 65
 exclude = ["tests", "docs"]
 verbose = 0
 
-[tool.bandit]
-exclude_dirs = ["tests"]
-skips = ["B101"]  # Allow assert — same as ruff S101
 
 [build-system]
 requires = ["hatchling"]
