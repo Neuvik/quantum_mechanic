@@ -68,6 +68,7 @@ class ScopeExchangeResult:
         tried_clients:  Ordered list of (client_id, friendly_name) attempted.
         last_error:     Human-readable last error, useful for diagnostics.
     """
+
     status: str
     token: EntraToken | None = None
     tried_clients: list[tuple[str, str]] = field(default_factory=list)

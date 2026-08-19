@@ -44,41 +44,43 @@ except ImportError:
 # ----------------------------------------------------------------
 # Loot schema — Declarative table mapping
 # ----------------------------------------------------------------
-LOOT_ITEMS_KEY = 'vaults'
+LOOT_ITEMS_KEY = "vaults"
 LOOT_SCHEMA = [
-    ('name',           'Vault Name',      'bold cyan'),
-    ('location',       'Location',        'dim'),
-    ('public_access',  'Public Access',   'yellow'),
-    ('auth_model',     'Auth Model',      'white'),
-    ('uri',            'Vault URI',       'dim'),
+    ("name", "Vault Name", "bold cyan"),
+    ("location", "Location", "dim"),
+    ("public_access", "Public Access", "yellow"),
+    ("auth_model", "Auth Model", "white"),
+    ("uri", "Vault URI", "dim"),
 ]
 
+
 @technique(
-    technique_id='discovery/enum_keyvaults',
-    tactic='discovery',
-    mitre_id='T1580',
-    providers=['aws', 'azure', 'gcp', 'oci'],
-    severity='info',
+    technique_id="discovery/enum_keyvaults",
+    tactic="discovery",
+    mitre_id="T1580",
+    providers=["aws", "azure", "gcp", "oci"],
+    severity="info",
     safe=True,
-    description='Enumerate key-management infrastructure such as KMS and Key Vaults.',
+    description="Enumerate key-management infrastructure such as KMS and Key Vaults.",
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,
     parameters=[
         Parameter("target", "A specific vault name to identify.", required=False),
-    ]
+    ],
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Enumerate key-management infrastructure for the active provider."""
-    if ctx.provider_name == 'aws':
+    if ctx.provider_name == "aws":
         return _aws(ctx)
-    if ctx.provider_name == 'azure':
+    if ctx.provider_name == "azure":
         return _azure(ctx)
-    if ctx.provider_name == 'gcp':
+    if ctx.provider_name == "gcp":
         return _gcp(ctx)
-    if ctx.provider_name == 'oci':
+    if ctx.provider_name == "oci":
         return _oci(ctx)
 
     return {"error": f"Provider {ctx.provider_name} not implemented.", "vaults": []}
+
 
 def _aws(ctx: ExecutionContext) -> dict[str, Any]:
     """Enumerate AWS KMS keys and aliases across accessible regions."""
@@ -126,15 +128,17 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
                     if target and target not in {display_name, key_id, arn}:
                         continue
 
-                    vaults.append({
-                        "name": display_name,
-                        "location": region,
-                        "public_access": "Private API",
-                        "auth_model": "IAM + Key Policy",
-                        "uri": arn,
-                        "key_id": key_id,
-                        "aliases": alias_names,
-                    })
+                    vaults.append(
+                        {
+                            "name": display_name,
+                            "location": region,
+                            "public_access": "Private API",
+                            "auth_model": "IAM + Key Policy",
+                            "uri": arn,
+                            "key_id": key_id,
+                            "aliases": alias_names,
+                        }
+                    )
                 if not key_resp.get("Truncated"):
                     break
                 marker = key_resp.get("NextMarker")
@@ -146,6 +150,7 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
         "vaults": vaults,
         "total": len(vaults),
     }
+
 
 def _azure(ctx: ExecutionContext) -> dict[str, Any]:
     """
@@ -177,9 +182,8 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
                 # Extract interesting security properties
                 # Note: list() might return a partial object, we may need get() for full props
                 full_vault = vault
-                if (
-                    not getattr(vault, "properties", None)
-                    or not getattr(vault.properties, "vault_uri", None)
+                if not getattr(vault, "properties", None) or not getattr(
+                    vault.properties, "vault_uri", None
                 ):
                     try:
                         # Extract RG from ID: /subscriptions/.../resourceGroups/{RG}/...
@@ -204,22 +208,21 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
                         auth_model = "Azure RBAC"
                     uri = getattr(props, "vault_uri", "")
 
-                vaults.append({
-                    "name": vault.name,
-                    "location": vault.location,
-                    "public_access": public_access,
-                    "auth_model": auth_model,
-                    "uri": uri,
-                    "subscription_id": sub_id
-                })
+                vaults.append(
+                    {
+                        "name": vault.name,
+                        "location": vault.location,
+                        "public_access": public_access,
+                        "auth_model": auth_model,
+                        "uri": uri,
+                        "subscription_id": sub_id,
+                    }
+                )
         except Exception as e:
             ctx.warn(f"Failed to list vaults in subscription {sub_id}: {e}")
 
-    return {
-        "provider": "azure",
-        "vaults": vaults,
-        "total": len(vaults)
-    }
+    return {"provider": "azure", "vaults": vaults, "total": len(vaults)}
+
 
 def _gcp(ctx: ExecutionContext) -> dict[str, Any]:
     """Enumerate Cloud KMS key rings across accessible GCP projects."""
@@ -267,14 +270,16 @@ def _gcp(ctx: ExecutionContext) -> dict[str, Any]:
                 if "locations" in parts:
                     location = parts[parts.index("locations") + 1]
 
-                vaults.append({
-                    "name": name,
-                    "location": location,
-                    "public_access": "Private API",
-                    "auth_model": "IAM",
-                    "uri": key_ring.name,
-                    "project_id": project_id,
-                })
+                vaults.append(
+                    {
+                        "name": name,
+                        "location": location,
+                        "public_access": "Private API",
+                        "auth_model": "IAM",
+                        "uri": key_ring.name,
+                        "project_id": project_id,
+                    }
+                )
         except Exception as e:
             ctx.warn(f"Failed to list Cloud KMS key rings in project {project_id}: {e}")
 
@@ -283,6 +288,7 @@ def _gcp(ctx: ExecutionContext) -> dict[str, Any]:
         "vaults": vaults,
         "total": len(vaults),
     }
+
 
 def _oci(ctx: ExecutionContext) -> dict[str, Any]:
     # TODO: Implement OCI Vault / key enumeration

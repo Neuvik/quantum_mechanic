@@ -96,12 +96,14 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
                     if target and target not in {name, arn}:
                         continue
 
-                    secrets.append({
-                        "scope": region,
-                        "name": name,
-                        "backend": "Secrets Manager",
-                        "uri": arn,
-                    })
+                    secrets.append(
+                        {
+                            "scope": region,
+                            "name": name,
+                            "backend": "Secrets Manager",
+                            "uri": arn,
+                        }
+                    )
 
                 next_token = response.get("NextToken")
                 if not next_token:
@@ -166,12 +168,14 @@ def _gcp(ctx: ExecutionContext) -> dict[str, Any]:
                     elif getattr(replication_cfg, "user_managed", None) is not None:
                         replication = "user-managed"
 
-                secrets.append({
-                    "scope": project_id,
-                    "name": name,
-                    "backend": f"Secret Manager ({replication})",
-                    "uri": secret.name,
-                })
+                secrets.append(
+                    {
+                        "scope": project_id,
+                        "name": name,
+                        "backend": f"Secret Manager ({replication})",
+                        "uri": secret.name,
+                    }
+                )
         except Exception as e:
             ctx.warn(f"Failed to list Secret Manager secrets in project {project_id}: {e}")
 

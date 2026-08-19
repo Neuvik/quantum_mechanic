@@ -137,8 +137,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     headers = {"Authorization": f"Bearer {token.value}"}
 
     packages_url = (
-        "https://graph.microsoft.com/v1.0/identityGovernance/"
-        "entitlementManagement/accessPackages"
+        "https://graph.microsoft.com/v1.0/identityGovernance/entitlementManagement/accessPackages"
     )
     assignments_url = (
         "https://graph.microsoft.com/v1.0/identityGovernance/"
@@ -152,25 +151,29 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         with httpx.Client(timeout=30) as http:
             packages = graph_list(http, packages_url, headers)
             for p in packages:
-                packages_out.append({
-                    "package_id": p.get("id"),
-                    "display_name": p.get("displayName", "—"),
-                    "description": p.get("description", ""),
-                })
+                packages_out.append(
+                    {
+                        "package_id": p.get("id"),
+                        "display_name": p.get("displayName", "—"),
+                        "description": p.get("description", ""),
+                    }
+                )
 
             assignments = graph_list(http, assignments_url, headers)
             for a in assignments:
                 pkg = a.get("accessPackage", {}) or {}
                 target = a.get("target", {}) or {}
-                assignments_out.append({
-                    "package_id": pkg.get("id"),
-                    "package_name": pkg.get("displayName", "—"),
-                    "target_id": target.get("id"),
-                    "target_name": target.get("displayName", "—"),
-                    "target_type": target.get("principalType", "—"),
-                    "state": a.get("state", "—"),
-                    "assignment_id": a.get("id"),
-                })
+                assignments_out.append(
+                    {
+                        "package_id": pkg.get("id"),
+                        "package_name": pkg.get("displayName", "—"),
+                        "target_id": target.get("id"),
+                        "target_name": target.get("displayName", "—"),
+                        "target_type": target.get("principalType", "—"),
+                        "state": a.get("state", "—"),
+                        "assignment_id": a.get("id"),
+                    }
+                )
     except GraphError as e:
         logger.info("Access packages enumeration returned %s: %s", type(e).__name__, e)
         return graph_error_to_result(e, packages=[], assignments=[])

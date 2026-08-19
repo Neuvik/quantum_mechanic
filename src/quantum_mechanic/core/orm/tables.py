@@ -48,6 +48,7 @@ class Base(DeclarativeBase):
 # accounts (stub — needed so credentials.account_id FK resolves)
 # ================================================================
 
+
 class AccountRow(Base):
     """ORM stub for the 'accounts' table.
 
@@ -71,6 +72,7 @@ class AccountRow(Base):
 # workspace (stub — needed so agents/evidence/findings FK resolves)
 # ================================================================
 
+
 class WorkspaceRow(Base):
     """ORM stub for the 'workspace' table."""
 
@@ -88,6 +90,7 @@ class WorkspaceRow(Base):
 # credentials
 # ================================================================
 
+
 class CredentialRow(Base):
     """ORM mapping for the 'credentials' table.
 
@@ -101,9 +104,7 @@ class CredentialRow(Base):
     credential_type: Mapped[str] = mapped_column(String, nullable=False)
     friendly_name: Mapped[str | None] = mapped_column(String)
     principal_id: Mapped[str | None] = mapped_column(String)
-    account_id: Mapped[str | None] = mapped_column(
-        String, ForeignKey("accounts.id"), nullable=True
-    )
+    account_id: Mapped[str | None] = mapped_column(String, ForeignKey("accounts.id"), nullable=True)
     derived_from_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("credentials.id"), nullable=True
     )
@@ -113,9 +114,7 @@ class CredentialRow(Base):
     last_refreshed: Mapped[str | None] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="active", nullable=False)
     obtained_via: Mapped[str | None] = mapped_column(String)
-    created_at: Mapped[str | None] = mapped_column(
-        String, server_default=text("(datetime('now'))")
-    )
+    created_at: Mapped[str | None] = mapped_column(String, server_default=text("(datetime('now'))"))
     raw_data: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
@@ -127,6 +126,7 @@ class CredentialRow(Base):
 # ================================================================
 # api_log
 # ================================================================
+
 
 class ApiLogRow(Base):
     """ORM mapping for the 'api_log' table."""
@@ -160,15 +160,14 @@ class ApiLogRow(Base):
 # evidence
 # ================================================================
 
+
 class EvidenceRow(Base):
     """ORM mapping for the 'evidence' table (002_evidence_table.sql)."""
 
     __tablename__ = "evidence"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    workspace_id: Mapped[str] = mapped_column(
-        String, ForeignKey("workspace.id"), nullable=False
-    )
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspace.id"), nullable=False)
     technique_id: Mapped[str] = mapped_column(String, nullable=False)
     credential_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("credentials.id"), nullable=True
@@ -188,27 +187,22 @@ class EvidenceRow(Base):
 # findings
 # ================================================================
 
+
 class FindingRow(Base):
     """ORM mapping for the 'findings' table (003_findings_table.sql)."""
 
     __tablename__ = "findings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    workspace_id: Mapped[str] = mapped_column(
-        String, ForeignKey("workspace.id"), nullable=False
-    )
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspace.id"), nullable=False)
     technique_id: Mapped[str] = mapped_column(String, nullable=False)
     tactic: Mapped[str] = mapped_column(String, nullable=False)
     mitre_id: Mapped[str | None] = mapped_column(String)
     title: Mapped[str] = mapped_column(String, nullable=False)
-    severity: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'medium'")
-    )
+    severity: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'medium'"))
     provider: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
-    evidence: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'{}'")
-    )
+    evidence: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'{}'"))
     created_at: Mapped[str] = mapped_column(
         String, nullable=False, server_default=text("(datetime('now'))")
     )
@@ -224,15 +218,14 @@ class FindingRow(Base):
 # compute_instances
 # ================================================================
 
+
 class ComputeInstanceRow(Base):
     """ORM mapping for 'compute_instances' (005_network_assets.sql)."""
 
     __tablename__ = "compute_instances"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    workspace_id: Mapped[str] = mapped_column(
-        String, ForeignKey("workspace.id"), nullable=False
-    )
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspace.id"), nullable=False)
     provider: Mapped[str] = mapped_column(String, nullable=False)
     instance_id: Mapped[str] = mapped_column(String, nullable=False)
     name: Mapped[str | None] = mapped_column(String)
@@ -244,9 +237,7 @@ class ComputeInstanceRow(Base):
     image_id: Mapped[str | None] = mapped_column(String)
     identity_arn: Mapped[str | None] = mapped_column(String)
     identity_name: Mapped[str | None] = mapped_column(String)
-    security_group_ids: Mapped[str] = mapped_column(
-        Text, server_default=text("'[]'")
-    )
+    security_group_ids: Mapped[str] = mapped_column(Text, server_default=text("'[]'"))
     metadata_: Mapped[str] = mapped_column(
         "metadata", Text, nullable=False, server_default=text("'{}'")
     )
@@ -268,15 +259,14 @@ class ComputeInstanceRow(Base):
 # network_assets
 # ================================================================
 
+
 class NetworkAssetRow(Base):
     """ORM mapping for the 'network_assets' table (005_network_assets.sql)."""
 
     __tablename__ = "network_assets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    workspace_id: Mapped[str] = mapped_column(
-        String, ForeignKey("workspace.id"), nullable=False
-    )
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspace.id"), nullable=False)
     provider: Mapped[str] = mapped_column(String, nullable=False)
     asset_type: Mapped[str] = mapped_column(String, nullable=False)
     asset_id: Mapped[str] = mapped_column(String, nullable=False)
@@ -303,15 +293,14 @@ class NetworkAssetRow(Base):
 # agents
 # ================================================================
 
+
 class AgentRow(Base):
     """ORM mapping for the 'agents' table (006_agents.sql)."""
 
     __tablename__ = "agents"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(
-        String, ForeignKey("workspace.id"), nullable=False
-    )
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspace.id"), nullable=False)
     hostname: Mapped[str | None] = mapped_column(String)
     username: Mapped[str | None] = mapped_column(String)
     internal_ip: Mapped[str | None] = mapped_column(String)
@@ -320,9 +309,7 @@ class AgentRow(Base):
     os_version: Mapped[str | None] = mapped_column(String)
     agent_version: Mapped[str | None] = mapped_column(String)
     profile: Mapped[str | None] = mapped_column(String)
-    status: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'active'")
-    )
+    status: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'active'"))
     latency_ms: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     registered_at: Mapped[str] = mapped_column(String, nullable=False)
     last_seen: Mapped[str] = mapped_column(String, nullable=False)
@@ -337,23 +324,18 @@ class AgentRow(Base):
 # tasks
 # ================================================================
 
+
 class TaskRow(Base):
     """ORM mapping for the 'tasks' table (007_tasks.sql)."""
 
     __tablename__ = "tasks"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(
-        String, ForeignKey("workspace.id"), nullable=False
-    )
-    agent_id: Mapped[str] = mapped_column(
-        String, ForeignKey("agents.id"), nullable=False
-    )
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspace.id"), nullable=False)
+    agent_id: Mapped[str] = mapped_column(String, ForeignKey("agents.id"), nullable=False)
     command: Mapped[str] = mapped_column(String, nullable=False)
     args: Mapped[bytes | None] = mapped_column(LargeBinary)
-    status: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'pending'")
-    )
+    status: Mapped[str] = mapped_column(String, nullable=False, server_default=text("'pending'"))
     output: Mapped[bytes | None] = mapped_column(LargeBinary)
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(String, nullable=False)

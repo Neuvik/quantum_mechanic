@@ -38,23 +38,25 @@ from quantum_mechanic.core.technique import Parameter, technique
 logger = logging.getLogger(__name__)
 
 # Default sensitive patterns
-DEFAULT_PATTERN = r"(\.env|id_rsa|id_dsa|\.pem|config.*\.json|secret|password|db\.sqlite|backup.*\.zip)"
+DEFAULT_PATTERN = (
+    r"(\.env|id_rsa|id_dsa|\.pem|config.*\.json|secret|password|db\.sqlite|backup.*\.zip)"
+)
 
 # ----------------------------------------------------------------
 # Loot schema — Declarative table mapping
 # ----------------------------------------------------------------
-LOOT_ITEMS_KEY = 'hits'
+LOOT_ITEMS_KEY = "hits"
 LOOT_SCHEMA = [
-    ('bucket',  'Bucket/Container', 'bold cyan'),
-    ('key',     'Object Key',       'white'),
-    ('size',    'Size',             'dim'),
-    ('type',    'Matched Pattern',  'yellow'),
+    ("bucket", "Bucket/Container", "bold cyan"),
+    ("key", "Object Key", "white"),
+    ("size", "Size", "dim"),
+    ("type", "Matched Pattern", "yellow"),
 ]
 
 
 @technique(
     technique_id="collection/storage_search",
-    tactic='collection',
+    tactic="collection",
     mitre_id="T1530",
     providers=["aws", "azure", "gcp", "oci"],
     severity="medium",
@@ -63,9 +65,16 @@ LOOT_SCHEMA = [
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,
     parameters=[
-        Parameter("target", "A specific bucket or container to search.", required=False, example="prod-backups"),
-        Parameter("regex", "Custom regex for file matching.", default=DEFAULT_PATTERN, example=".*\\.key$"),
-    ]
+        Parameter(
+            "target",
+            "A specific bucket or container to search.",
+            required=False,
+            example="prod-backups",
+        ),
+        Parameter(
+            "regex", "Custom regex for file matching.", default=DEFAULT_PATTERN, example=".*\\.key$"
+        ),
+    ],
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Execute bucket search across cloud providers."""
@@ -104,12 +113,14 @@ def _search_aws(ctx: ExecutionContext) -> dict[str, Any]:
             for obj in objs.get("Contents", []):
                 key = obj["Key"]
                 if regex.search(key):
-                    hits.append({
-                        "bucket": bname,
-                        "key": key,
-                        "size": obj.get("Size", 0),
-                        "type": "Pattern Match",
-                    })
+                    hits.append(
+                        {
+                            "bucket": bname,
+                            "key": key,
+                            "size": obj.get("Size", 0),
+                            "type": "Pattern Match",
+                        }
+                    )
         except Exception as e:
             logger.debug("Skipping bucket %s: %s", bname, e)
 
@@ -172,7 +183,9 @@ def _search_azure(ctx: ExecutionContext) -> dict[str, Any]:
                     try:
                         containers = [c.name for c in blob_service.list_containers()]
                     except ClientAuthenticationError:
-                        ctx.warn(f"Access denied listing containers for account {account_name}. (Try granting 'Storage Blob Data Reader')")
+                        ctx.warn(
+                            f"Access denied listing containers for account {account_name}. (Try granting 'Storage Blob Data Reader')"
+                        )
                         continue
                     except Exception as e:
                         logger.debug("Failed to list containers for %s: %s", account_name, e)
@@ -186,18 +199,22 @@ def _search_azure(ctx: ExecutionContext) -> dict[str, Any]:
                         container_client = blob_service.get_container_client(cname)
                         for blob in container_client.list_blobs(max_results=1000):
                             if regex.search(blob.name):
-                                hits.append({
-                                    "bucket": f"{account_name}/{cname}",
-                                    "key": blob.name,
-                                    "size": blob.size,
-                                    "type": "Pattern Match",
-                                })
+                                hits.append(
+                                    {
+                                        "bucket": f"{account_name}/{cname}",
+                                        "key": blob.name,
+                                        "size": blob.size,
+                                        "type": "Pattern Match",
+                                    }
+                                )
                     except ResourceNotFoundError:
                         ctx.warn(f"Container {cname} not found in account {account_name}.")
                     except ClientAuthenticationError:
                         ctx.warn(f"Access denied listing blobs in {account_name}/{cname}.")
                     except Exception as inner_e:
-                        logger.debug("Error searching container %s/%s: %s", account_name, cname, inner_e)
+                        logger.debug(
+                            "Error searching container %s/%s: %s", account_name, cname, inner_e
+                        )
 
             except Exception as account_e:
                 logger.debug("Failed to connect to storage account %s: %s", account_name, account_e)
@@ -234,12 +251,14 @@ def _search_gcp(ctx: ExecutionContext) -> dict[str, Any]:
                 for obj in objs_resp.get("items", []):
                     key = obj["name"]
                     if regex.search(key):
-                        hits.append({
-                            "bucket": bname,
-                            "key": key,
-                            "size": int(obj.get("size", 0)),
-                            "type": "Pattern Match",
-                        })
+                        hits.append(
+                            {
+                                "bucket": bname,
+                                "key": key,
+                                "size": int(obj.get("size", 0)),
+                                "type": "Pattern Match",
+                            }
+                        )
             except Exception as inner_e:
                 logger.debug("Skipping GCP bucket %s: %s", bname, inner_e)
 
@@ -262,14 +281,24 @@ def _search_oci(ctx: ExecutionContext) -> dict[str, Any]:
     try:
         config = ctx.session["config"]
         signer = ctx.session.get("signer")
-        identity = oci.identity.IdentityClient(config={}, signer=signer) if signer else oci.identity.IdentityClient(config)
-        os_client = oci.object_storage.ObjectStorageClient(config={}, signer=signer) if signer else oci.object_storage.ObjectStorageClient(config)
+        identity = (
+            oci.identity.IdentityClient(config={}, signer=signer)
+            if signer
+            else oci.identity.IdentityClient(config)
+        )
+        os_client = (
+            oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+            if signer
+            else oci.object_storage.ObjectStorageClient(config)
+        )
 
         tenancy_id = config.get("tenancy")
 
         compartment_ids = [tenancy_id]
         try:
-            child_compartments = identity.list_compartments(tenancy_id, compartment_id_in_subtree=True, access_level="ACCESSIBLE").data
+            child_compartments = identity.list_compartments(
+                tenancy_id, compartment_id_in_subtree=True, access_level="ACCESSIBLE"
+            ).data
             compartment_ids += [c.id for c in child_compartments]
         except Exception as e:
             logger.debug("Failed listing child compartments: %s", e)
@@ -282,15 +311,19 @@ def _search_oci(ctx: ExecutionContext) -> dict[str, Any]:
                 for bucket in buckets:
                     bname = bucket.name
                     ctx.info(f"OCI: searching bucket {bname}...")
-                    objects = os_client.list_objects(namespace, bname, fields="size", limit=1000).data
+                    objects = os_client.list_objects(
+                        namespace, bname, fields="size", limit=1000
+                    ).data
                     for obj in objects.objects:
                         if regex.search(obj.name):
-                            hits.append({
-                                "bucket": bname,
-                                "key": obj.name,
-                                "size": obj.size,
-                                "type": "Pattern Match",
-                            })
+                            hits.append(
+                                {
+                                    "bucket": bname,
+                                    "key": obj.name,
+                                    "size": obj.size,
+                                    "type": "Pattern Match",
+                                }
+                            )
             except Exception as e:
                 logger.debug("Failed listing buckets in compartment %s: %s", cid, e)
 

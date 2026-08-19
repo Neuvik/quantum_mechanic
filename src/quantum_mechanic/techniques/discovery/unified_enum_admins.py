@@ -35,13 +35,14 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------
 # Loot & Formatter
 # ----------------------------------------------------------------
-LOOT_ITEMS_KEY = 'admins'
+LOOT_ITEMS_KEY = "admins"
 LOOT_SCHEMA = [
-    ('principal', 'Principal', 'bold cyan'),
-    ('type',      'Type',      'white'),
-    ('role',      'Role/Policy', 'bold yellow'),
-    ('reason',    'Reason',    'dim'),
+    ("principal", "Principal", "bold cyan"),
+    ("type", "Type", "white"),
+    ("role", "Role/Policy", "bold yellow"),
+    ("reason", "Reason", "dim"),
 ]
+
 
 def format_unified_admins(result: Any) -> None:
     """Formatter for Unified Admin discovery results."""
@@ -56,23 +57,27 @@ def format_unified_admins(result: Any) -> None:
     provider = result.provider.upper()
 
     # --- THE CAUTION / DISCLAIMER ---
-    console.print(Panel(
-        "[bold red]⚠ HEURISTIC SCAN DISCLAIMER[/bold red]\n"
-        "This module identifies [bold]obvious[/bold] administrator assignments only.\n"
-        "It does [bold]NOT[/bold] perform exhaustive policy evaluation or graph-based analysis.\n\n"
-        "[dim]For deep visibility, we recommend:[/dim]\n"
-        "• [cyan]AWS:[/cyan]   CloudFox\n"
-        "• [cyan]Azure:[/cyan] AzureHound / BloodHound\n"
-        "• [cyan]GCP:[/cyan]   GCP-Scanner",
-        border_style="yellow",
-        expand=False
-    ))
+    console.print(
+        Panel(
+            "[bold red]⚠ HEURISTIC SCAN DISCLAIMER[/bold red]\n"
+            "This module identifies [bold]obvious[/bold] administrator assignments only.\n"
+            "It does [bold]NOT[/bold] perform exhaustive policy evaluation or graph-based analysis.\n\n"
+            "[dim]For deep visibility, we recommend:[/dim]\n"
+            "• [cyan]AWS:[/cyan]   CloudFox\n"
+            "• [cyan]Azure:[/cyan] AzureHound / BloodHound\n"
+            "• [cyan]GCP:[/cyan]   GCP-Scanner",
+            border_style="yellow",
+            expand=False,
+        )
+    )
 
     if not admins:
         console.print(f"  [dim]No obvious {provider} admins discovered (or access denied).[/dim]")
         return
 
-    console.print(f"  [bold green]✓[/bold green] Discovered [bold cyan]{len(admins)}[/bold cyan] obvious {provider} Admin(s)")
+    console.print(
+        f"  [bold green]✓[/bold green] Discovered [bold cyan]{len(admins)}[/bold cyan] obvious {provider} Admin(s)"
+    )
 
     tbl = Table(box=box.ROUNDED, border_style="dim")
     tbl.add_column("Principal", style="bold cyan")
@@ -82,17 +87,15 @@ def format_unified_admins(result: Any) -> None:
 
     for a in admins:
         tbl.add_row(
-            a.get("principal", "—"),
-            a.get("type", "—"),
-            a.get("role", "—"),
-            a.get("reason", "—")
+            a.get("principal", "—"), a.get("type", "—"), a.get("role", "—"), a.get("reason", "—")
         )
 
     console.print(tbl)
 
+
 @technique(
     technique_id="discovery/unified_enum_admins",
-    tactic='discovery',
+    tactic="discovery",
     mitre_id="T1078.004",
     providers=["aws", "azure", "gcp", "oci", "entra"],
     severity="info",
@@ -118,9 +121,11 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
     return handler(ctx)
 
+
 # ================================================================
 # AWS — IAM Admin Discovery
 # ================================================================
+
 
 def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
     iam = ctx.session.client("iam")
@@ -133,19 +138,23 @@ def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
         resp = iam.list_entities_for_policy(PolicyArn=arn)
 
         for u in resp.get("PolicyUsers", []):
-            admins.append({
-                "principal": u["UserName"],
-                "type": "User",
-                "role": "AdministratorAccess",
-                "reason": "Full Administrative Rights (AWS Managed)"
-            })
+            admins.append(
+                {
+                    "principal": u["UserName"],
+                    "type": "User",
+                    "role": "AdministratorAccess",
+                    "reason": "Full Administrative Rights (AWS Managed)",
+                }
+            )
         for r in resp.get("PolicyRoles", []):
-            admins.append({
-                "principal": r["RoleName"],
-                "type": "Role",
-                "role": "AdministratorAccess",
-                "reason": "Full Administrative Rights (AWS Managed)"
-            })
+            admins.append(
+                {
+                    "principal": r["RoleName"],
+                    "type": "Role",
+                    "role": "AdministratorAccess",
+                    "reason": "Full Administrative Rights (AWS Managed)",
+                }
+            )
     except Exception as e:
         ctx.debug(f"Failed to list entities for AdministratorAccess: {e}")
 
@@ -156,12 +165,14 @@ def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
             try:
                 resp = iam.get_group(GroupName=gname)
                 for u in resp.get("Users", []):
-                    admins.append({
-                        "principal": u["UserName"],
-                        "type": "User",
-                        "role": f"Group: {gname}",
-                        "reason": "Member of suspected admin group"
-                    })
+                    admins.append(
+                        {
+                            "principal": u["UserName"],
+                            "type": "User",
+                            "role": f"Group: {gname}",
+                            "reason": "Member of suspected admin group",
+                        }
+                    )
             except Exception:
                 continue
     except Exception:
@@ -169,9 +180,11 @@ def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
 
     return {"status": "success", "admins": admins}
 
+
 # ================================================================
 # Azure — RBAC Owner/Contributor Discovery
 # ================================================================
+
 
 def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
     try:
@@ -197,7 +210,7 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
             HIGH_VALUE_ROLES = {
                 "8e3af657-a8ff-443c-a75c-2fe8c4bcb635": "Owner",
                 "b24988ac-6180-42a0-ab88-20f7382dd24c": "Contributor",
-                "18d7d81d-424b-4813-a006-27c0ad510ed2": "User Access Administrator"
+                "18d7d81d-424b-4813-a006-27c0ad510ed2": "User Access Administrator",
             }
 
             for assignment in auth_client.role_assignments.list_for_subscription():
@@ -207,21 +220,25 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
                     pname = assignment.principal_name or assignment.principal_id
                     key = f"{pname}-{role_id}"
                     if key not in seen:
-                        admins.append({
-                            "principal": pname,
-                            "type": assignment.principal_type or "Unknown",
-                            "role": HIGH_VALUE_ROLES[role_id],
-                            "reason": f"Subscription-level Control ({sub.display_name})"
-                        })
+                        admins.append(
+                            {
+                                "principal": pname,
+                                "type": assignment.principal_type or "Unknown",
+                                "role": HIGH_VALUE_ROLES[role_id],
+                                "reason": f"Subscription-level Control ({sub.display_name})",
+                            }
+                        )
                         seen.add(key)
     except Exception as e:
         ctx.debug(f"Azure RBAC scan failed: {e}")
 
     return {"status": "success", "admins": admins}
 
+
 # ================================================================
 # GCP — Project-level Owner/Editor Discovery
 # ================================================================
+
 
 def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
     try:
@@ -253,20 +270,24 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
                     name = member.split(":", 1)[-1] if ":" in member else member
                     mtype = member.split(":", 1)[0].title() if ":" in member else "Unknown"
 
-                    admins.append({
-                        "principal": name,
-                        "type": mtype,
-                        "role": binding.role,
-                        "reason": f"Project-wide {binding.role.split('/')[-1]} rights"
-                    })
+                    admins.append(
+                        {
+                            "principal": name,
+                            "type": mtype,
+                            "role": binding.role,
+                            "reason": f"Project-wide {binding.role.split('/')[-1]} rights",
+                        }
+                    )
     except Exception as e:
         ctx.debug(f"GCP IAM scan failed for {project_id}: {e}")
 
     return {"status": "success", "admins": admins}
 
+
 # ================================================================
 # OCI — Tenancy Administrator Discovery
 # ================================================================
+
 
 def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
     try:
@@ -278,7 +299,11 @@ def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
     config = ctx.session["config"]
     signer = ctx.session.get("signer")
 
-    identity = oci.identity.IdentityClient(config, signer=signer) if signer else oci.identity.IdentityClient(config)
+    identity = (
+        oci.identity.IdentityClient(config, signer=signer)
+        if signer
+        else oci.identity.IdentityClient(config)
+    )
     tenancy_id = config.get("tenancy")
 
     try:
@@ -287,19 +312,24 @@ def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
         admin_group = next((g for g in groups if g.name == "Administrators"), None)
 
         if admin_group:
-            memberships = identity.list_user_group_memberships(tenancy_id, group_id=admin_group.id).data
+            memberships = identity.list_user_group_memberships(
+                tenancy_id, group_id=admin_group.id
+            ).data
             for m in memberships:
                 user = identity.get_user(m.user_id).data
-                admins.append({
-                    "principal": user.name,
-                    "type": "User",
-                    "role": "Administrators Group",
-                    "reason": "Full Tenancy Control (Built-in Group)"
-                })
+                admins.append(
+                    {
+                        "principal": user.name,
+                        "type": "User",
+                        "role": "Administrators Group",
+                        "reason": "Full Tenancy Control (Built-in Group)",
+                    }
+                )
     except Exception as e:
         ctx.debug(f"OCI Admin scan failed: {e}")
 
     return {"status": "success", "admins": admins}
+
 
 # ================================================================
 # Entra ID — delegate to entra_enum_privileged_roles (authoritative)

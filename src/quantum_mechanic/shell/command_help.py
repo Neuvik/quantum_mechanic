@@ -4,6 +4,7 @@ Each shell command (cmd_creds, cmd_workspace, etc.) declares a CommandHelp
 record that drives both in-shell `help` output and the auto-generated
 docs/wiki/Commands.md page. Single source of truth, two renderers.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -28,6 +29,7 @@ class SubcommandHelp:
 
     Example: `creds delete <id>` is SubcommandHelp(name="delete", args="<id>").
     """
+
     name: str
     synopsis: str
     args: str = ""
@@ -41,6 +43,7 @@ class FlagHelp:
     Example: `--provider aws` is FlagHelp(name="--provider", value="<name>",
     synopsis="Filter by provider").
     """
+
     name: str
     synopsis: str
     value: str = ""
@@ -49,6 +52,7 @@ class FlagHelp:
 @dataclass
 class CommandHelp:
     """Structured help record for a shell command."""
+
     name: str
     category: str
     synopsis: str

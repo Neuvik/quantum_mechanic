@@ -188,7 +188,8 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
         # Fetch the client_id — the operator needs it to authenticate.
         app_resp = _graph_call(
-            http, "GET",
+            http,
+            "GET",
             f"https://graph.microsoft.com/v1.0/applications/{obj_id}?$select=appId",
             headers,
         )

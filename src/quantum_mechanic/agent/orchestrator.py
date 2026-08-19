@@ -66,13 +66,12 @@ class AgentOrchestrator:
         self.llm = ChatAnthropic(
             model_name="claude-3-7-sonnet-20250219",
             temperature=0,  # Strict determinism for offensive tooling
-            max_tokens=2048
+            max_tokens=2048,
         )
 
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT),
-            ("human", "{question}")
-        ])
+        prompt = ChatPromptTemplate.from_messages(
+            [("system", SYSTEM_PROMPT), ("human", "{question}")]
+        )
 
         # Helper to stringify Chroma documents into the prompt
         def format_docs(docs) -> str:
@@ -83,7 +82,7 @@ class AgentOrchestrator:
             {
                 "context": self.retriever | format_docs,
                 "evidence": lambda x: x["evidence"],
-                "question": lambda x: x["question"]
+                "question": lambda x: x["question"],
             }
             | prompt
             | self.llm
@@ -108,12 +107,13 @@ class AgentOrchestrator:
                 for r in rows:
                     try:
                         parsed = json.loads(r["output_json"])
-                        compiled_evidence.append({
-                            "technique": r["technique_id"],
-                            "data": parsed
-                        })
+                        compiled_evidence.append({"technique": r["technique_id"], "data": parsed})
                     except Exception as e:
-                        logger.debug("Skipping malformed evidence row for technique %s: %s", r["technique_id"], e)
+                        logger.debug(
+                            "Skipping malformed evidence row for technique %s: %s",
+                            r["technique_id"],
+                            e,
+                        )
 
                 if compiled_evidence:
                     evidence_str = json.dumps(compiled_evidence, indent=2)
@@ -122,7 +122,9 @@ class AgentOrchestrator:
 
         # 3. Fire Langchain!
         logger.info("Invoking LLM chain with query: %s", question)
-        return self.chain.invoke({ # type: ignore
-            "evidence": evidence_str,
-            "question": question
-        })
+        return self.chain.invoke(
+            {  # type: ignore
+                "evidence": evidence_str,
+                "question": question,
+            }
+        )

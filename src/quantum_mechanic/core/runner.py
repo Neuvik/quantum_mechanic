@@ -140,7 +140,7 @@ class TechniqueRunner:
                 technique_id=technique_id,
                 provider=cred.provider if cred else "unknown",
                 status="error",
-                error=param_err
+                error=param_err,
             )
 
         # 2. Authenticate & Build Context
@@ -176,12 +176,14 @@ class TechniqueRunner:
         )
 
         # Emit Start Event
-        ctx._emit(TelemetryEvent(
-            technique_id=technique_id,
-            event_type=TelemetryType.TASK_START,
-            message=f"Starting technique: {technique_id}",
-            data={"provider": provider_name_for_event, "safe_mode": safe_mode}
-        ))
+        ctx._emit(
+            TelemetryEvent(
+                technique_id=technique_id,
+                event_type=TelemetryType.TASK_START,
+                message=f"Starting technique: {technique_id}",
+                data={"provider": provider_name_for_event, "safe_mode": safe_mode},
+            )
+        )
 
         # 3. Execute
         try:
@@ -197,9 +199,7 @@ class TechniqueRunner:
             # scope and retry once. Retry mutates ctx.session in place so the
             # subsequent level-up path picks up the new token automatically.
             if auto_scope and on_prompt is not None:
-                retry_data = self._maybe_scope_retry(
-                    registered, ctx, cred, result_data, on_prompt
-                )
+                retry_data = self._maybe_scope_retry(registered, ctx, cred, result_data, on_prompt)
                 if retry_data is not None:
                     result_data = retry_data
 
@@ -219,8 +219,7 @@ class TechniqueRunner:
                     # We only support leveling up EntraTokenStore for now
                     if hasattr(session_to_save, "to_dict"):
                         self.workspace.update_credential_secret(
-                            cred.id,
-                            json.dumps({"token_store": session_to_save.to_dict()})
+                            cred.id, json.dumps({"token_store": session_to_save.to_dict()})
                         )
                     # Reset dirty flag after successful save
                     if hasattr(session_to_save, "_dirty"):
@@ -233,13 +232,15 @@ class TechniqueRunner:
             )
 
             # Emit End Event
-            ctx._emit(TelemetryEvent(
-                technique_id=technique_id,
-                event_type=TelemetryType.TASK_END,
-                level=TelemetryLevel.SUCCESS,
-                message=f"Technique {technique_id} completed successfully.",
-                data={"duration_ms": duration_ms, "api_calls": ctx.api_call_count}
-            ))
+            ctx._emit(
+                TelemetryEvent(
+                    technique_id=technique_id,
+                    event_type=TelemetryType.TASK_END,
+                    level=TelemetryLevel.SUCCESS,
+                    message=f"Technique {technique_id} completed successfully.",
+                    data={"duration_ms": duration_ms, "api_calls": ctx.api_call_count},
+                )
+            )
 
             # Derive TechniqueResult.status from the technique's own status
             # field so an inner {"status": "denied"} propagates to a red ✗
@@ -278,13 +279,15 @@ class TechniqueRunner:
             logger.debug("Technique %s failed: %s", technique_id, e)
 
             # Emit Error Event
-            ctx._emit(TelemetryEvent(
-                technique_id=technique_id,
-                event_type=TelemetryType.TASK_END,
-                level=TelemetryLevel.ERROR,
-                message=f"Technique {technique_id} failed: {friendly}",
-                data={"error": str(e), "duration_ms": duration_ms}
-            ))
+            ctx._emit(
+                TelemetryEvent(
+                    technique_id=technique_id,
+                    event_type=TelemetryType.TASK_END,
+                    level=TelemetryLevel.ERROR,
+                    message=f"Technique {technique_id} failed: {friendly}",
+                    data={"error": str(e), "duration_ms": duration_ms},
+                )
+            )
 
             return TechniqueResult(
                 technique_id=technique_id,
@@ -342,9 +345,11 @@ class TechniqueRunner:
             return None
 
         try:
-            answered_yes = bool(on_prompt(
-                f"    ↳ Try FOCI expansion for scope [bold]{required_scope}[/bold]? [Y/n]: "
-            ))
+            answered_yes = bool(
+                on_prompt(
+                    f"    ↳ Try FOCI expansion for scope [bold]{required_scope}[/bold]? [Y/n]: "
+                )
+            )
         except Exception as e:
             logger.debug("scope-retry prompt raised: %s", e)
             return None
@@ -365,12 +370,9 @@ class TechniqueRunner:
                     "FOCI RT is invalid (expired/revoked/CA-blocked). Re-authenticate "
                     "via `acquire entra device_code` / `interactive`."
                 ),
-                "no_rt": (
-                    "No FOCI RT in the active store — nothing to expand."
-                ),
+                "no_rt": ("No FOCI RT in the active store — nothing to expand."),
                 "unknown": (
-                    f"FOCI expansion returned no grant. Last AAD error: "
-                    f"{exchange.last_error}"
+                    f"FOCI expansion returned no grant. Last AAD error: {exchange.last_error}"
                 ),
             }
             note = note_map.get(exchange.status, exchange.last_error)
@@ -411,12 +413,17 @@ class TechniqueRunner:
         """
         registered = self._resolve_technique(technique_id)
         if registered is None:
-            return None, None, TechniqueResult(
-                technique_id=technique_id,
-                provider="unknown",
-                status="error",
-                error=f"Technique '{technique_id}' not found. Run 'techniques' to see available.",
-            ), None
+            return (
+                None,
+                None,
+                TechniqueResult(
+                    technique_id=technique_id,
+                    provider="unknown",
+                    status="error",
+                    error=f"Technique '{technique_id}' not found. Run 'techniques' to see available.",
+                ),
+                None,
+            )
 
         # Techniques with providers=[] are credential-free but will use an
         # active credential opportunistically if one is present — the technique
@@ -490,6 +497,7 @@ class TechniqueRunner:
 
         try:
             from quantum_mechanic.core.loot import loot_writer
+
             loot_path = loot_writer.write(
                 TechniqueResult(
                     technique_id=technique_id,
@@ -647,7 +655,9 @@ class TechniqueRunner:
                     status="error",
                     error=f"No secret data for credential #{cred_id}.",
                 )
-            logger.debug("Runner: Calling json.loads on secret_data (Length: %d)", len(secret_data_raw))
+            logger.debug(
+                "Runner: Calling json.loads on secret_data (Length: %d)", len(secret_data_raw)
+            )
             secret_data = json.loads(secret_data_raw)
             logger.debug("Runner: Calling provider.authenticate")
             session = provider.authenticate(secret_data)
@@ -658,6 +668,7 @@ class TechniqueRunner:
                 from quantum_mechanic.providers.entra.arm_credential import (
                     EntraTokenCredential,
                 )
+
                 session = EntraTokenCredential(session)
 
             return session, None
@@ -694,6 +705,7 @@ class TechniqueRunner:
         # Normalise result to a plain dict once for all evidence paths.
         if hasattr(result_data, "__dataclass_fields__"):
             from dataclasses import asdict
+
             dump_data: dict = asdict(result_data)
         elif isinstance(result_data, dict):
             dump_data = result_data
@@ -781,24 +793,16 @@ class TechniqueRunner:
             sgs = inst.get("security_group_ids", [])
             profile_arn = inst.get("instance_profile_arn") or inst.get("identity")
             profile_name = (
-                profile_arn.split("/")[-1]
-                if profile_arn and "/" in profile_arn
-                else profile_arn
+                profile_arn.split("/")[-1] if profile_arn and "/" in profile_arn else profile_arn
             )
             self.workspace.upsert_compute_instance(
                 provider=provider,
                 instance_id=(
-                    inst.get("instance_id")
-                    or inst.get("id")
-                    or inst.get("vm_id", "unknown")
+                    inst.get("instance_id") or inst.get("id") or inst.get("vm_id", "unknown")
                 ),
                 name=inst.get("name") or inst.get("display_name"),
                 state=inst.get("state") or inst.get("lifecycle_state"),
-                instance_type=(
-                    inst.get("type")
-                    or inst.get("machine_type")
-                    or inst.get("shape")
-                ),
+                instance_type=(inst.get("type") or inst.get("machine_type") or inst.get("shape")),
                 private_ip=inst.get("private_ip"),
                 public_ip=inst.get("public_ip"),
                 subnet_id=inst.get("subnet_id"),
@@ -840,11 +844,16 @@ class TechniqueRunner:
         import json as _json
 
         _HIGH_SEVERITY_FLAGS = {
-            "AdministratorAccess", "IAMFullAccess",
-            "PowerUserAccess", "rce:confirmed", "rce:root_context",
-            "role:Owner", "role:Contributor",
+            "AdministratorAccess",
+            "IAMFullAccess",
+            "PowerUserAccess",
+            "rce:confirmed",
+            "rce:root_context",
+            "role:Owner",
+            "role:Contributor",
             "role:User Access Administrator",
-            "role:roles/owner", "role:roles/editor",
+            "role:roles/owner",
+            "role:roles/editor",
         }
 
         for flag in agent_summary.risk_flags:
@@ -858,12 +867,12 @@ class TechniqueRunner:
             flag_value = flag.split(":", 1)[-1] if ":" in flag else flag
             flag_key = flag.split(":", 1)[0] if ":" in flag else flag
             human_title: str = {
-                "policy":           f"Privileged Policy: {flag_value}",
-                "assumed":          f"IAM Role Assumed: {flag_value}",
-                "role":             f"Privileged Role: {flag_value}",
-                "group":            f"Privileged Group: {flag_value}",
+                "policy": f"Privileged Policy: {flag_value}",
+                "assumed": f"IAM Role Assumed: {flag_value}",
+                "role": f"Privileged Role: {flag_value}",
+                "group": f"Privileged Group: {flag_value}",
                 "role_chain_depth": f"Role Chain Depth: {flag_value} hops",
-                "rce":              f"Remote Code Execution: {flag_value.replace('_', ' ')}",
+                "rce": f"Remote Code Execution: {flag_value.replace('_', ' ')}",
             }.get(flag_key, f"{flag_key.replace('_', ' ').title()}: {flag_value}")
 
             self.workspace.add_finding(

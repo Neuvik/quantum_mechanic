@@ -47,9 +47,9 @@ from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore,
 logger = logging.getLogger(__name__)
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
-_ME            = f"{_GRAPH_BASE}/me"
-_ME_MEMBER_OF  = f"{_GRAPH_BASE}/me/memberOf?$top=100"
-_ME_DIR_ROLES  = (
+_ME = f"{_GRAPH_BASE}/me"
+_ME_MEMBER_OF = f"{_GRAPH_BASE}/me/memberOf?$top=100"
+_ME_DIR_ROLES = (
     f"{_GRAPH_BASE}/me/transitiveMemberOf/microsoft.graph.directoryRole"
     "?$select=id,displayName,roleTemplateId"
 )
@@ -59,6 +59,7 @@ _ME_OWNED = f"{_GRAPH_BASE}/me/ownedObjects?$select=id,displayName,appId,@odata.
 # ----------------------------------------------------------------
 # Formatter
 # ----------------------------------------------------------------
+
 
 def _format_entra_whoami(result: Any) -> None:
     from rich.panel import Panel
@@ -89,7 +90,11 @@ def _format_entra_whoami(result: Any) -> None:
     lines.append("")
     lines.append("[bold]Token Posture:[/bold]")
     mfa = posture.get("mfa")
-    mfa_str = "[green]verified[/green]" if mfa else ("[red]not in token[/red]" if mfa is False else "[dim]unknown[/dim]")
+    mfa_str = (
+        "[green]verified[/green]"
+        if mfa
+        else ("[red]not in token[/red]" if mfa is False else "[dim]unknown[/dim]")
+    )
     device = posture.get("device_claims")
     device_str = "[green]yes[/green]" if device else "[dim]no[/dim]"
     foci = posture.get("foci_token")
@@ -98,14 +103,23 @@ def _format_entra_whoami(result: Any) -> None:
     lines.append(f"  Device claims:  {device_str}")
     lines.append(f"  FOCI token:     {foci_str}")
 
-    console.print(Panel("\n".join(lines), title="[bold]Entra ID Identity[/bold]", border_style="green", expand=False))
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title="[bold]Entra ID Identity[/bold]",
+            border_style="green",
+            expand=False,
+        )
+    )
 
     # ── Directory Roles ──────────────────────────────────────────
     roles = data.get("directory_roles", [])
     if roles:
         console.print("\n  [bold red]⚠  Directory Roles[/bold red]")
         for r in roles:
-            console.print(f"    [bold]{r.get('displayName', '?')}[/bold]  [dim]({r.get('id', '')})[/dim]")
+            console.print(
+                f"    [bold]{r.get('displayName', '?')}[/bold]  [dim]({r.get('id', '')})[/dim]"
+            )
     else:
         console.print("\n  [dim]No directory roles assigned.[/dim]")
 
@@ -128,7 +142,9 @@ def _format_entra_whoami(result: Any) -> None:
     # ── Owned objects (escalation paths) ────────────────────────
     owned = data.get("owned_objects", [])
     if owned:
-        own_tbl = Table(title=f"Owned Objects — Escalation Paths ({len(owned)})", box=None, padding=(0, 2))
+        own_tbl = Table(
+            title=f"Owned Objects — Escalation Paths ({len(owned)})", box=None, padding=(0, 2)
+        )
         own_tbl.add_column("Type", style="dim")
         own_tbl.add_column("Display Name", style="bold green")
         own_tbl.add_column("App ID / ID", style="cyan")
@@ -136,12 +152,15 @@ def _format_entra_whoami(result: Any) -> None:
             otype = o.get("@odata.type", "").split(".")[-1]
             own_tbl.add_row(otype, o.get("displayName", "—"), o.get("appId") or o.get("id", ""))
         console.print(own_tbl)
-        console.print("  [dim]Tip: run escalation/entra_app_creds on an owned Application to escalate.[/dim]")
+        console.print(
+            "  [dim]Tip: run escalation/entra_app_creds on an owned Application to escalate.[/dim]"
+        )
 
 
 # ----------------------------------------------------------------
 # Technique
 # ----------------------------------------------------------------
+
 
 @technique(
     technique_id="discovery/entra_whoami",
@@ -209,11 +228,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     # it's always the real, authoritative tenant GUID. Prefer it over
     # store.tenant_id, which can still hold the "common" placeholder from
     # an acquisition that didn't pin a specific tenant.
-    tenant_id = (
-        claims.get("tid", "")
-        or me.get("tenantId")
-        or store.tenant_id
-    )
+    tenant_id = claims.get("tid", "") or me.get("tenantId") or store.tenant_id
     if tenant_id and tenant_id != store.tenant_id:
         store.tenant_id = tenant_id
 

@@ -170,5 +170,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                 "command": "run collection/entra_export_bloodhound",
                 "reason": "Export collected groups into BloodHound OpenGraph.",
             },
-        ] if groups else [],
+        ]
+        if groups
+        else [],
     }

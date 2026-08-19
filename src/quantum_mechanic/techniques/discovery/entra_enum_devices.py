@@ -108,7 +108,8 @@ def _format_entra_enum_devices(result: Any) -> None:
     for d in devices[:100]:
         compliant = d.get("isCompliant")
         compliant_str = (
-            "[green]✓[/green]" if compliant
+            "[green]✓[/green]"
+            if compliant
             else ("[red]✗[/red]" if compliant is False else "[dim]?[/dim]")
         )
         managed = d.get("isManaged")
@@ -129,9 +130,7 @@ def _format_entra_enum_devices(result: Any) -> None:
     providers=["entra"],
     severity="info",
     safe=True,
-    description=(
-        "Enumerate Entra ID registered and joined devices, including compliance status."
-    ),
+    description=("Enumerate Entra ID registered and joined devices, including compliance status."),
     formatter=_format_entra_enum_devices,
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,

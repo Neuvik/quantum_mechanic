@@ -29,25 +29,27 @@ from typing import Any
 
 class ParameterType(enum.StrEnum):
     """Supported data types for technique parameters."""
-    STRING  = "string"
+
+    STRING = "string"
     INTEGER = "integer"
     BOOLEAN = "boolean"
-    LIST    = "list"
+    LIST = "list"
 
     @property
     def label(self) -> str:
         """Operational label for display."""
         return {
-            ParameterType.STRING:  "Text",
+            ParameterType.STRING: "Text",
             ParameterType.INTEGER: "Number",
             ParameterType.BOOLEAN: "Toggle",
-            ParameterType.LIST:    "List",
+            ParameterType.LIST: "List",
         }.get(self, "Unknown")
 
 
 @dataclass(frozen=True)
 class Parameter:
     """Definition of a single technique parameter."""
+
     name: str
     description: str
     required: bool = False
@@ -78,6 +80,7 @@ class TechniqueMetadata:
     loot_schema: list[tuple[str, str | None, str | None]] | None = None  # Declarative table schema
     loot_items_key: str | None = None  # Key in result data containing the list of items
     parameters: list[Parameter] = field(default_factory=list)
+
 
 def technique(
     *,
@@ -125,9 +128,7 @@ def technique(
     # to the same canonical display value ('Discovery',
     # 'Privilege Escalation', etc.).
     # ----------------------------------------------------------------
-    normalized_tactic = " ".join(
-        word.capitalize() for word in tactic.replace("_", " ").split()
-    )
+    normalized_tactic = " ".join(word.capitalize() for word in tactic.replace("_", " ").split())
 
     metadata = TechniqueMetadata(
         id=technique_id,

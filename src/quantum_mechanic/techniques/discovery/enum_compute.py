@@ -48,17 +48,17 @@ from quantum_mechanic.core.technique import Parameter, technique
 # ----------------------------------------------------------------
 # Loot schema — Declarative table mapping
 # ----------------------------------------------------------------
-LOOT_ITEMS_KEY = 'instances'
+LOOT_ITEMS_KEY = "instances"
 LOOT_SCHEMA = [
-    ('instance_id', 'Instance ID', 'bold cyan'),
-    ('state',       'State',       'dim'),
-    ('os_type',     'OS',          'dim'),
-    ('type',        'Type',        'dim'),
-    ('private_ip',  'Private IP',  'white'),
-    ('public_ip',   'Public IP',   'white'),
-    ('identity',    'Identity',    'yellow'),
-    ('region',      'Region',      'dim'),
-    ('vm_id',       'Resource ID', 'dim'),
+    ("instance_id", "Instance ID", "bold cyan"),
+    ("state", "State", "dim"),
+    ("os_type", "OS", "dim"),
+    ("type", "Type", "dim"),
+    ("private_ip", "Private IP", "white"),
+    ("public_ip", "Public IP", "white"),
+    ("identity", "Identity", "yellow"),
+    ("region", "Region", "dim"),
+    ("vm_id", "Resource ID", "dim"),
 ]
 
 logger = logging.getLogger(__name__)
@@ -66,15 +66,13 @@ logger = logging.getLogger(__name__)
 
 @technique(
     technique_id="discovery/enum_compute",
-    tactic='discovery',
+    tactic="discovery",
     mitre_id="T1580",
     providers=["aws", "azure", "gcp", "oci"],
     severity="info",
     safe=True,
     description="List all compute instances and optionally retrieve their assigned metadata.",
-    parameters=[
-        Parameter("project", "Target GCP project ID (override default)", required=False)
-    ],
+    parameters=[Parameter("project", "Target GCP project ID (override default)", required=False)],
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,
 )
@@ -106,6 +104,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 # AWS — ec2:DescribeInstances
 # ================================================================
 
+
 def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
     """List EC2 instances and retrieve their assigned metadata.
 
@@ -135,25 +134,28 @@ def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
                     for reservation in page.get("Reservations", []):
                         for inst in reservation.get("Instances", []):
                             profile = inst.get("IamInstanceProfile")
-                            instances.append({
-                                "instance_id": inst.get("InstanceId"),
-                                "vm_id": inst.get("InstanceId"),
-                                "state": inst.get("State", {}).get("Name"),
-                                "type": inst.get("InstanceType"),
-                                "key_name": inst.get("KeyName"),
-                                "subnet_id": inst.get("SubnetId"),
-                                "security_group_ids": [
-                                    sg["GroupId"]
-                                    for sg in inst.get("SecurityGroups", [])
-                                ],
-                                "private_ip": inst.get("PrivateIpAddress"),
-                                "public_ip": inst.get("PublicIpAddress"),
-                                "identity": profile.get("Arn").split("/")[-1] if profile and profile.get("Arn") else None,
-                                "instance_profile_arn": profile.get("Arn") if profile else None,
-                                "instance_profile_id": profile.get("Id") if profile else None,
-                                "image_id": inst.get("ImageId"),
-                                "region": region,
-                            })
+                            instances.append(
+                                {
+                                    "instance_id": inst.get("InstanceId"),
+                                    "vm_id": inst.get("InstanceId"),
+                                    "state": inst.get("State", {}).get("Name"),
+                                    "type": inst.get("InstanceType"),
+                                    "key_name": inst.get("KeyName"),
+                                    "subnet_id": inst.get("SubnetId"),
+                                    "security_group_ids": [
+                                        sg["GroupId"] for sg in inst.get("SecurityGroups", [])
+                                    ],
+                                    "private_ip": inst.get("PrivateIpAddress"),
+                                    "public_ip": inst.get("PublicIpAddress"),
+                                    "identity": profile.get("Arn").split("/")[-1]
+                                    if profile and profile.get("Arn")
+                                    else None,
+                                    "instance_profile_arn": profile.get("Arn") if profile else None,
+                                    "instance_profile_id": profile.get("Id") if profile else None,
+                                    "image_id": inst.get("ImageId"),
+                                    "region": region,
+                                }
+                            )
             except ClientError as e:
                 logger.debug("Skipping AWS region %s for enum_compute: %s", region, e)
 
@@ -171,6 +173,7 @@ def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
 # ================================================================
 # Azure — VirtualMachines.list_all()
 # ================================================================
+
 
 def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
     """List Azure VMs and retrieve their assigned metadata.
@@ -191,7 +194,9 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
     try:
         cred = ctx.session
 
-        ctx.info("Azure: enumerating VMs — this may take a minute (one API call per VM for power state).")
+        ctx.info(
+            "Azure: enumerating VMs — this may take a minute (one API call per VM for power state)."
+        )
 
         sub_client = SubscriptionClient(cred)
         subscriptions = [s.subscription_id for s in sub_client.subscriptions.list()]
@@ -215,8 +220,10 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
                     }
 
                 id_type = (
-                    identity.type.value if hasattr(identity.type, "value") else str(identity.type)
-                ) if identity and getattr(identity, "type", None) else "None"
+                    (identity.type.value if hasattr(identity.type, "value") else str(identity.type))
+                    if identity and getattr(identity, "type", None)
+                    else "None"
+                )
 
                 identity_parts = [f"Type: {id_type}"]
                 if user_assigned:
@@ -235,7 +242,7 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
                             nic_rg = nic_parts[nic_parts.index("resourceGroups") + 1]
                             nic_name = nic_parts[-1]
                             nic = network.network_interfaces.get(nic_rg, nic_name)
-                            for ip_cfg in (nic.ip_configurations or []):
+                            for ip_cfg in nic.ip_configurations or []:
                                 if not private_ip:
                                     private_ip = ip_cfg.private_ip_address
                                 if not public_ip and ip_cfg.public_ip_address:
@@ -256,33 +263,37 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
                     vm_parts = (vm.id or "").lstrip("/").split("/")
                     vm_rg = vm_parts[vm_parts.index("resourceGroups") + 1]
                     iv = compute.virtual_machines.instance_view(vm_rg, vm.name)
-                    for status in (iv.statuses or []):
+                    for status in iv.statuses or []:
                         if status.code and status.code.startswith("PowerState/"):
                             power_state = status.code.split("/", 1)[1]
                             break
                 except Exception:
                     pass
 
-                os_disk = getattr(vm.storage_profile, "os_disk", None) if vm.storage_profile else None
+                os_disk = (
+                    getattr(vm.storage_profile, "os_disk", None) if vm.storage_profile else None
+                )
                 raw_os = getattr(os_disk, "os_type", None)
                 os_type = str(raw_os.value if hasattr(raw_os, "value") else raw_os or "unknown")
 
-                instances.append({
-                    "instance_id": vm.name,
-                    "vm_id": vm.id,
-                    "state": power_state,
-                    "os_type": os_type,
-                    "type": vm.hardware_profile.vm_size if vm.hardware_profile else "unknown",
-                    "location": vm.location,
-                    "region": vm.location,
-                    "private_ip": private_ip,
-                    "public_ip": public_ip,
-                    "subscription_id": sub_id,
-                    "identity": " | ".join(identity_parts),
-                    "identity_type": id_type,
-                    "system_assigned_principal_id": identity.principal_id if identity else None,
-                    "user_assigned_identities": user_assigned,
-                })
+                instances.append(
+                    {
+                        "instance_id": vm.name,
+                        "vm_id": vm.id,
+                        "state": power_state,
+                        "os_type": os_type,
+                        "type": vm.hardware_profile.vm_size if vm.hardware_profile else "unknown",
+                        "location": vm.location,
+                        "region": vm.location,
+                        "private_ip": private_ip,
+                        "public_ip": public_ip,
+                        "subscription_id": sub_id,
+                        "identity": " | ".join(identity_parts),
+                        "identity_type": id_type,
+                        "system_assigned_principal_id": identity.principal_id if identity else None,
+                        "user_assigned_identities": user_assigned,
+                    }
+                )
 
                 # Persist to workspace AssetStore so cross-technique queries
                 # ("which VMs have MIs with privileged Graph perms?") work
@@ -307,7 +318,9 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
                 except Exception as _persist_err:
                     logger.warning(
                         "Workspace persistence for VM %s failed: %s (%s)",
-                        vm.name, _persist_err, type(_persist_err).__name__,
+                        vm.name,
+                        _persist_err,
+                        type(_persist_err).__name__,
                     )
 
         return {
@@ -324,6 +337,7 @@ def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
 # ================================================================
 # GCP — compute.instances.aggregatedList()
 # ================================================================
+
 
 def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
     """List GCP Compute instances and retrieve their assigned metadata.
@@ -342,7 +356,10 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
         project = ctx.get_param("project") or whoami.account_id
 
         if not project:
-            return {"error": "Could not determine GCP project ID from credentials.", "instances": []}
+            return {
+                "error": "Could not determine GCP project ID from credentials.",
+                "instances": [],
+            }
 
         compute = build("compute", "v1", credentials=credentials)
         result = compute.instances().aggregatedList(project=project).execute()
@@ -358,28 +375,34 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
                 for sa in service_accounts:
                     email = sa.get("email", "")
                     is_default = "developer.gserviceaccount.com" in email
-                    annotated_sas.append({
-                        "email": email,
-                        "scopes": sa.get("scopes", []),
-                        "is_default_compute_sa": is_default,
-                        "risk_note": (
-                            "Default Compute SA — often has project Editor rights."
-                            if is_default
-                            else "Custom SA — enumerate its IAM roles."
-                        ),
-                    })
+                    annotated_sas.append(
+                        {
+                            "email": email,
+                            "scopes": sa.get("scopes", []),
+                            "is_default_compute_sa": is_default,
+                            "risk_note": (
+                                "Default Compute SA — often has project Editor rights."
+                                if is_default
+                                else "Custom SA — enumerate its IAM roles."
+                            ),
+                        }
+                    )
 
-                instances.append({
-                    "instance_id": inst.get("name"),
-                    "vm_id": inst.get("name"),
-                    "name": inst.get("name"),
-                    "zone": inst.get("zone", "").split("/")[-1],
-                    "region": inst.get("zone", "").split("/")[-1],
-                    "state": inst.get("status"),
-                    "type": inst.get("machineType", "").split("/")[-1],
-                    "identity": ", ".join([sa["email"].split("@")[0] for sa in annotated_sas]) if annotated_sas else "None",
-                    "service_accounts": annotated_sas,
-                })
+                instances.append(
+                    {
+                        "instance_id": inst.get("name"),
+                        "vm_id": inst.get("name"),
+                        "name": inst.get("name"),
+                        "zone": inst.get("zone", "").split("/")[-1],
+                        "region": inst.get("zone", "").split("/")[-1],
+                        "state": inst.get("status"),
+                        "type": inst.get("machineType", "").split("/")[-1],
+                        "identity": ", ".join([sa["email"].split("@")[0] for sa in annotated_sas])
+                        if annotated_sas
+                        else "None",
+                        "service_accounts": annotated_sas,
+                    }
+                )
 
         return {
             "provider": "gcp",
@@ -395,6 +418,7 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
 # ================================================================
 # OCI — ComputeClient.list_instances()
 # ================================================================
+
 
 def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
     """List OCI Compute instances.
@@ -441,17 +465,19 @@ def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
                 for inst in compute_client.list_instances(compartment_id=cid).data:
                     if inst.lifecycle_state in ("TERMINATED", "TERMINATING"):
                         continue
-                    instances.append({
-                        "instance_id": inst.display_name,
-                        "vm_id": inst.id,
-                        "ocid": inst.id,
-                        "display_name": inst.display_name,
-                        "compartment_id": inst.compartment_id,
-                        "state": inst.lifecycle_state,
-                        "type": inst.shape,
-                        "identity": "Instance Principal (Dynamic Group Coverage)",
-                        "region": config.get("region"),
-                    })
+                    instances.append(
+                        {
+                            "instance_id": inst.display_name,
+                            "vm_id": inst.id,
+                            "ocid": inst.id,
+                            "display_name": inst.display_name,
+                            "compartment_id": inst.compartment_id,
+                            "state": inst.lifecycle_state,
+                            "type": inst.shape,
+                            "identity": "Instance Principal (Dynamic Group Coverage)",
+                            "region": config.get("region"),
+                        }
+                    )
             except Exception as e:
                 logger.debug("Skipping compartment %s (access denied or error): %s", cid, e)
 

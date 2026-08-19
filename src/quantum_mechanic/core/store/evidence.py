@@ -54,9 +54,7 @@ class EvidenceStore:
             return self._save_orm(technique_id, output_json, credential_id)
         return self._save_sqlite(technique_id, output_json, credential_id)
 
-    def _save_sqlite(
-        self, technique_id: str, output_json: str, credential_id: int | None
-    ) -> int:
+    def _save_sqlite(self, technique_id: str, output_json: str, credential_id: int | None) -> int:
         now = datetime.now(UTC).isoformat()
         row = self._db.fetchone(
             """
@@ -70,9 +68,7 @@ class EvidenceStore:
         self._db.commit()
         return row[0] if row else 0
 
-    def _save_orm(
-        self, technique_id: str, output_json: str, credential_id: int | None
-    ) -> int:
+    def _save_orm(self, technique_id: str, output_json: str, credential_id: int | None) -> int:
         from quantum_mechanic.core.orm.tables import EvidenceRow
 
         now = datetime.now(UTC).isoformat()
@@ -113,10 +109,14 @@ class EvidenceStore:
             from sqlalchemy import select
 
             from quantum_mechanic.core.orm.tables import EvidenceRow
+
             with self._SessionLocal() as session:
-                stmt = select(EvidenceRow).where(
-                    EvidenceRow.credential_id == credential_id
-                ).order_by(EvidenceRow.id.desc()).limit(limit)
+                stmt = (
+                    select(EvidenceRow)
+                    .where(EvidenceRow.credential_id == credential_id)
+                    .order_by(EvidenceRow.id.desc())
+                    .limit(limit)
+                )
                 rows = session.scalars(stmt).all()
                 return [
                     {
@@ -184,16 +184,26 @@ class EvidenceStore:
         """
         if self._use_orm:
             return self._log_api_orm(
-                provider=provider, action=action, credential_id=credential_id,
-                service=service, request_params=request_params,
-                response_status=response_status, response_summary=response_summary,
-                technique_id=technique_id, duration_ms=duration_ms,
+                provider=provider,
+                action=action,
+                credential_id=credential_id,
+                service=service,
+                request_params=request_params,
+                response_status=response_status,
+                response_summary=response_summary,
+                technique_id=technique_id,
+                duration_ms=duration_ms,
             )
         return self._log_api_sqlite(
-            provider=provider, action=action, credential_id=credential_id,
-            service=service, request_params=request_params,
-            response_status=response_status, response_summary=response_summary,
-            technique_id=technique_id, duration_ms=duration_ms,
+            provider=provider,
+            action=action,
+            credential_id=credential_id,
+            service=service,
+            request_params=request_params,
+            response_status=response_status,
+            response_summary=response_summary,
+            technique_id=technique_id,
+            duration_ms=duration_ms,
         )
 
     def _log_api_sqlite(self, **kwargs) -> int:
@@ -208,10 +218,15 @@ class EvidenceStore:
             RETURNING id
             """,
             (
-                now, kwargs.get("credential_id"), kwargs["provider"],
-                kwargs.get("service"), kwargs["action"],
-                kwargs.get("request_params"), kwargs.get("response_status"),
-                kwargs.get("response_summary"), kwargs.get("technique_id"),
+                now,
+                kwargs.get("credential_id"),
+                kwargs["provider"],
+                kwargs.get("service"),
+                kwargs["action"],
+                kwargs.get("request_params"),
+                kwargs.get("response_status"),
+                kwargs.get("response_summary"),
+                kwargs.get("technique_id"),
                 kwargs.get("duration_ms"),
             ),
         )

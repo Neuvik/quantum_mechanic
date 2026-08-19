@@ -262,6 +262,7 @@ class LocalTransport(Transport):
     ) -> int:
         """Add a credential to the local workspace."""
         from datetime import datetime
+
         expires = datetime.fromisoformat(expires_at) if expires_at else None
         return self._workspace.add_credential(
             provider=provider,
@@ -296,6 +297,7 @@ class LocalTransport(Transport):
     def list_agents(self) -> list[dict]:
         """List all agents from the local workspace."""
         from dataclasses import asdict
+
         agents = []
         for agent_id in self._workspace.list_agent_ids():
             a = self._workspace.get_agent(agent_id)
@@ -398,7 +400,9 @@ class RemoteTransport(Transport):
         Network errors are caught and returned as status='error'.
         """
         if on_event:
-            logger.warning("Real-time telemetry streaming not yet supported over RemoteTransport (HTTP).")
+            logger.warning(
+                "Real-time telemetry streaming not yet supported over RemoteTransport (HTTP)."
+            )
 
         try:
             with self._make_client() as client:
@@ -615,7 +619,7 @@ class RemoteTransport(Transport):
                 key_file.write(tok.client_key_pem.encode())
 
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            ctx.load_verify_locations(ca_path)        # Pin to engagement CA
+            ctx.load_verify_locations(ca_path)  # Pin to engagement CA
             ctx.load_cert_chain(cert_path, key_path)  # Present operator client cert
             ctx.check_hostname = False  # CA pinning is our check — hostname is flexible
             ctx.verify_mode = ssl.CERT_REQUIRED
@@ -624,6 +628,7 @@ class RemoteTransport(Transport):
             for p in (ca_path, cert_path, key_path):
                 try:
                     import os
+
                     if os.path.exists(p):
                         os.unlink(p)
                 except Exception:

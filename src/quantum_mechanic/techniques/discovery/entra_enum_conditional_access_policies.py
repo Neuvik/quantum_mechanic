@@ -85,40 +85,41 @@ WELL_KNOWN_APPS = {
 # ----------------------------------------------------------------
 LOOT_ITEMS_KEY = "policies"
 LOOT_SCHEMA = [
-    ("display_name",       "Policy Name",     "bold cyan"),
-    ("state",              "State",           "bold white"),
-    ("grant_operator",     "Grant Op",        "dim"),
-    ("grant_controls",     "Access Controls", "bold yellow"),
-    ("included_users",     "Incl Users",      "dim"),
-    ("excluded_users",     "Excl Users",      "bold red"),
-    ("include_guest_types", "Incl Guests",    "dim"),
-    ("exclude_guest_types", "Excl Guests",    "bold red"),
-    ("included_groups",    "Incl Groups",     "dim"),
-    ("excluded_groups",    "Excl Groups",     "bold red"),
-    ("included_roles",     "Incl Roles",      "dim"),
-    ("excluded_roles",     "Excl Roles",      "bold red"),
-    ("included_apps",      "Incl Apps",       "dim"),
-    ("excluded_apps",      "Excl Apps",       "bold red"),
-    ("include_user_actions", "Incl Actions",  "dim"),
-    ("include_auth_context", "Incl AuthCtx",  "dim"),
-    ("included_platforms", "Incl Platforms",  "dim"),
-    ("exclude_platforms",  "Excl Platforms",  "bold red"),
-    ("included_locations", "Incl Locations",  "dim"),
-    ("excluded_locations", "Excl Locations",  "bold red"),
-    ("client_app_types",   "Client Apps",     "dim"),
-    ("sign_in_risk_levels", "Sign-in Risk",   "dim"),
-    ("user_risk_levels",   "User Risk",       "dim"),
-    ("sp_risk_levels",     "SP Risk",         "dim"),
-    ("insider_risk_levels", "Insider Risk",   "dim"),
-    ("auth_flows",         "Auth Flows",      "dim"),
+    ("display_name", "Policy Name", "bold cyan"),
+    ("state", "State", "bold white"),
+    ("grant_operator", "Grant Op", "dim"),
+    ("grant_controls", "Access Controls", "bold yellow"),
+    ("included_users", "Incl Users", "dim"),
+    ("excluded_users", "Excl Users", "bold red"),
+    ("include_guest_types", "Incl Guests", "dim"),
+    ("exclude_guest_types", "Excl Guests", "bold red"),
+    ("included_groups", "Incl Groups", "dim"),
+    ("excluded_groups", "Excl Groups", "bold red"),
+    ("included_roles", "Incl Roles", "dim"),
+    ("excluded_roles", "Excl Roles", "bold red"),
+    ("included_apps", "Incl Apps", "dim"),
+    ("excluded_apps", "Excl Apps", "bold red"),
+    ("include_user_actions", "Incl Actions", "dim"),
+    ("include_auth_context", "Incl AuthCtx", "dim"),
+    ("included_platforms", "Incl Platforms", "dim"),
+    ("exclude_platforms", "Excl Platforms", "bold red"),
+    ("included_locations", "Incl Locations", "dim"),
+    ("excluded_locations", "Excl Locations", "bold red"),
+    ("client_app_types", "Client Apps", "dim"),
+    ("sign_in_risk_levels", "Sign-in Risk", "dim"),
+    ("user_risk_levels", "User Risk", "dim"),
+    ("sp_risk_levels", "SP Risk", "dim"),
+    ("insider_risk_levels", "Insider Risk", "dim"),
+    ("auth_flows", "Auth Flows", "dim"),
     ("device_filter_mode", "Device Filter Mode", "dim"),
     ("device_filter_rule", "Device Filter Rule", "dim"),
-    ("session_sign_in_freq", "Session SIF",   "dim"),
+    ("session_sign_in_freq", "Session SIF", "dim"),
     ("session_persistent_browser", "Session PB", "dim"),
     ("session_token_protection", "Session TP", "dim"),
-    ("session_casb",       "Session CASB",    "dim"),
-    ("id",                 "Policy ID",       "dim"),
+    ("session_casb", "Session CASB", "dim"),
+    ("id", "Policy ID", "dim"),
 ]
+
 
 def get_list(val: Any) -> list[str]:
     """Coerce a value (list or comma-separated string) into a list of strings.
@@ -144,6 +145,7 @@ def get_list_from_policy(policy: dict, key: str) -> list[str]:
     if isinstance(policy.get(struct_key), list):
         return [str(x) for x in policy[struct_key] if x]
     return get_list(policy.get(key))
+
 
 def format_conditional_access_policies_result(result: Any) -> None:
     """Formatter for Entra CA Policy enumeration results."""
@@ -240,7 +242,7 @@ def format_conditional_access_policies_result(result: Any) -> None:
             f"[{state_style}]{p.get('state', 'unknown')}[/{state_style}]",
             controls,
             incls_str,
-            excls_str
+            excls_str,
         )
 
     console.print(tbl)
@@ -253,43 +255,62 @@ def format_conditional_access_policies_result(result: Any) -> None:
         controls = ", ".join(get_list(p.get("grant_controls"))) or "None"
 
         if state == "disabled":
-            bypass_tips.append(f"  • [bold yellow]Disabled Policy:[/bold yellow] Policy [cyan]'{name}'[/cyan] is disabled. Controls ({controls}) are not active.")
+            bypass_tips.append(
+                f"  • [bold yellow]Disabled Policy:[/bold yellow] Policy [cyan]'{name}'[/cyan] is disabled. Controls ({controls}) are not active."
+            )
         elif "report" in state.lower():
-            bypass_tips.append(f"  • [bold yellow]Report-Only Mode:[/bold yellow] Policy [cyan]'{name}'[/cyan] is in report-only mode. Controls ({controls}) are logged but not actively enforced.")
+            bypass_tips.append(
+                f"  • [bold yellow]Report-Only Mode:[/bold yellow] Policy [cyan]'{name}'[/cyan] is in report-only mode. Controls ({controls}) are logged but not actively enforced."
+            )
 
         ex_users = get_list(p.get("excluded_users"))
         for u in ex_users:
-            bypass_tips.append(f"  • [bold red]Excluded User:[/bold red] User [white]'{u}'[/white] is excluded from [cyan]'{name}'[/cyan]. Authenticating as this user bypasses controls ({controls}).")
+            bypass_tips.append(
+                f"  • [bold red]Excluded User:[/bold red] User [white]'{u}'[/white] is excluded from [cyan]'{name}'[/cyan]. Authenticating as this user bypasses controls ({controls})."
+            )
 
         ex_groups = get_list(p.get("excluded_groups"))
         for g in ex_groups:
-            bypass_tips.append(f"  • [bold red]Excluded Group:[/bold red] Group [white]'{g}'[/white] is excluded from [cyan]'{name}'[/cyan]. Members bypass controls ({controls}). Target group members or add compromised users to this group.")
+            bypass_tips.append(
+                f"  • [bold red]Excluded Group:[/bold red] Group [white]'{g}'[/white] is excluded from [cyan]'{name}'[/cyan]. Members bypass controls ({controls}). Target group members or add compromised users to this group."
+            )
 
         ex_roles = get_list(p.get("excluded_roles"))
         for r in ex_roles:
-            bypass_tips.append(f"  • [bold red]Excluded Role:[/bold red] Role [white]'{r}'[/white] is excluded from [cyan]'{name}'[/cyan]. Members bypass controls ({controls}).")
+            bypass_tips.append(
+                f"  • [bold red]Excluded Role:[/bold red] Role [white]'{r}'[/white] is excluded from [cyan]'{name}'[/cyan]. Members bypass controls ({controls})."
+            )
 
         ex_apps = get_list(p.get("excluded_apps"))
         for a in ex_apps:
-            bypass_tips.append(f"  • [bold red]Excluded App:[/bold red] Application [white]'{a}'[/white] is excluded from [cyan]'{name}'[/cyan]. Access via this app bypasses controls ({controls}).")
+            bypass_tips.append(
+                f"  • [bold red]Excluded App:[/bold red] Application [white]'{a}'[/white] is excluded from [cyan]'{name}'[/cyan]. Access via this app bypasses controls ({controls})."
+            )
 
         ex_platforms = get_list(p.get("exclude_platforms"))
         for pl in ex_platforms:
-            bypass_tips.append(f"  • [bold red]Excluded Platform:[/bold red] Platform [white]'{pl}'[/white] is excluded from [cyan]'{name}'[/cyan]. Spoofing User-Agent bypasses controls ({controls}).")
+            bypass_tips.append(
+                f"  • [bold red]Excluded Platform:[/bold red] Platform [white]'{pl}'[/white] is excluded from [cyan]'{name}'[/cyan]. Spoofing User-Agent bypasses controls ({controls})."
+            )
 
         ex_locations = get_list_from_policy(p, "excluded_locations")
         for loc in ex_locations:
-            bypass_tips.append(f"  • [bold red]Excluded Location:[/bold red] Location [white]'{loc}'[/white] is excluded from [cyan]'{name}'[/cyan]. Access from this network bypasses controls ({controls}).")
+            bypass_tips.append(
+                f"  • [bold red]Excluded Location:[/bold red] Location [white]'{loc}'[/white] is excluded from [cyan]'{name}'[/cyan]. Access from this network bypasses controls ({controls})."
+            )
 
         client_apps = [x.lower() for x in get_list(p.get("client_app_types"))]
         if "exchangeactivesync" in client_apps or "other" in client_apps:
             legacy = [c for c in client_apps if c in ["exchangeactivesync", "other"]]
-            bypass_tips.append(f"  • [bold yellow]Legacy Auth Allowed:[/bold yellow] Legacy authentication ({', '.join(legacy)}) allowed in [cyan]'{name}'[/cyan]. Bypasses modern MFA controls.")
+            bypass_tips.append(
+                f"  • [bold yellow]Legacy Auth Allowed:[/bold yellow] Legacy authentication ({', '.join(legacy)}) allowed in [cyan]'{name}'[/cyan]. Bypasses modern MFA controls."
+            )
 
     if bypass_tips:
         console.print("\n  [bold yellow]Bypass & Penetration Testing Guidance:[/bold yellow]")
         for tip in bypass_tips:
             console.print(tip)
+
 
 def tbl_data(policies: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Helper to transform parsed policies for the table view."""
@@ -335,43 +356,46 @@ def tbl_data(policies: list[dict[str, Any]]) -> list[dict[str, Any]]:
         client_apps = get_list(p.get("client_app_types"))
         client_apps_str = ", ".join(client_apps) if client_apps else "All"
 
-        rows.append({
-            "display_name": p.get("display_name"),
-            "state": p.get("state"),
-            "grant_controls": get_list(p.get("grant_controls")),
-            "included_users": incl_users,
-            "excluded_users": excl_users,
-            "included_groups": incl_groups,
-            "excluded_groups": excl_groups,
-            "included_roles": incl_roles,
-            "excluded_roles": excl_roles,
-            "included_apps": incl_apps,
-            "excluded_apps": excl_apps,
-            "included_platforms": incl_platforms,
-            "exclude_platforms": excl_platforms,
-            "included_locations": incl_locations,
-            "excluded_locations": excl_locations,
-            "client_app_types": client_apps_str,
-            "id": p.get("id"),
-            # Ensure the extra fields exist in row dict too
-            "grant_operator": p.get("grant_operator", "OR"),
-            "include_guest_types": p.get("include_guest_types", ""),
-            "exclude_guest_types": p.get("exclude_guest_types", ""),
-            "include_user_actions": p.get("include_user_actions", "None"),
-            "include_auth_context": p.get("include_auth_context", "None"),
-            "sign_in_risk_levels": p.get("sign_in_risk_levels", "None"),
-            "user_risk_levels": p.get("user_risk_levels", "None"),
-            "sp_risk_levels": p.get("sp_risk_levels", "None"),
-            "insider_risk_levels": p.get("insider_risk_levels", ""),
-            "auth_flows": p.get("auth_flows", ""),
-            "device_filter_mode": p.get("device_filter_mode", ""),
-            "device_filter_rule": p.get("device_filter_rule", ""),
-            "session_sign_in_freq": p.get("session_sign_in_freq", ""),
-            "session_persistent_browser": p.get("session_persistent_browser", ""),
-            "session_token_protection": p.get("session_token_protection", ""),
-            "session_casb": p.get("session_casb", "")
-        })
+        rows.append(
+            {
+                "display_name": p.get("display_name"),
+                "state": p.get("state"),
+                "grant_controls": get_list(p.get("grant_controls")),
+                "included_users": incl_users,
+                "excluded_users": excl_users,
+                "included_groups": incl_groups,
+                "excluded_groups": excl_groups,
+                "included_roles": incl_roles,
+                "excluded_roles": excl_roles,
+                "included_apps": incl_apps,
+                "excluded_apps": excl_apps,
+                "included_platforms": incl_platforms,
+                "exclude_platforms": excl_platforms,
+                "included_locations": incl_locations,
+                "excluded_locations": excl_locations,
+                "client_app_types": client_apps_str,
+                "id": p.get("id"),
+                # Ensure the extra fields exist in row dict too
+                "grant_operator": p.get("grant_operator", "OR"),
+                "include_guest_types": p.get("include_guest_types", ""),
+                "exclude_guest_types": p.get("exclude_guest_types", ""),
+                "include_user_actions": p.get("include_user_actions", "None"),
+                "include_auth_context": p.get("include_auth_context", "None"),
+                "sign_in_risk_levels": p.get("sign_in_risk_levels", "None"),
+                "user_risk_levels": p.get("user_risk_levels", "None"),
+                "sp_risk_levels": p.get("sp_risk_levels", "None"),
+                "insider_risk_levels": p.get("insider_risk_levels", ""),
+                "auth_flows": p.get("auth_flows", ""),
+                "device_filter_mode": p.get("device_filter_mode", ""),
+                "device_filter_rule": p.get("device_filter_rule", ""),
+                "session_sign_in_freq": p.get("session_sign_in_freq", ""),
+                "session_persistent_browser": p.get("session_persistent_browser", ""),
+                "session_token_protection": p.get("session_token_protection", ""),
+                "session_casb": p.get("session_casb", ""),
+            }
+        )
     return rows
+
 
 def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, str]:
     """Parse local users/groups/apps loot and database evidence to resolve IDs to names."""
@@ -393,7 +417,11 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
         mapping[key_str.lower()] = val_str
 
     def _norm_dict(d: dict) -> dict[str, Any]:
-        return {str(k).lower().replace(" ", "").replace("_", ""): v for k, v in d.items() if k is not None}
+        return {
+            str(k).lower().replace(" ", "").replace("_", ""): v
+            for k, v in d.items()
+            if k is not None
+        }
 
     # 1. Primary: query database evidence table and principals table
     evidence_rows = []
@@ -408,22 +436,23 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
 
         try:
             target_techs = {
-                'discovery/entra_enum_users',
-                'discovery/unified_enum_users',
-                'discovery/entra_enum_groups',
-                'discovery/unified_enum_groups',
-                'discovery/entra_enum_apps',
-                'discovery/unified_enum_apps',
-                'discovery/entra_enum_group_members',
-                'discovery/entra_enum_privileged_roles',
-                'discovery/whoami',
-                'discovery/entra_whoami',
-                'discovery/entra_enum_identity',
-                'discovery/entra_enum_self',
-                'discovery/entra_enum_devices',
+                "discovery/entra_enum_users",
+                "discovery/unified_enum_users",
+                "discovery/entra_enum_groups",
+                "discovery/unified_enum_groups",
+                "discovery/entra_enum_apps",
+                "discovery/unified_enum_apps",
+                "discovery/entra_enum_group_members",
+                "discovery/entra_enum_privileged_roles",
+                "discovery/whoami",
+                "discovery/entra_whoami",
+                "discovery/entra_enum_identity",
+                "discovery/entra_enum_self",
+                "discovery/entra_enum_devices",
             }
             evidence_rows = [
-                row for row in workspace_db_path.list_evidence()
+                row
+                for row in workspace_db_path.list_evidence()
                 if row.get("technique_id") in target_techs
             ]
         except Exception as ev_ex:
@@ -431,6 +460,7 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
     else:
         try:
             import sqlite3
+
             conn = sqlite3.connect(str(db_path))
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -479,28 +509,40 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
             data = json.loads(row["output_json"])
             if not isinstance(data, dict):
                 continue
-            if tech_id in ('discovery/entra_enum_users', 'discovery/unified_enum_users'):
+            if tech_id in ("discovery/entra_enum_users", "discovery/unified_enum_users"):
                 users_list = data.get("users") or []
                 for u in users_list:
                     if not isinstance(u, dict):
                         continue
                     u_norm = _norm_dict(u)
                     uid = u_norm.get("id") or u_norm.get("userid") or u_norm.get("objectid")
-                    upn = u_norm.get("userprincipalname") or u_norm.get("username") or u_norm.get("name") or u_norm.get("upn")
+                    upn = (
+                        u_norm.get("userprincipalname")
+                        or u_norm.get("username")
+                        or u_norm.get("name")
+                        or u_norm.get("upn")
+                    )
                     if uid and upn:
                         add_to_mapping(uid, upn)
-            elif tech_id in ('discovery/entra_enum_groups', 'discovery/unified_enum_groups'):
+            elif tech_id in ("discovery/entra_enum_groups", "discovery/unified_enum_groups"):
                 groups_list = data.get("groups") or []
                 for g in groups_list:
                     if not isinstance(g, dict):
                         continue
                     g_norm = _norm_dict(g)
                     gid = g_norm.get("id") or g_norm.get("groupid") or g_norm.get("objectid")
-                    disp = g_norm.get("displayname") or g_norm.get("groupname") or g_norm.get("name")
+                    disp = (
+                        g_norm.get("displayname") or g_norm.get("groupname") or g_norm.get("name")
+                    )
                     if gid and disp:
                         add_to_mapping(gid, disp)
-            elif tech_id in ('discovery/entra_enum_apps', 'discovery/unified_enum_apps'):
-                apps_list = data.get("apps") or data.get("applications") or data.get("service_principals") or []
+            elif tech_id in ("discovery/entra_enum_apps", "discovery/unified_enum_apps"):
+                apps_list = (
+                    data.get("apps")
+                    or data.get("applications")
+                    or data.get("service_principals")
+                    or []
+                )
                 for a in apps_list:
                     if not isinstance(a, dict):
                         continue
@@ -513,7 +555,7 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
                             add_to_mapping(aid, disp)
                         if appid:
                             add_to_mapping(appid, disp)
-            elif tech_id == 'discovery/entra_enum_group_members':
+            elif tech_id == "discovery/entra_enum_group_members":
                 members_list = data.get("members") or []
                 for m in members_list:
                     if not isinstance(m, dict):
@@ -527,7 +569,7 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
                         add_to_mapping(gid, gname)
                     if mid and mname:
                         add_to_mapping(mid, mname)
-            elif tech_id == 'discovery/entra_enum_privileged_roles':
+            elif tech_id == "discovery/entra_enum_privileged_roles":
                 assignments_list = data.get("assignments") or []
                 for a in assignments_list:
                     if not isinstance(a, dict):
@@ -537,12 +579,16 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
                     pname = a_norm.get("principalname")
                     if pid and pname:
                         add_to_mapping(pid, pname)
-            elif tech_id in ('discovery/whoami', 'discovery/entra_whoami'):
+            elif tech_id in ("discovery/whoami", "discovery/entra_whoami"):
                 pid = data.get("principal_id")
                 me_dict = data.get("me")
                 upn = None
                 if isinstance(me_dict, dict):
-                    upn = me_dict.get("userPrincipalName") or me_dict.get("mail") or me_dict.get("displayName")
+                    upn = (
+                        me_dict.get("userPrincipalName")
+                        or me_dict.get("mail")
+                        or me_dict.get("displayName")
+                    )
                 if not upn:
                     upn = data.get("friendly_name")
                 if pid and upn:
@@ -565,12 +611,16 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
                                 add_to_mapping(drid, drname)
                             if drtemplate:
                                 add_to_mapping(drtemplate, drname)
-            elif tech_id == 'discovery/entra_enum_identity':
+            elif tech_id == "discovery/entra_enum_identity":
                 pid = data.get("principal_id")
                 me_dict = data.get("me")
                 upn = None
                 if isinstance(me_dict, dict):
-                    upn = me_dict.get("userPrincipalName") or me_dict.get("mail") or me_dict.get("displayName")
+                    upn = (
+                        me_dict.get("userPrincipalName")
+                        or me_dict.get("mail")
+                        or me_dict.get("displayName")
+                    )
                 if pid and upn:
                     add_to_mapping(pid, upn)
                 g_list = data.get("groups") or []
@@ -591,7 +641,7 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
                                 add_to_mapping(drid, drname)
                             if drtemplate:
                                 add_to_mapping(drtemplate, drname)
-            elif tech_id == 'discovery/entra_enum_self':
+            elif tech_id == "discovery/entra_enum_self":
                 user_dict = data.get("user")
                 if isinstance(user_dict, dict):
                     uid = user_dict.get("id")
@@ -612,7 +662,7 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
                         rname = r.get("displayName")
                         if rid and rname:
                             add_to_mapping(rid, rname)
-            elif tech_id == 'discovery/entra_enum_devices':
+            elif tech_id == "discovery/entra_enum_devices":
                 devices_list = data.get("devices") or []
                 for d in devices_list:
                     if not isinstance(d, dict):
@@ -639,7 +689,12 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
                         for r in reader:
                             r_norm = _norm_dict(r)
                             uid = r_norm.get("id") or r_norm.get("userid") or r_norm.get("objectid")
-                            upn = r_norm.get("userprincipalname") or r_norm.get("username") or r_norm.get("name") or r_norm.get("upn")
+                            upn = (
+                                r_norm.get("userprincipalname")
+                                or r_norm.get("username")
+                                or r_norm.get("name")
+                                or r_norm.get("upn")
+                            )
                             if uid and upn:
                                 add_to_mapping(uid, upn)
                 except Exception as csv_err:
@@ -654,8 +709,14 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
                         reader = csv.DictReader(fh)
                         for r in reader:
                             r_norm = _norm_dict(r)
-                            gid = r_norm.get("id") or r_norm.get("groupid") or r_norm.get("objectid")
-                            disp = r_norm.get("displayname") or r_norm.get("groupname") or r_norm.get("name")
+                            gid = (
+                                r_norm.get("id") or r_norm.get("groupid") or r_norm.get("objectid")
+                            )
+                            disp = (
+                                r_norm.get("displayname")
+                                or r_norm.get("groupname")
+                                or r_norm.get("name")
+                            )
                             if gid and disp:
                                 add_to_mapping(gid, disp)
                 except Exception as csv_err:
@@ -715,7 +776,9 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
                             if pid and pname:
                                 add_to_mapping(pid, pname)
                 except Exception as csv_err:
-                    logger.debug("Failed to load privileged roles CSV map from %s: %s", sub, csv_err)
+                    logger.debug(
+                        "Failed to load privileged roles CSV map from %s: %s", sub, csv_err
+                    )
 
         # Load from roles CSVs
         for sub in ["entra_enum_privileged_roles"]:
@@ -759,6 +822,7 @@ def load_loot_mappings(workspace_db_path: Path | Workspace | None) -> dict[str, 
 
     return mapping
 
+
 def _resolve_directory_objects_with_diagnostics(
     http: httpx.Client,
     headers: dict[str, str],
@@ -776,10 +840,11 @@ def _resolve_directory_objects_with_diagnostics(
         }
 
     import re
+
     # Match standard GUID or typical test mock IDs (e.g. guid-1, mock-user)
     uuid_pattern = re.compile(
         r"^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(guid|mock|test)-\w+)$",
-        re.IGNORECASE
+        re.IGNORECASE,
     )
     valid_ids = [x for x in ids if x and uuid_pattern.match(str(x))]
 
@@ -797,11 +862,11 @@ def _resolve_directory_objects_with_diagnostics(
     throttling_observed = False
     chunk_size = 900
     for i in range(0, len(valid_ids), chunk_size):
-        chunk = valid_ids[i:i+chunk_size]
+        chunk = valid_ids[i : i + chunk_size]
         url = "https://graph.microsoft.com/v1.0/directoryObjects/getByIds"
         body = {
             "ids": chunk,
-            "types": ["user", "group", "directoryRole", "servicePrincipal", "device"]
+            "types": ["user", "group", "directoryRole", "servicePrincipal", "device"],
         }
         try:
             resp = _graph_call(http, "POST", url, headers=headers, json_data=body)
@@ -839,7 +904,9 @@ def _resolve_directory_objects_with_diagnostics(
                 "sample_unresolved_ids": unresolved_ids[:5],
             }
 
-        logger.debug("Attempting individual fallback resolution for %d unresolved ID(s)", len(unresolved_ids))
+        logger.debug(
+            "Attempting individual fallback resolution for %d unresolved ID(s)", len(unresolved_ids)
+        )
         for obj_id in unresolved_ids:
             # --------------------------------------------------------
             # 1. Try generic Directory Object first.
@@ -907,7 +974,9 @@ def _resolve_directory_objects_with_diagnostics(
                 if resp_sp.status_code == 429:
                     throttling_observed = True
             except Exception as ex_sp:
-                logger.debug("Failed to resolve service principal %s in fallback: %s", obj_id, ex_sp)
+                logger.debug(
+                    "Failed to resolve service principal %s in fallback: %s", obj_id, ex_sp
+                )
 
             # --------------------------------------------------------
             # 5. Try Directory Role
@@ -988,10 +1057,13 @@ def _resolve_directory_objects_with_diagnostics(
     }
 
 
-def resolve_directory_objects(http: httpx.Client, headers: dict[str, str], ids: list[str]) -> dict[str, str]:
+def resolve_directory_objects(
+    http: httpx.Client, headers: dict[str, str], ids: list[str]
+) -> dict[str, str]:
     """Backward-compatible wrapper returning only the resolved mapping."""
     resolved, _ = _resolve_directory_objects_with_diagnostics(http, headers, ids)
     return resolved
+
 
 @technique(
     technique_id="discovery/entra_enum_conditional_access_policies",
@@ -1032,7 +1104,11 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     with httpx.Client(timeout=30) as http:
         ctx.info("Enumerating Conditional Access policies...")
         try:
-            policies = graph_list(http, "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies", headers)
+            policies = graph_list(
+                http,
+                "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies",
+                headers,
+            )
         except GraphError as e:
             return graph_error_to_result(e, parsed_policies=[])
 
@@ -1084,7 +1160,11 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         # Resolve named locations first
         try:
             ctx.info("Fetching named locations from Graph...")
-            locations = graph_list(http, "https://graph.microsoft.com/v1.0/identity/conditionalAccess/namedLocations", headers)
+            locations = graph_list(
+                http,
+                "https://graph.microsoft.com/v1.0/identity/conditionalAccess/namedLocations",
+                headers,
+            )
             for loc in locations:
                 loc_id = loc.get("id")
                 loc_name = loc.get("displayName")
@@ -1103,7 +1183,9 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
                     if details:
                         if len(details) > 5:
-                            display_str = ", ".join(details[:5]) + f", ... (+{len(details) - 5} more)"
+                            display_str = (
+                                ", ".join(details[:5]) + f", ... (+{len(details) - 5} more)"
+                            )
                         else:
                             display_str = ", ".join(details)
                         resolved[loc_id] = f"{loc_name} ({display_str})"
@@ -1115,7 +1197,11 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         # Resolve all directory role definitions dynamically
         try:
             ctx.info("Fetching directory role definitions from Graph...")
-            role_defs = graph_list(http, "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions", headers)
+            role_defs = graph_list(
+                http,
+                "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions",
+                headers,
+            )
             for rd in role_defs:
                 t_id = rd.get("templateId")
                 r_id = rd.get("id")
@@ -1137,12 +1223,15 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         unresolved = [g for g in guids if g not in resolved]
         if unresolved:
             ctx.info(f"Resolving {len(unresolved)} unique object ID(s) via Graph API...")
-            api_resolved, resolution = _resolve_directory_objects_with_diagnostics(http, headers, unresolved)
+            api_resolved, resolution = _resolve_directory_objects_with_diagnostics(
+                http, headers, unresolved
+            )
             resolved.update(api_resolved)
             if resolution.get("unresolved_count", 0) > 0:
                 partial_reasons.append("Directory object resolution incomplete")
 
         resolved_lower = {k.lower(): v for k, v in resolved.items() if k}
+
         def resolve_list(lst: list[str]) -> list[str]:
             res = []
             for item in lst:
@@ -1302,7 +1391,9 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                 exclude_guest_types = eg.get("guestOrExternalUserTypes", "")
 
             include_user_actions = apps_cond.get("includeUserActions") or []
-            include_auth_context = apps_cond.get("includeAuthenticationContextClassReferences") or []
+            include_auth_context = (
+                apps_cond.get("includeAuthenticationContextClassReferences") or []
+            )
 
             # Serialize session controls
             sif = session.get("signInFrequency") or {}
@@ -1330,46 +1421,62 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             resolved_inc_loc = resolve_list(include_locations)
             resolved_exc_loc = resolve_list(exclude_locations)
 
-            parsed_policies.append({
-                "display_name": p.get("displayName"),
-                "state": p.get("state"),
-                "grant_operator": grant_operator,
-                "grant_controls": ", ".join(controls_all) if controls_all else "None",
-                "included_users": ", ".join(resolved_inc_u) if resolved_inc_u else "None",
-                "excluded_users": ", ".join(resolved_exc_u) if resolved_exc_u else "None",
-                "include_guest_types": include_guest_types,
-                "exclude_guest_types": exclude_guest_types,
-                "included_groups": ", ".join(resolved_inc_g) if resolved_inc_g else "None",
-                "excluded_groups": ", ".join(resolved_exc_g) if resolved_exc_g else "None",
-                "included_roles": ", ".join(resolved_inc_r) if resolved_inc_r else "None",
-                "excluded_roles": ", ".join(resolved_exc_r) if resolved_exc_r else "None",
-                "included_apps": ", ".join(resolved_inc_a) if resolved_inc_a else "None",
-                "excluded_apps": ", ".join(resolved_exc_a) if resolved_exc_a else "None",
-                "include_user_actions": ", ".join(include_user_actions) if include_user_actions else "None",
-                "include_auth_context": ", ".join(include_auth_context) if include_auth_context else "None",
-                "included_platforms": ", ".join(include_platforms) if include_platforms else "All",
-                "exclude_platforms": ", ".join(exclude_platforms) if exclude_platforms else "None",
-                "included_locations": ", ".join(resolved_inc_loc) if resolved_inc_loc else "All",
-                "excluded_locations": ", ".join(resolved_exc_loc) if resolved_exc_loc else "None",
-                # Structured lists preserve entries containing CIDR commas — see B3.
-                # `get_list()` prefers these fields when present so callers no
-                # longer split a single "IPs (a, b)" string into three entries.
-                "included_locations_list": list(resolved_inc_loc) if resolved_inc_loc else [],
-                "excluded_locations_list": list(resolved_exc_loc) if resolved_exc_loc else [],
-                "client_app_types": ", ".join(client_apps) if client_apps else "All",
-                "sign_in_risk_levels": ", ".join(sign_in_risk_levels) if sign_in_risk_levels else "None",
-                "user_risk_levels": ", ".join(user_risk_levels) if user_risk_levels else "None",
-                "sp_risk_levels": ", ".join(sp_risk_levels) if sp_risk_levels else "None",
-                "insider_risk_levels": insider_risk_levels,
-                "auth_flows": auth_flows,
-                "device_filter_mode": device_filter_mode,
-                "device_filter_rule": device_filter_rule,
-                "session_sign_in_freq": session_sign_in_freq,
-                "session_persistent_browser": session_persistent_browser,
-                "session_token_protection": session_token_protection,
-                "session_casb": session_casb,
-                "id": p.get("id")
-            })
+            parsed_policies.append(
+                {
+                    "display_name": p.get("displayName"),
+                    "state": p.get("state"),
+                    "grant_operator": grant_operator,
+                    "grant_controls": ", ".join(controls_all) if controls_all else "None",
+                    "included_users": ", ".join(resolved_inc_u) if resolved_inc_u else "None",
+                    "excluded_users": ", ".join(resolved_exc_u) if resolved_exc_u else "None",
+                    "include_guest_types": include_guest_types,
+                    "exclude_guest_types": exclude_guest_types,
+                    "included_groups": ", ".join(resolved_inc_g) if resolved_inc_g else "None",
+                    "excluded_groups": ", ".join(resolved_exc_g) if resolved_exc_g else "None",
+                    "included_roles": ", ".join(resolved_inc_r) if resolved_inc_r else "None",
+                    "excluded_roles": ", ".join(resolved_exc_r) if resolved_exc_r else "None",
+                    "included_apps": ", ".join(resolved_inc_a) if resolved_inc_a else "None",
+                    "excluded_apps": ", ".join(resolved_exc_a) if resolved_exc_a else "None",
+                    "include_user_actions": ", ".join(include_user_actions)
+                    if include_user_actions
+                    else "None",
+                    "include_auth_context": ", ".join(include_auth_context)
+                    if include_auth_context
+                    else "None",
+                    "included_platforms": ", ".join(include_platforms)
+                    if include_platforms
+                    else "All",
+                    "exclude_platforms": ", ".join(exclude_platforms)
+                    if exclude_platforms
+                    else "None",
+                    "included_locations": ", ".join(resolved_inc_loc)
+                    if resolved_inc_loc
+                    else "All",
+                    "excluded_locations": ", ".join(resolved_exc_loc)
+                    if resolved_exc_loc
+                    else "None",
+                    # Structured lists preserve entries containing CIDR commas — see B3.
+                    # `get_list()` prefers these fields when present so callers no
+                    # longer split a single "IPs (a, b)" string into three entries.
+                    "included_locations_list": list(resolved_inc_loc) if resolved_inc_loc else [],
+                    "excluded_locations_list": list(resolved_exc_loc) if resolved_exc_loc else [],
+                    "client_app_types": ", ".join(client_apps) if client_apps else "All",
+                    "sign_in_risk_levels": ", ".join(sign_in_risk_levels)
+                    if sign_in_risk_levels
+                    else "None",
+                    "user_risk_levels": ", ".join(user_risk_levels) if user_risk_levels else "None",
+                    "sp_risk_levels": ", ".join(sp_risk_levels) if sp_risk_levels else "None",
+                    "insider_risk_levels": insider_risk_levels,
+                    "auth_flows": auth_flows,
+                    "device_filter_mode": device_filter_mode,
+                    "device_filter_rule": device_filter_rule,
+                    "session_sign_in_freq": session_sign_in_freq,
+                    "session_persistent_browser": session_persistent_browser,
+                    "session_token_protection": session_token_protection,
+                    "session_casb": session_casb,
+                    "id": p.get("id"),
+                }
+            )
 
         # Generate findings for active bypass opportunities
         if getattr(ctx, "workspace", None):
@@ -1384,7 +1491,9 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                     exps = explain_controls(controls)
                     exp_suffix = ""
                     if exps:
-                        exp_suffix = "\n\nControl Explanations:\n" + "\n".join(f"- {e}" for e in exps)
+                        exp_suffix = "\n\nControl Explanations:\n" + "\n".join(
+                            f"- {e}" for e in exps
+                        )
 
                     # Excluded users
                     ex_u = get_list(p.get("excluded_users"))
@@ -1396,8 +1505,10 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                             severity="medium",
                             provider="entra",
                             description=f"User(s) {', '.join(ex_u)} are excluded from policy '{name}' and can bypass controls ({controls}).{exp_suffix}",
-                            evidence=json.dumps({"policy_name": name, "excluded_users": ex_u, "controls": controls}),
-                            mitre_id="T1580"
+                            evidence=json.dumps(
+                                {"policy_name": name, "excluded_users": ex_u, "controls": controls}
+                            ),
+                            mitre_id="T1580",
                         )
                     # Excluded groups
                     ex_g = get_list(p.get("excluded_groups"))
@@ -1409,8 +1520,10 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                             severity="medium",
                             provider="entra",
                             description=f"Group(s) {', '.join(ex_g)} are excluded from policy '{name}'. Members bypass controls ({controls}).{exp_suffix}",
-                            evidence=json.dumps({"policy_name": name, "excluded_groups": ex_g, "controls": controls}),
-                            mitre_id="T1580"
+                            evidence=json.dumps(
+                                {"policy_name": name, "excluded_groups": ex_g, "controls": controls}
+                            ),
+                            mitre_id="T1580",
                         )
                     # Excluded roles
                     ex_r = get_list(p.get("excluded_roles"))
@@ -1422,8 +1535,10 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                             severity="medium",
                             provider="entra",
                             description=f"Role(s) {', '.join(ex_r)} are excluded from policy '{name}'. Role members bypass controls ({controls}).{exp_suffix}",
-                            evidence=json.dumps({"policy_name": name, "excluded_roles": ex_r, "controls": controls}),
-                            mitre_id="T1580"
+                            evidence=json.dumps(
+                                {"policy_name": name, "excluded_roles": ex_r, "controls": controls}
+                            ),
+                            mitre_id="T1580",
                         )
                     # Excluded platforms
                     ex_p = get_list(p.get("exclude_platforms"))
@@ -1435,8 +1550,14 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                             severity="medium",
                             provider="entra",
                             description=f"Platform(s) {', '.join(ex_p)} are excluded from policy '{name}'. Spoofing User-Agent to these platforms bypasses controls ({controls}).{exp_suffix}",
-                            evidence=json.dumps({"policy_name": name, "excluded_platforms": ex_p, "controls": controls}),
-                            mitre_id="T1580"
+                            evidence=json.dumps(
+                                {
+                                    "policy_name": name,
+                                    "excluded_platforms": ex_p,
+                                    "controls": controls,
+                                }
+                            ),
+                            mitre_id="T1580",
                         )
                     # Excluded locations
                     ex_loc = get_list_from_policy(p, "excluded_locations")
@@ -1448,13 +1569,21 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                             severity="medium",
                             provider="entra",
                             description=f"Location(s) {', '.join(ex_loc)} are excluded from policy '{name}'. Accessing from these networks/locations bypasses controls ({controls}).{exp_suffix}",
-                            evidence=json.dumps({"policy_name": name, "excluded_locations": ex_loc, "controls": controls}),
-                            mitre_id="T1580"
+                            evidence=json.dumps(
+                                {
+                                    "policy_name": name,
+                                    "excluded_locations": ex_loc,
+                                    "controls": controls,
+                                }
+                            ),
+                            mitre_id="T1580",
                         )
                     # Legacy auth allowed
                     client_apps = [x.lower() for x in get_list(p.get("client_app_types"))]
                     if "exchangeactivesync" in client_apps or "other" in client_apps:
-                        legacy_clients = [c for c in client_apps if c in ["exchangeactivesync", "other"]]
+                        legacy_clients = [
+                            c for c in client_apps if c in ["exchangeactivesync", "other"]
+                        ]
                         ctx.workspace.add_finding(
                             technique_id="discovery/entra_enum_conditional_access_policies",
                             tactic="discovery",
@@ -1462,8 +1591,10 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                             severity="medium",
                             provider="entra",
                             description=f"Legacy authentication protocols ({', '.join(legacy_clients)}) are allowed in policy '{name}'. Attackers can bypass modern MFA controls using legacy authentication.{exp_suffix}",
-                            evidence=json.dumps({"policy_name": name, "client_app_types": client_apps}),
-                            mitre_id="T1580"
+                            evidence=json.dumps(
+                                {"policy_name": name, "client_app_types": client_apps}
+                            ),
+                            mitre_id="T1580",
                         )
 
     status = "partial" if partial_reasons else "success"
@@ -1487,17 +1618,18 @@ def explain_controls(controls_str: str) -> list[str]:
         return []
 
     import re
+
     parts = []
     current = []
     depth = 0
     for char in controls_str:
-        if char == ',' and depth == 0:
+        if char == "," and depth == 0:
             parts.append("".join(current).strip())
             current = []
         else:
-            if char == '(':
+            if char == "(":
                 depth += 1
-            elif char == ')':
+            elif char == ")":
                 depth -= 1
             current.append(char)
     if current:
@@ -1625,8 +1757,6 @@ def explain_controls(controls_str: str) -> list[str]:
                 "secureSignInSession: Enforces additional session protection during sign-in."
             )
         else:
-            explanations.append(
-                f"{part}: Active access control/restriction policy."
-            )
+            explanations.append(f"{part}: Active access control/restriction policy.")
 
     return explanations

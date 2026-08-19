@@ -65,9 +65,7 @@ def classify_cloud_error(exc: Exception, provider: str) -> tuple[str, str, str]:
     return "error", "Unknown", str(exc)
 
 
-def cloud_error_to_result(
-    exc: Exception, provider: str, **extra: Any
-) -> dict[str, Any]:
+def cloud_error_to_result(exc: Exception, provider: str, **extra: Any) -> dict[str, Any]:
     """Convert a cloud SDK exception into the standard technique result shape."""
     status, code, message = classify_cloud_error(exc, provider)
     return {

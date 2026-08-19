@@ -107,7 +107,7 @@ class ExecutionContext:
             technique_id=f"{self.technique_id}/{name}",
             safe_mode=self.safe_mode,
             params=merged_params,
-            on_event=self._on_event
+            on_event=self._on_event,
         )
 
         # Link API call counter so child calls count toward parent total
@@ -137,57 +137,67 @@ class ExecutionContext:
     def info(self, message: str, data: dict[str, Any] | None = None) -> None:
         """Log an informational message."""
         self.log(message)  # Fallback to standard logging
-        self._emit(TelemetryEvent(
-            technique_id=self.technique_id or "unknown",
-            event_type=TelemetryType.LOG,
-            level=TelemetryLevel.INFO,
-            message=message,
-            data=data or {}
-        ))
+        self._emit(
+            TelemetryEvent(
+                technique_id=self.technique_id or "unknown",
+                event_type=TelemetryType.LOG,
+                level=TelemetryLevel.INFO,
+                message=message,
+                data=data or {},
+            )
+        )
 
     def debug(self, message: str, data: dict[str, Any] | None = None) -> None:
         """Log a debug-level message within the technique context."""
         logger.debug("[%s] %s", self.technique_id or "qm", message)
-        self._emit(TelemetryEvent(
-            technique_id=self.technique_id or "unknown",
-            event_type=TelemetryType.LOG,
-            level=TelemetryLevel.DEBUG,
-            message=message,
-            data=data or {}
-        ))
+        self._emit(
+            TelemetryEvent(
+                technique_id=self.technique_id or "unknown",
+                event_type=TelemetryType.LOG,
+                level=TelemetryLevel.DEBUG,
+                message=message,
+                data=data or {},
+            )
+        )
 
     def success(self, message: str, data: dict[str, Any] | None = None) -> None:
         """Log a successful operation or discovery."""
         self.log(f"SUCCESS: {message}")
-        self._emit(TelemetryEvent(
-            technique_id=self.technique_id or "unknown",
-            event_type=TelemetryType.LOG,
-            level=TelemetryLevel.SUCCESS,
-            message=message,
-            data=data or {}
-        ))
+        self._emit(
+            TelemetryEvent(
+                technique_id=self.technique_id or "unknown",
+                event_type=TelemetryType.LOG,
+                level=TelemetryLevel.SUCCESS,
+                message=message,
+                data=data or {},
+            )
+        )
 
     def warn(self, message: str, data: dict[str, Any] | None = None) -> None:
         """Log a warning (e.g. permission denied on a non-critical path)."""
         self.log(f"WARNING: {message}")
-        self._emit(TelemetryEvent(
-            technique_id=self.technique_id or "unknown",
-            event_type=TelemetryType.LOG,
-            level=TelemetryLevel.WARNING,
-            message=message,
-            data=data or {}
-        ))
+        self._emit(
+            TelemetryEvent(
+                technique_id=self.technique_id or "unknown",
+                event_type=TelemetryType.LOG,
+                level=TelemetryLevel.WARNING,
+                message=message,
+                data=data or {},
+            )
+        )
 
     def error(self, message: str, data: dict[str, Any] | None = None) -> None:
         """Log an error within the technique context."""
         self.log(f"ERROR: {message}")
-        self._emit(TelemetryEvent(
-            technique_id=self.technique_id or "unknown",
-            event_type=TelemetryType.ERROR,
-            level=TelemetryLevel.ERROR,
-            message=message,
-            data=data or {}
-        ))
+        self._emit(
+            TelemetryEvent(
+                technique_id=self.technique_id or "unknown",
+                event_type=TelemetryType.ERROR,
+                level=TelemetryLevel.ERROR,
+                message=message,
+                data=data or {},
+            )
+        )
 
     def discovery(
         self,
@@ -198,16 +208,14 @@ class ExecutionContext:
         """Emit a structured discovery event."""
         msg = f"Discovered {asset_type}: {asset_id}"
         self.log(msg)
-        self._emit(TelemetryEvent(
-            technique_id=self.technique_id or "unknown",
-            event_type=TelemetryType.DISCOVERY,
-            message=msg,
-            data={
-                "asset_type": asset_type,
-                "asset_id": asset_id,
-                "metadata": metadata or {}
-            }
-        ))
+        self._emit(
+            TelemetryEvent(
+                technique_id=self.technique_id or "unknown",
+                event_type=TelemetryType.DISCOVERY,
+                message=msg,
+                data={"asset_type": asset_type, "asset_id": asset_id, "metadata": metadata or {}},
+            )
+        )
 
     # ================================================================
     # Provider methods
@@ -243,16 +251,18 @@ class ExecutionContext:
         )
 
         # Stream API call via telemetry
-        self._emit(TelemetryEvent(
-            technique_id=self.technique_id or "unknown",
-            event_type=TelemetryType.API_CALL,
-            message=f"API: whoami ({self._provider_name})",
-            data={
-                "provider": self._provider_name,
-                "action": "whoami",
-                "duration_ms": duration_ms
-            }
-        ))
+        self._emit(
+            TelemetryEvent(
+                technique_id=self.technique_id or "unknown",
+                event_type=TelemetryType.API_CALL,
+                message=f"API: whoami ({self._provider_name})",
+                data={
+                    "provider": self._provider_name,
+                    "action": "whoami",
+                    "duration_ms": duration_ms,
+                },
+            )
+        )
 
         # --------------------------------------------------------
         # Store the discovered principal in the workspace database.
@@ -319,6 +329,7 @@ class ExecutionContext:
             ID of the newly created finding row.
         """
         import json as _json
+
         full_desc = description or title
         if recommendation:
             full_desc += f"\n\nRemediation: {recommendation}"
@@ -347,17 +358,17 @@ class ExecutionContext:
         )
 
         # Stream finding via telemetry
-        self._emit(TelemetryEvent(
-            technique_id=self.technique_id or "unknown",
-            event_type=TelemetryType.FINDING,
-            level=TelemetryLevel.WARNING if severity in ("low", "medium") else TelemetryLevel.ERROR,
-            message=f"Finding: {title}",
-            data={
-                "id": fid,
-                "severity": severity,
-                "mitre_id": mitre_id
-            }
-        ))
+        self._emit(
+            TelemetryEvent(
+                technique_id=self.technique_id or "unknown",
+                event_type=TelemetryType.FINDING,
+                level=TelemetryLevel.WARNING
+                if severity in ("low", "medium")
+                else TelemetryLevel.ERROR,
+                message=f"Finding: {title}",
+                data={"id": fid, "severity": severity, "mitre_id": mitre_id},
+            )
+        )
 
         return fid
 

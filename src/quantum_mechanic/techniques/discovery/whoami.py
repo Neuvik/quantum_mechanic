@@ -56,12 +56,12 @@ from quantum_mechanic.core.technique import technique
 # ----------------------------------------------------------------
 LOOT_ITEMS_KEY = None  # single-row result
 LOOT_SCHEMA = [
-    ('principal_id', 'principal_id'),
-    ('principal_type', 'principal_type'),
-    ('friendly_name', 'friendly_name'),
-    ('account_id', 'account_id'),
-    ('provider', 'provider'),
-    ('notes', None),
+    ("principal_id", "principal_id"),
+    ("principal_type", "principal_type"),
+    ("friendly_name", "friendly_name"),
+    ("account_id", "account_id"),
+    ("provider", "provider"),
+    ("notes", None),
 ]
 from quantum_mechanic.providers.base import WhoAmIResult
 
@@ -114,7 +114,7 @@ def format_whoami(result: Any) -> None:
 
 @technique(
     technique_id="discovery/whoami",
-    tactic='discovery',
+    tactic="discovery",
     mitre_id="T1087.004",
     providers=["aws", "azure", "gcp", "oci", "entra"],
     severity="info",

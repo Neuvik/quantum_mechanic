@@ -44,6 +44,7 @@ class CredentialMismatchError(RuntimeError):
 
     Defense-in-depth check for credential-isolation regressions.
     """
+
     pass
 
 
@@ -71,14 +72,14 @@ class Workspace:
         # Workspace delegates every domain method here, keeping
         # the ORM migration (AR-3) domain-by-domain.
         # --------------------------------------------------------
-        self._accounts    = AccountStore(db, self.id)
-        self._activity    = ActivityStore(db, self.id)
-        self._agents      = AgentStore(db, self.id)
-        self._assets      = AssetStore(db, self.id)
+        self._accounts = AccountStore(db, self.id)
+        self._activity = ActivityStore(db, self.id)
+        self._agents = AgentStore(db, self.id)
+        self._assets = AssetStore(db, self.id)
         self._credentials = CredentialStore(db, self.id)
-        self._evidence    = EvidenceStore(db, self.id)
-        self._findings    = FindingStore(db, self.id)
-        self._principals  = PrincipalStore(db, self.id)
+        self._evidence = EvidenceStore(db, self.id)
+        self._findings = FindingStore(db, self.id)
+        self._principals = PrincipalStore(db, self.id)
 
     def on_agent_update(self, cb) -> None:
         """Register a callback for agent updates (used by SSE)."""
@@ -99,7 +100,6 @@ class Workspace:
     ) -> list[dict]:
         """Return activity log entries."""
         return self._activity.list(technique_id=technique_id, level=level, limit=limit)
-
 
     @classmethod
     def create(cls, name: str, workspace_dir: Path | None = None) -> Workspace:
@@ -222,9 +222,11 @@ class Workspace:
             except Exception as e:
                 # Non-fatal — verification just stays best-effort next time.
                 import logging as _logging
+
                 _logging.getLogger(__name__).debug(
                     "Could not persist recovered principal_id for cred %d: %s",
-                    cred_id, e,
+                    cred_id,
+                    e,
                 )
             return
 
@@ -273,7 +275,6 @@ class Workspace:
         """Update a task with its final result from the agent."""
         return self._agents.process_task_response(task_id, success, output, error)
 
-
     # ================================================================
     # Account operations — delegates to AccountStore
     # ================================================================
@@ -283,16 +284,25 @@ class Workspace:
         return self._accounts.add(account)
 
     def upsert_account(
-        self, id: str, provider: str, name: str | None = None,
-        account_type: str = "account", parent_id: str | None = None,
-        metadata: str = "{}"
+        self,
+        id: str,
+        provider: str,
+        name: str | None = None,
+        account_type: str = "account",
+        parent_id: str | None = None,
+        metadata: str = "{}",
     ) -> None:
         """Convenience method to add or update a cloud account."""
-        return self._accounts.add(Account(
-            id=id, provider=provider, name=name or id,
-            account_type=account_type, parent_id=parent_id,
-            metadata=metadata
-        ))
+        return self._accounts.add(
+            Account(
+                id=id,
+                provider=provider,
+                name=name or id,
+                account_type=account_type,
+                parent_id=parent_id,
+                metadata=metadata,
+            )
+        )
 
     def get_account(self, account_id: str) -> Account | None:
         """Retrieve an account by ID."""
@@ -330,11 +340,16 @@ class Workspace:
     ) -> int:
         """Store a new credential. Delegates to CredentialStore."""
         return self._credentials.add(
-            provider=provider, credential_type=credential_type,
-            secret_data=secret_data, friendly_name=friendly_name,
-            principal_id=principal_id, account_id=account_id,
-            derived_from_id=derived_from_id, expires_at=expires_at,
-            auto_refresh=auto_refresh, obtained_via=obtained_via,
+            provider=provider,
+            credential_type=credential_type,
+            secret_data=secret_data,
+            friendly_name=friendly_name,
+            principal_id=principal_id,
+            account_id=account_id,
+            derived_from_id=derived_from_id,
+            expires_at=expires_at,
+            auto_refresh=auto_refresh,
+            obtained_via=obtained_via,
             raw_data=raw_data,
         )
 
@@ -375,8 +390,6 @@ class Workspace:
         """Link a credential to a discovered principal."""
         return self._credentials.update_principal(cred_id, principal_id, friendly_name)
 
-
-
     # ================================================================
     # API log — delegates to EvidenceStore
     # ================================================================
@@ -395,10 +408,15 @@ class Workspace:
     ) -> int:
         """Append an API call to the audit log."""
         return self._evidence.log_api_call(
-            provider=provider, action=action, credential_id=credential_id,
-            service=service, request_params=request_params,
-            response_status=response_status, response_summary=response_summary,
-            technique_id=technique_id, duration_ms=duration_ms,
+            provider=provider,
+            action=action,
+            credential_id=credential_id,
+            service=service,
+            request_params=request_params,
+            response_status=response_status,
+            response_summary=response_summary,
+            technique_id=technique_id,
+            duration_ms=duration_ms,
         )
 
     # ================================================================
@@ -440,9 +458,14 @@ class Workspace:
     ) -> int:
         """Persist a security finding. Delegates to FindingStore."""
         return self._findings.add(
-            technique_id=technique_id, tactic=tactic, title=title,
-            severity=severity, provider=provider, description=description,
-            evidence=evidence, mitre_id=mitre_id,
+            technique_id=technique_id,
+            tactic=tactic,
+            title=title,
+            severity=severity,
+            provider=provider,
+            description=description,
+            evidence=evidence,
+            mitre_id=mitre_id,
         )
 
     def clear_findings(self, technique_id: str) -> None:

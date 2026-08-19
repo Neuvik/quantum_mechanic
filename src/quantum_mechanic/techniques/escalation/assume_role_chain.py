@@ -52,12 +52,12 @@ from quantum_mechanic.core.technique import technique
 # ----------------------------------------------------------------
 # Loot schema — CloudFox-style output (loot.csv / table.txt)
 # ----------------------------------------------------------------
-LOOT_ITEMS_KEY = 'chains'
+LOOT_ITEMS_KEY = "chains"
 LOOT_SCHEMA = [
-    ('starting_principal', 'starting_principal'),
-    ('assumed_role_arn', 'assumed_role_arn'),
-    ('depth', 'depth'),
-    ('notes', None),
+    ("starting_principal", "starting_principal"),
+    ("assumed_role_arn", "assumed_role_arn"),
+    ("depth", "depth"),
+    ("notes", None),
 ]
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,11 @@ def format_chain_result(result: Any) -> None:
 
         # We only have one role per chain item in the current logic,
         # but the data structure stores it flattened.
-        status = "[bold green]ASSUMED[/bold green]" if chain.get("assumed") else "[yellow]CAN ASSUME[/yellow]"
+        status = (
+            "[bold green]ASSUMED[/bold green]"
+            if chain.get("assumed")
+            else "[yellow]CAN ASSUME[/yellow]"
+        )
         if chain.get("error"):
             status = f"[red]FAILED ({chain['error']})[/red]"
 
@@ -102,7 +106,7 @@ def format_chain_result(result: Any) -> None:
 
 @technique(
     technique_id="escalation/assume_role_chain",
-    tactic='privilege_escalation',
+    tactic="privilege_escalation",
     mitre_id="T1548",
     providers=["aws"],
     severity="high",
@@ -160,6 +164,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 # ================================================================
 # Chain traversal — recursive BFS up to MAX_DEPTH
 # ================================================================
+
 
 def _follow_chain(
     *,
@@ -221,13 +226,15 @@ def _follow_chain(
         # AssumeRole.
         # ----------------------------------------------------------
         if ctx.safe_mode:
-            chains.append({
-                "role_arn": role_arn,
-                "depth": depth,
-                "assumed": False,
-                "safe_mode": True,
-                "credential_id": None,
-            })
+            chains.append(
+                {
+                    "role_arn": role_arn,
+                    "depth": depth,
+                    "assumed": False,
+                    "safe_mode": True,
+                    "credential_id": None,
+                }
+            )
             continue
 
         # ----------------------------------------------------------
@@ -246,11 +253,13 @@ def _follow_chain(
             # ----------------------------------------------------------
             # Store the derived credential in the workspace
             # ----------------------------------------------------------
-            secret = json.dumps({
-                "aws_access_key_id": creds["AccessKeyId"],
-                "aws_secret_access_key": creds["SecretAccessKey"],
-                "aws_session_token": creds["SessionToken"],
-            })
+            secret = json.dumps(
+                {
+                    "aws_access_key_id": creds["AccessKeyId"],
+                    "aws_secret_access_key": creds["SecretAccessKey"],
+                    "aws_session_token": creds["SessionToken"],
+                }
+            )
             child_cred_id = ctx.workspace.add_credential(
                 provider="aws",
                 credential_type="assumed_role",
@@ -260,18 +269,21 @@ def _follow_chain(
                 derived_from_id=parent_cred_id,
             )
 
-            chains.append({
-                "role_arn": role_arn,
-                "depth": depth,
-                "assumed": True,
-                "credential_id": child_cred_id,
-                "expiration": str(creds.get("Expiration", "")),
-            })
+            chains.append(
+                {
+                    "role_arn": role_arn,
+                    "depth": depth,
+                    "assumed": True,
+                    "credential_id": child_cred_id,
+                    "expiration": str(creds.get("Expiration", "")),
+                }
+            )
 
             # ----------------------------------------------------------
             # Recurse: follow the chain from this new role
             # ----------------------------------------------------------
             import boto3
+
             child_session = boto3.Session(
                 aws_access_key_id=creds["AccessKeyId"],
                 aws_secret_access_key=creds["SecretAccessKey"],
@@ -293,18 +305,21 @@ def _follow_chain(
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code", "")
             logger.info("Failed to assume %s (%s)", role_arn, code)
-            chains.append({
-                "role_arn": role_arn,
-                "depth": depth,
-                "assumed": False,
-                "error": code,
-                "credential_id": None,
-            })
+            chains.append(
+                {
+                    "role_arn": role_arn,
+                    "depth": depth,
+                    "assumed": False,
+                    "error": code,
+                    "credential_id": None,
+                }
+            )
 
 
 # ================================================================
 # Trust policy evaluation
 # ================================================================
+
 
 def _trust_allows(policy_doc: dict | str, principal_arn: str) -> bool:
     """Return True if the trust policy document allows the given principal.
@@ -350,11 +365,7 @@ def _trust_allows(policy_doc: dict | str, principal_arn: str) -> bool:
             if isinstance(aws_principals, str):
                 aws_principals = [aws_principals]
             for p in aws_principals:
-                if (
-                    principal_arn in p
-                    or (account_id and account_id in p)
-                    or p == "*"
-                ):
+                if principal_arn in p or (account_id and account_id in p) or p == "*":
                     return True
 
     return False

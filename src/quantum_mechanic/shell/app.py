@@ -41,6 +41,7 @@ try:
         PRIVATE_COMMAND_HELP,
         PRIVATE_COMMANDS,
     )
+
     COMMANDS.update(PRIVATE_COMMANDS)
     COMMAND_HELP.update(PRIVATE_COMMAND_HELP)
 except ImportError:
@@ -158,7 +159,15 @@ def _build_completer(state: ShellState) -> NestedCompleter:
     if "check-ca-bypasses" in COMMANDS:
         completions["check-ca-bypasses"] = None
     if "acquire" in COMMANDS:
-        completions["acquire"] = {"entra": {"device_code": None, "interactive": None, "ropc": None, "refresh": None, "arm": None}}
+        completions["acquire"] = {
+            "entra": {
+                "device_code": None,
+                "interactive": None,
+                "ropc": None,
+                "refresh": None,
+                "arm": None,
+            }
+        }
     if "export" in COMMANDS:
         completions["export"] = {"entra": {"roadtools": None, "token": None, "describe": None}}
 
@@ -259,7 +268,8 @@ def run_shell(args: argparse.Namespace) -> None:
         full_raw = " ".join([args.command] + args.args)
         for sub_cmd in full_raw.split(";"):
             parts = shlex.split(sub_cmd.strip())
-            if not parts: continue
+            if not parts:
+                continue
             _handle_command(state, parts[0].lower(), parts[1:])
 
         if state.workspace:
@@ -301,7 +311,8 @@ def run_shell(args: argparse.Namespace) -> None:
                 except ValueError:
                     parts = cmd_segment.strip().split()
 
-                if not parts: continue
+                if not parts:
+                    continue
 
                 cmd_name = parts[0].lower()
                 cmd_args = parts[1:]

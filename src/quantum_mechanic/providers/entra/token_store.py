@@ -70,12 +70,12 @@ class EntraToken:
     # "access_token" | "refresh_token" | "prt_cookie" | "ests_cookie"
     # | "prt_with_key" | "device_cert"
     value: str
-    resource: str           # target resource URI; empty for PRT material
+    resource: str  # target resource URI; empty for PRT material
     tenant_id: str | None = None
     client_id: str | None = None
     expires_at: datetime | None = None
     device_claims: bool = False  # True if token carries deviceid / join_type claims
-    foci: bool = False           # True if this refresh token is a FOCI family member
+    foci: bool = False  # True if this refresh token is a FOCI family member
     scopes: list[str] = field(default_factory=list)
     raw_claims: dict[str, Any] = field(default_factory=dict)
 
@@ -103,10 +103,10 @@ class EntraDeviceState:
 
     device_id: str
     device_cert_pem: str
-    transport_key_pem: str   # RSA private key used to sign PRT requests
+    transport_key_pem: str  # RSA private key used to sign PRT requests
     tenant_id: str
     enrolled_at: datetime
-    join_type: str           # "azureADJoined" | "hybridAzureADJoined"
+    join_type: str  # "azureADJoined" | "hybridAzureADJoined"
 
 
 @dataclass
@@ -260,18 +260,20 @@ class EntraTokenStore:
             else:
                 kind = tok.token_type
 
-            out.append({
-                "kind": kind,
-                "resource": tok.resource or "",
-                "token_type": tok.token_type,
-                "foci": bool(tok.foci),
-                "client_id": tok.client_id or "",
-                "expires_at": tok.expires_at.isoformat() if tok.expires_at else None,
-                "minutes_remaining": tok.minutes_remaining,
-                "is_expired": tok.is_expired,
-                "scopes": scopes,
-                "roles": list(roles),
-            })
+            out.append(
+                {
+                    "kind": kind,
+                    "resource": tok.resource or "",
+                    "token_type": tok.token_type,
+                    "foci": bool(tok.foci),
+                    "client_id": tok.client_id or "",
+                    "expires_at": tok.expires_at.isoformat() if tok.expires_at else None,
+                    "minutes_remaining": tok.minutes_remaining,
+                    "is_expired": tok.is_expired,
+                    "scopes": scopes,
+                    "roles": list(roles),
+                }
+            )
         return out
 
     def add_token(self, token: EntraToken) -> None:
@@ -285,7 +287,8 @@ class EntraTokenStore:
         if token.token_type == "ests_cookie":
             cookie_name = token.raw_claims.get("cookie_name")
         self.tokens = [
-            t for t in self.tokens
+            t
+            for t in self.tokens
             if not (
                 t.token_type == token.token_type
                 and t.resource == token.resource
@@ -378,6 +381,7 @@ class EntraTokenStore:
 # JWT utilities
 # ----------------------------------------------------------------
 
+
 def decode_jwt_claims(token: str) -> dict[str, Any]:
     """Decode JWT payload without signature verification."""
     try:
@@ -396,7 +400,6 @@ def decode_jwt_claims(token: str) -> dict[str, Any]:
     except Exception as e:
         logger.debug("JWT decode failed: %s", e)
         return {}
-
 
 
 def token_from_jwt(
@@ -425,6 +428,7 @@ def token_from_jwt(
 
     # FOCI detection: token is from a known FOCI client
     from quantum_mechanic.providers.entra.foci import FOCI_CLIENT_IDS
+
     detected_client = client_id or claims.get("appid") or claims.get("azp")
     is_foci = detected_client in FOCI_CLIENT_IDS if detected_client else False
 
@@ -446,6 +450,7 @@ def token_from_jwt(
 # Resource matching (handle trailing slashes and scope suffixes)
 # ----------------------------------------------------------------
 
+
 def _resource_matches(stored: str, requested: str) -> bool:
     return stored.rstrip("/") == requested.rstrip("/")
 
@@ -453,6 +458,7 @@ def _resource_matches(stored: str, requested: str) -> bool:
 # ----------------------------------------------------------------
 # Serialization helpers
 # ----------------------------------------------------------------
+
 
 def _token_to_dict(tok: EntraToken) -> dict[str, Any]:
     return {

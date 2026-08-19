@@ -57,11 +57,17 @@ PROBES = [
         "service": "Cloud Vision",
         "url": "https://vision.googleapis.com/v1/images:annotate?key={key}",
         "method": "POST",
-        "payload": {"requests": [{"image": {"source": {"imageUri": "https://example.com/test.jpg"}}, "features": [{"type": "LABEL_DETECTION"}]}]},
+        "payload": {
+            "requests": [
+                {
+                    "image": {"source": {"imageUri": "https://example.com/test.jpg"}},
+                    "features": [{"type": "LABEL_DETECTION"}],
+                }
+            ]
+        },
         "risk": "CRITICAL",
         "hint": "Ability to run expensive image analysis. High billing risk.",
     },
-
     # --- HIGH RISK ---
     {
         "service": "Firebase Auth (Sign Up)",
@@ -78,7 +84,7 @@ PROBES = [
         "method": "POST",
         "payload": {"registration_ids": ["ABC"]},
         "risk": "HIGH",
-        "success_msg": ["InvalidRegistration"], # 400 with this message means key is valid
+        "success_msg": ["InvalidRegistration"],  # 400 with this message means key is valid
         "hint": "Send push notifications to all app users.",
     },
     {
@@ -88,7 +94,6 @@ PROBES = [
         "risk": "HIGH",
         "hint": "If status 403 (Forbidden) vs 400 (Bad Project), access level varies.",
     },
-
     # --- MEDIUM RISK ---
     {
         "service": "Cloud Translation",
@@ -104,7 +109,6 @@ PROBES = [
         "risk": "MEDIUM",
         "hint": "Access to YouTube account data.",
     },
-
     # --- LOW RISK ---
     {
         "service": "Static Maps",
@@ -128,9 +132,10 @@ PROBES = [
 
 LOOT_SCHEMA = [
     ("service", "Service", "bold white"),
-    ("risk",    "Risk",    "bold yellow"),
+    ("risk", "Risk", "bold yellow"),
     ("details", "Details", "dim"),
 ]
+
 
 def format_gcp_api_audit(result: Any) -> None:
     """Formatter for GCP API Key Audit results."""
@@ -146,7 +151,9 @@ def format_gcp_api_audit(result: Any) -> None:
         console.print("  [bold red]✗[/bold red] No accessible services found for this API key.")
         return
 
-    console.print(f"  [bold green]✓[/bold green] Discovered [bold cyan]{len(findings)}[/bold cyan] Accessible Service(s)")
+    console.print(
+        f"  [bold green]✓[/bold green] Discovered [bold cyan]{len(findings)}[/bold cyan] Accessible Service(s)"
+    )
 
     tbl = Table(box=box.ROUNDED, border_style="dim")
     tbl.add_column("Service", style="bold white")
@@ -156,20 +163,21 @@ def format_gcp_api_audit(result: Any) -> None:
     # Order by risk severity
     severity = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
     for f in sorted(findings, key=lambda x: severity.get(x["risk"], 99)):
-        risk_style = "bold red" if f["risk"] == "CRITICAL" else ("bold yellow" if f["risk"] == "HIGH" else "white")
-        tbl.add_row(
-            f["service"],
-            f"[{risk_style}]{f['risk']}[/{risk_style}]",
-            f["hint"]
+        risk_style = (
+            "bold red"
+            if f["risk"] == "CRITICAL"
+            else ("bold yellow" if f["risk"] == "HIGH" else "white")
         )
+        tbl.add_row(f["service"], f"[{risk_style}]{f['risk']}[/{risk_style}]", f["hint"])
 
     console.print(tbl)
+
 
 @technique(
     technique_id="discovery/gcp_enum_api_key",
     tactic="discovery",
     mitre_id="T1528",
-    providers=[], # Unauthenticated (uses raw key)
+    providers=[],  # Unauthenticated (uses raw key)
     severity="high",
     safe=True,
     description="Audit a Google API key for access across Gemini, Firebase, Storage, and more.",
@@ -182,14 +190,14 @@ def format_gcp_api_audit(result: Any) -> None:
             "The raw Google API key to audit (starts with AIza).",
             required=True,
             type=ParameterType.STRING,
-            example="AIzaSyA..."
+            example="AIzaSyA...",
         ),
         Parameter(
             "threads",
             "Parallel threads for probing.",
             required=False,
             type=ParameterType.INTEGER,
-            default=10
+            default=10,
         ),
     ],
 )
@@ -229,20 +237,20 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                 status_label = f"[{resp.status_code}]"
                 if accessible:
                     ctx.success(f"Accessible: {probe['service']} {status_label}")
-                    findings.append({
-                        "service": probe["service"],
-                        "risk": probe["risk"],
-                        "hint": probe["hint"]
-                    })
+                    findings.append(
+                        {"service": probe["service"], "risk": probe["risk"], "hint": probe["hint"]}
+                    )
                 else:
                     # Log failure to activity log (but hidden from main shell)
                     ctx.debug(f"Denied: {probe['service']} {status_label}")
 
-                attempts.append({
-                    "service": probe["service"],
-                    "status_code": resp.status_code,
-                    "accessible": accessible
-                })
+                attempts.append(
+                    {
+                        "service": probe["service"],
+                        "status_code": resp.status_code,
+                        "accessible": accessible,
+                    }
+                )
 
         except Exception as e:
             msg = f"Failed to probe {probe['service']}: {e}"
@@ -257,5 +265,5 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         "api_key_prefix": api_key[:8],
         "findings": findings,
         "total_probes": len(PROBES),
-        "probes_run": len(attempts)
+        "probes_run": len(attempts),
     }

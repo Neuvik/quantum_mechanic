@@ -45,28 +45,29 @@ logger = logging.getLogger(__name__)
 
 # Re-use patterns from disk_scanner.py logic
 DEFAULT_PATTERNS = {
-    "AWS Credentials":  r"^credentials$",
-    "SSH Private Key":  r"^id_(rsa|dsa|ed25519|ecdsa)$",
+    "AWS Credentials": r"^credentials$",
+    "SSH Private Key": r"^id_(rsa|dsa|ed25519|ecdsa)$",
     "Environment File": r"^\.env(\..*)?$",
-    "Kubeconfig":       r"^config$",
-    "Terraform State":  r".*\.tfstate$",
-    "Shadow File":      r"^shadow$",
+    "Kubeconfig": r"^config$",
+    "Terraform State": r".*\.tfstate$",
+    "Shadow File": r"^shadow$",
 }
 
 # ----------------------------------------------------------------
 # Loot schema
 # ----------------------------------------------------------------
-LOOT_ITEMS_KEY = 'hits'
+LOOT_ITEMS_KEY = "hits"
 LOOT_SCHEMA = [
-    ('label',   'Type',     'bold cyan'),
-    ('path',    'Location', 'white'),
-    ('size',    'Size',     'dim'),
-    ('type',    'Matched Pattern', 'yellow'),
+    ("label", "Type", "bold cyan"),
+    ("path", "Location", "white"),
+    ("size", "Size", "dim"),
+    ("type", "Matched Pattern", "yellow"),
 ]
+
 
 @technique(
     technique_id="collection/scan_disk_content",
-    tactic='collection',
+    tactic="collection",
     mitre_id="T1005",
     providers=["aws"],
     severity="high",
@@ -75,11 +76,23 @@ LOOT_SCHEMA = [
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,
     parameters=[
-        Parameter("target", "The mount point or local directory to scan.", required=False, example="/mnt/stolen-disk"),
-        Parameter("snapshot", "AWS EBS Snapshot ID to scan directly (AWS only).", required=False, example="snap-0123456789"),
-        Parameter("region", "AWS Region for the snapshot (AWS only).", required=False, example="us-east-1"),
+        Parameter(
+            "target",
+            "The mount point or local directory to scan.",
+            required=False,
+            example="/mnt/stolen-disk",
+        ),
+        Parameter(
+            "snapshot",
+            "AWS EBS Snapshot ID to scan directly (AWS only).",
+            required=False,
+            example="snap-0123456789",
+        ),
+        Parameter(
+            "region", "AWS Region for the snapshot (AWS only).", required=False, example="us-east-1"
+        ),
         Parameter("regex", "Custom regex for file matching (optional)."),
-    ]
+    ],
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Execute disk scan (Local Path or AWS Direct)."""
@@ -107,7 +120,7 @@ def _scan_aws_direct(ctx: ExecutionContext, snapshot_id: str, region: str | None
         b"BEGIN OPENSSH PRIVATE KEY",
         b"AWS_SECRET_ACCESS_KEY",
         b"DB_PASSWORD",
-        b"\"api_key\":",
+        b'"api_key":',
         b"REPRO_SECRET_MARKER",
     ]
     hits = []
@@ -115,7 +128,9 @@ def _scan_aws_direct(ctx: ExecutionContext, snapshot_id: str, region: str | None
     # 1. Attempt to find the snapshot and its region
     ec2 = ctx.session.client("ec2", region_name=initial_region)
     try:
-        ctx.info(f"AWS Direct: Searching for snapshot {snapshot_id} starting in {initial_region}...")
+        ctx.info(
+            f"AWS Direct: Searching for snapshot {snapshot_id} starting in {initial_region}..."
+        )
         snap_info = ec2.describe_snapshots(SnapshotIds=[snapshot_id])["Snapshots"][0]
         aws_region = initial_region
     except Exception:
@@ -123,7 +138,8 @@ def _scan_aws_direct(ctx: ExecutionContext, snapshot_id: str, region: str | None
         ctx.info(f"AWS Direct: Snapshot not found in {initial_region}, searching other regions...")
         found = False
         for r in ["us-east-1", "us-east-2", "us-west-1", "us-west-2", "eu-west-1"]:
-            if r == initial_region: continue
+            if r == initial_region:
+                continue
             try:
                 temp_ec2 = ctx.session.client("ec2", region_name=r)
                 snap_info = temp_ec2.describe_snapshots(SnapshotIds=[snapshot_id])["Snapshots"][0]
@@ -145,7 +161,9 @@ def _scan_aws_direct(ctx: ExecutionContext, snapshot_id: str, region: str | None
         # 2. Wait for snapshot completion
         state = snap_info.get("State")
         if state != "completed":
-            ctx.info(f"AWS Direct: Waiting for snapshot {snapshot_id} to reach 'completed' (Current: {state})...")
+            ctx.info(
+                f"AWS Direct: Waiting for snapshot {snapshot_id} to reach 'completed' (Current: {state})..."
+            )
             waiter = ec2.get_waiter("snapshot_completed")
             waiter.wait(SnapshotIds=[snapshot_id], WaiterConfig={"MaxAttempts": 20, "Delay": 5})
 
@@ -157,11 +175,14 @@ def _scan_aws_direct(ctx: ExecutionContext, snapshot_id: str, region: str | None
                 # MaxResults 1000 is the API max
                 resp = ebs.list_snapshot_blocks(SnapshotId=snapshot_id, MaxResults=1000)
                 blocks = resp.get("Blocks", [])
-                if blocks: break
+                if blocks:
+                    break
 
                 # If no blocks, but snapshot is complete, it might be an empty/zero-filled volume
                 # or just propagation lag
-                ctx.info(f"AWS Direct: No blocks returned yet (Attempt {attempt+1}/{max_retries})...")
+                ctx.info(
+                    f"AWS Direct: No blocks returned yet (Attempt {attempt + 1}/{max_retries})..."
+                )
                 time.sleep(5)
             except Exception as api_e:
                 if "ResourceNotFoundException" in str(api_e) and attempt < max_retries - 1:
@@ -183,22 +204,24 @@ def _scan_aws_direct(ctx: ExecutionContext, snapshot_id: str, region: str | None
             try:
                 # 4. Get the raw block data
                 block_data = ebs.get_snapshot_block(
-                    SnapshotId=snapshot_id,
-                    BlockIndex=idx,
-                    BlockToken=token
+                    SnapshotId=snapshot_id, BlockIndex=idx, BlockToken=token
                 )["BlockData"].read()
 
-                ctx.info(f"Block {idx} read ({len(block_data)} bytes). Start (hex): {block_data[:32].hex()}")
+                ctx.info(
+                    f"Block {idx} read ({len(block_data)} bytes). Start (hex): {block_data[:32].hex()}"
+                )
 
                 # 5. Heuristic pattern matching
                 for p in patterns:
                     if p in block_data:
-                        hits.append({
-                            "label": "Direct Block Match",
-                            "path": f"Snapshot: {snapshot_id} / Block: {idx}",
-                            "size": len(block_data),
-                            "type": p.decode()
-                        })
+                        hits.append(
+                            {
+                                "label": "Direct Block Match",
+                                "path": f"Snapshot: {snapshot_id} / Block: {idx}",
+                                "size": len(block_data),
+                                "type": p.decode(),
+                            }
+                        )
                         ctx.success(f"Discovered secret marker '{p.decode()}' in block {idx}")
                         break
 
@@ -209,7 +232,7 @@ def _scan_aws_direct(ctx: ExecutionContext, snapshot_id: str, region: str | None
         return {
             "hits": hits,
             "count": len(hits),
-            "note": "Scanned via EBS Direct APIs (Zero-Mount)"
+            "note": "Scanned via EBS Direct APIs (Zero-Mount)",
         }
     except Exception as e:
         return {"error": str(e), "hits": []}
@@ -228,7 +251,9 @@ def _scan_local(ctx: ExecutionContext, mount_point: str) -> dict[str, Any]:
     if custom_regex:
         compiled = {"Custom Match": re.compile(custom_regex, re.IGNORECASE)}
     else:
-        compiled = {label: re.compile(pat, re.IGNORECASE) for label, pat in DEFAULT_PATTERNS.items()}
+        compiled = {
+            label: re.compile(pat, re.IGNORECASE) for label, pat in DEFAULT_PATTERNS.items()
+        }
 
     skip_dirs = {"dev", "proc", "sys", "run", "tmp", "node_modules", "usr/share"}
     hits = []
@@ -243,8 +268,10 @@ def _scan_local(ctx: ExecutionContext, mount_point: str) -> dict[str, Any]:
             full_path = Path(root) / filename
 
             try:
-                if not full_path.is_file(): continue
-                if full_path.stat().st_size > 10 * 1024 * 1024: continue # 10MB limit
+                if not full_path.is_file():
+                    continue
+                if full_path.stat().st_size > 10 * 1024 * 1024:
+                    continue  # 10MB limit
             except Exception as e:
                 logger.debug("Failed to stat file %s: %s", full_path, e)
                 continue
@@ -252,18 +279,18 @@ def _scan_local(ctx: ExecutionContext, mount_point: str) -> dict[str, Any]:
             for label, regex in compiled.items():
                 if regex.match(filename):
                     # Quick logic validation
-                    if label == "AWS Credentials" and ".aws" not in str(full_path): continue
+                    if label == "AWS Credentials" and ".aws" not in str(full_path):
+                        continue
 
-                    hits.append({
-                        "label": label,
-                        "path": str(full_path),
-                        "size": full_path.stat().st_size,
-                        "type": "File Match"
-                    })
+                    hits.append(
+                        {
+                            "label": label,
+                            "path": str(full_path),
+                            "size": full_path.stat().st_size,
+                            "type": "File Match",
+                        }
+                    )
                     break
 
     ctx.success(f"Scan complete. Found {len(hits)} sensitive items.")
-    return {
-        "hits": hits,
-        "count": len(hits)
-    }
+    return {"hits": hits, "count": len(hits)}

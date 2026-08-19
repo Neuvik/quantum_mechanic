@@ -64,10 +64,14 @@ def _build_credential_chain(workspace: Workspace) -> str:
             prefix = "└─ " if depth > 0 else ""
             obtained = f" ← {c.obtained_via}" if c.obtained_via else ""
             name = c.friendly_name or c.credential_type
-            status_marker = " ⚠ expiring" if c.status == "expiring" else (
-                " ✗ expired" if c.status == "expired" else ""
+            status_marker = (
+                " ⚠ expiring"
+                if c.status == "expiring"
+                else (" ✗ expired" if c.status == "expired" else "")
             )
-            lines.append(f"{indent}{prefix}**#{c.id}** {c.provider.upper()} `{name}`{obtained}{status_marker}")
+            lines.append(
+                f"{indent}{prefix}**#{c.id}** {c.provider.upper()} `{name}`{obtained}{status_marker}"
+            )
             render(c.id, depth + 1)
 
     render(None, 0)
@@ -91,16 +95,13 @@ def _build_technique_timeline(workspace: Workspace) -> str:
 
         # Attempt to get provider from output_json
         import json
+
         provider = "?"
         principal = "?"
         try:
             data = json.loads(row.get("output_json", "{}"))
             provider = data.get("provider", "?")
-            principal = (
-                data.get("principal")
-                or data.get("friendly_name")
-                or "?"
-            )
+            principal = data.get("principal") or data.get("friendly_name") or "?"
         except Exception as e:
             logger.debug("Could not parse output_json for evidence row %s: %s", row.get("id"), e)
 
@@ -120,11 +121,12 @@ def _build_findings_summary(workspace: Workspace) -> str:
     rows.append("| ID | Severity | Title | Provider | Technique |")
     rows.append("|----|----------|-------|----------|-----------|")
 
-    for f in sorted(findings, key=lambda x: (
-        {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(
+    for f in sorted(
+        findings,
+        key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(
             x.get("severity", "info").lower(), 99
-        )
-    )):
+        ),
+    ):
         fid = f.get("id", "?")
         severity = f.get("severity", "info")
         emoji = _severity_emoji(severity)

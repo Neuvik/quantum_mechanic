@@ -8,6 +8,7 @@ re-import the credential to obtain a fresh token. This is intentional: a
 captured-at-import credential cannot silently refresh from local state, because
 that's exactly the bug class this class exists to prevent.
 """
+
 from __future__ import annotations
 
 import time

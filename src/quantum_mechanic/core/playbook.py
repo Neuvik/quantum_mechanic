@@ -20,10 +20,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 class PlaybookRunner:
     """Loads and executes multi-step technique sequences."""
 
-    def __init__(self, runner: TechniqueRunner, on_event: Callable[[TelemetryEvent], None] | None = None):
+    def __init__(
+        self, runner: TechniqueRunner, on_event: Callable[[TelemetryEvent], None] | None = None
+    ):
         self.runner = runner
         self.on_event = on_event
 
@@ -47,7 +50,7 @@ class PlaybookRunner:
         logger.info("Starting playbook: %s (%d steps)", name, len(steps))
 
         for i, step in enumerate(steps):
-            step_name = step.get("name", f"Step {i+1}")
+            step_name = step.get("name", f"Step {i + 1}")
             tech_id = step.get("technique")
             params = step.get("params", {})
             note = step.get("note")
@@ -66,12 +69,15 @@ class PlaybookRunner:
                     TelemetryLevel,
                     TelemetryType,
                 )
-                self.on_event(TelemetryEvent(
-                    technique_id=tech_id,
-                    event_type=TelemetryType.LOG,
-                    level=TelemetryLevel.INFO,
-                    message=f"Playbook Step: {step_name} [{tech_id}]"
-                ))
+
+                self.on_event(
+                    TelemetryEvent(
+                        technique_id=tech_id,
+                        event_type=TelemetryType.LOG,
+                        level=TelemetryLevel.INFO,
+                        message=f"Playbook Step: {step_name} [{tech_id}]",
+                    )
+                )
 
             logger.info("Executing step: %s [%s]", step_name, tech_id)
 

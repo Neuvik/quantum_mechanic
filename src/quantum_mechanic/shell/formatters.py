@@ -163,9 +163,7 @@ def format_credential_detail(cred: dict, token_details: list[dict]) -> None:
         console.print(line)
 
     if not token_details:
-        console.print(
-            "  [dim]No per-token detail available for this credential type.[/dim]"
-        )
+        console.print("  [dim]No per-token detail available for this credential type.[/dim]")
         return
 
     tbl = Table(box=box.ROUNDED, border_style="dim", title="Tokens")
@@ -192,7 +190,7 @@ def format_credential_detail(cred: dict, token_details: list[dict]) -> None:
         resource = td.get("resource") or ""
         # Compact resource: strip https:// and trailing /
         if resource.startswith("https://"):
-            resource = resource[len("https://"):]
+            resource = resource[len("https://") :]
         resource = resource.rstrip("/")
 
         client = td.get("client_id") or ""
@@ -230,7 +228,9 @@ def format_declarative_result(result: TechniqueResult) -> None:
 
     # Show count summary like legacy formatters did
     provider_str = result.provider.upper() if result.provider else "UNKNOWN"
-    console.print(f"  [bold green]✓[/bold green] {len(items)} item(s) found — [dim]{provider_str}[/dim]")
+    console.print(
+        f"  [bold green]✓[/bold green] {len(items)} item(s) found — [dim]{provider_str}[/dim]"
+    )
 
     if not items:
         return
@@ -269,13 +269,21 @@ def format_technique_result(result: TechniqueResult) -> None:
             try:
                 result.formatter_func(result)
             except Exception:
-                msg = result.error or (result.data.get("error") if isinstance(result.data, dict) else None) or "Unknown error"
+                msg = (
+                    result.error
+                    or (result.data.get("error") if isinstance(result.data, dict) else None)
+                    or "Unknown error"
+                )
                 console.print(f"  [bold red]✗[/bold red] {msg}")
                 scope = result.data.get("required_scope") if isinstance(result.data, dict) else None
                 if scope:
                     console.print(f"    [dim]Required scope: {scope}[/dim]")
         else:
-            msg = result.error or (result.data.get("error") if isinstance(result.data, dict) else None) or "Unknown error"
+            msg = (
+                result.error
+                or (result.data.get("error") if isinstance(result.data, dict) else None)
+                or "Unknown error"
+            )
             console.print(f"  [bold red]✗[/bold red] {msg}")
             scope = result.data.get("required_scope") if isinstance(result.data, dict) else None
             if scope:
@@ -304,7 +312,9 @@ def format_technique_result(result: TechniqueResult) -> None:
         return
 
     if result.status == "partial":
-        console.print("  [bold yellow]⚠[/bold yellow] Partial results — some pages failed after first success")
+        console.print(
+            "  [bold yellow]⚠[/bold yellow] Partial results — some pages failed after first success"
+        )
         # Fall through to render the partial data
 
     processed = False
@@ -316,8 +326,11 @@ def format_technique_result(result: TechniqueResult) -> None:
             processed = True
         except Exception as e:
             from logging import getLogger
+
             logging_logger = getLogger("qm.shell")
-            logging_logger.debug("Decentralized formatter failed for %s: %s", result.technique_id, e)
+            logging_logger.debug(
+                "Decentralized formatter failed for %s: %s", result.technique_id, e
+            )
             processed = False
 
     # 2. Declarative formatter (The "Intelligent" path)
@@ -338,6 +351,7 @@ def format_technique_result(result: TechniqueResult) -> None:
     # ── CloudFox-style loot path announcement ──────────────────────────────
     if result.loot_path:
         from pathlib import Path as _Path
+
         loot_dir = _Path(result.loot_path)
         try:
             display = "~/" + str(loot_dir.relative_to(_Path.home()))
@@ -438,14 +452,23 @@ def format_help_menu(commands: dict | None = None, command_help_registry=None) -
     workspace_table.add_row("workspace create <name>", "Create a new workspace")
     workspace_table.add_row("workspace load <name>", "Load an existing workspace")
     workspace_table.add_row("workspace list", "List all workspaces")
-    console.print(Panel(workspace_table, title="[bold]Workspaces[/bold]", title_align="left", border_style="blue"))
+    console.print(
+        Panel(
+            workspace_table,
+            title="[bold]Workspaces[/bold]",
+            title_align="left",
+            border_style="blue",
+        )
+    )
 
     # Credential Commands
     cred_table = Table(box=box.SIMPLE, border_style="dim", show_header=False)
     cred_table.add_column("Command", style="bold cyan", width=40)
     cred_table.add_column("Description")
     cred_table.add_row("import aws --profile <name>", "Import AWS CLI profile")
-    cred_table.add_row("import aws --access-key <key> --secret-key <secret>", "Import AWS keys directly")
+    cred_table.add_row(
+        "import aws --access-key <key> --secret-key <secret>", "Import AWS keys directly"
+    )
     cred_table.add_row("import azure --default", "Import Azure default credentials")
     cred_table.add_row("import gcp --default", "Import GCP application default creds")
     cred_table.add_row("import oci --default", "Import OCI config (~/.oci/config)")
@@ -459,7 +482,11 @@ def format_help_menu(commands: dict | None = None, command_help_registry=None) -
     cred_table.add_row("creds --active", "List active credentials only")
     cred_table.add_row("use <id>  |  use none", "Set or clear active credential")
     cred_table.add_row("raw <id>", "Show raw JSON for a credential/principal")
-    console.print(Panel(cred_table, title="[bold]Credentials[/bold]", title_align="left", border_style="green"))
+    console.print(
+        Panel(
+            cred_table, title="[bold]Credentials[/bold]", title_align="left", border_style="green"
+        )
+    )
 
     # Technique Commands
     tech_table = Table(box=box.SIMPLE, border_style="dim", show_header=False)
@@ -474,16 +501,29 @@ def format_help_menu(commands: dict | None = None, command_help_registry=None) -
     tech_table.add_row("playbook list", "List available playbooks")
     tech_table.add_row("playbook run <name>", "Run a playbook (YAML sequence)")
     tech_table.add_row("reload", "Hot-reload technique modules")
-    console.print(Panel(tech_table, title="[bold]Techniques[/bold]", title_align="left", border_style="magenta"))
+    console.print(
+        Panel(
+            tech_table, title="[bold]Techniques[/bold]", title_align="left", border_style="magenta"
+        )
+    )
 
     # Assessment & Analytics
     report_table = Table(box=box.SIMPLE, border_style="dim", show_header=False)
     report_table.add_column("Command", style="bold cyan", width=40)
     report_table.add_column("Description")
     report_table.add_row("report", "Show the ATTACK_PATH.md engagement narrative")
-    report_table.add_row("check-ca-bypasses", "Show aggregated bypass vectors for Conditional Access policies")
+    report_table.add_row(
+        "check-ca-bypasses", "Show aggregated bypass vectors for Conditional Access policies"
+    )
     report_table.add_row("ask <question>", "Ask the autonomous RAG Agent for advice")
-    console.print(Panel(report_table, title="[bold]Report & Agent[/bold]", title_align="left", border_style="cyan"))
+    console.print(
+        Panel(
+            report_table,
+            title="[bold]Report & Agent[/bold]",
+            title_align="left",
+            border_style="cyan",
+        )
+    )
 
     # Extended commands — only shown when additional command handlers are loaded
     if commands is not None and "exploits" in commands:
@@ -496,7 +536,14 @@ def format_help_menu(commands: dict | None = None, command_help_registry=None) -
         adv_table.add_row("payloads generate <name>", "Generate a payload")
         adv_table.add_row("connect <qm://token>", "Connect to a remote control plane")
         adv_table.add_row("disconnect", "Return to local mode")
-        console.print(Panel(adv_table, title="[bold red]Advanced[/bold red]", title_align="left", border_style="red"))
+        console.print(
+            Panel(
+                adv_table,
+                title="[bold red]Advanced[/bold red]",
+                title_align="left",
+                border_style="red",
+            )
+        )
 
     # General
     gen_table = Table(box=box.SIMPLE, border_style="dim", show_header=False)
@@ -504,7 +551,9 @@ def format_help_menu(commands: dict | None = None, command_help_registry=None) -
     gen_table.add_column("Description")
     gen_table.add_row("help", "Show this help menu")
     gen_table.add_row("exit / quit", "Exit QM")
-    console.print(Panel(gen_table, title="[bold]General[/bold]", title_align="left", border_style="white"))
+    console.print(
+        Panel(gen_table, title="[bold]General[/bold]", title_align="left", border_style="white")
+    )
     console.print()
 
 
@@ -526,8 +575,14 @@ def _format_help_from_registry(registry) -> None:
     }
 
     for cat_key in [
-        "workspaces", "credentials", "techniques", "playbooks",
-        "evidence", "reporting", "shell", "advanced",
+        "workspaces",
+        "credentials",
+        "techniques",
+        "playbooks",
+        "evidence",
+        "reporting",
+        "shell",
+        "advanced",
     ]:
         records = by_cat.get(cat_key, [])
         if not records:
@@ -537,12 +592,14 @@ def _format_help_from_registry(registry) -> None:
         tbl.add_column("Description")
         for rec in records:
             tbl.add_row(rec.name, rec.synopsis)
-        console.print(Panel(
-            tbl,
-            title=f"[bold]{category_titles[cat_key]}[/bold]",
-            title_align="left",
-            border_style="blue",
-        ))
+        console.print(
+            Panel(
+                tbl,
+                title=f"[bold]{category_titles[cat_key]}[/bold]",
+                title_align="left",
+                border_style="blue",
+            )
+        )
 
     console.print("\n  [dim]Use `help <command>` for full details on any command.[/dim]")
     console.print("  [dim]Use `techniques` to list runnable techniques.[/dim]\n")

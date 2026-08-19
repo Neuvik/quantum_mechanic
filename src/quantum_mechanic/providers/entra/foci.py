@@ -76,6 +76,7 @@ def resolve_client_alias(value: str | None) -> str | None:
         return None
     return CLIENT_ALIASES.get(value.strip().lower(), value)
 
+
 # ----------------------------------------------------------------
 # Resource → typical FOCI client mapping.
 # Used to pick the most appropriate client for each resource.

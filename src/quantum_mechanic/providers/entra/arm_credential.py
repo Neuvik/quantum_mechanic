@@ -47,19 +47,13 @@ class EntraTokenCredential:
         tok = self._store.best_token(resource)
         if tok is None or tok.token_type == "refresh_token":
             from quantum_mechanic.providers.entra.foci import foci_expand
+
             tok = foci_expand(self._store, resource)
 
         if tok is None:
-            raise ValueError(
-                f"No ARM token available for {resource}. "
-                "Run: acquire entra arm"
-            )
+            raise ValueError(f"No ARM token available for {resource}. Run: acquire entra arm")
 
-        expires_on = (
-            int(tok.expires_at.timestamp())
-            if tok.expires_at
-            else int(time.time()) + 3600
-        )
+        expires_on = int(tok.expires_at.timestamp()) if tok.expires_at else int(time.time()) + 3600
         return AccessToken(tok.value, expires_on)
 
     def get_token_info(self, *scopes: str, **kwargs) -> object:

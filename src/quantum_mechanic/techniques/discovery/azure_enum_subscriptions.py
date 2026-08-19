@@ -107,9 +107,7 @@ def _format_azure_enum_subscriptions(result: Any) -> None:
     providers=["azure", "entra"],
     severity="info",
     safe=True,
-    description=(
-        "Enumerate all Azure subscriptions accessible to the current identity via ARM."
-    ),
+    description=("Enumerate all Azure subscriptions accessible to the current identity via ARM."),
     formatter=_format_azure_enum_subscriptions,
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,
@@ -139,12 +137,14 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         subscriptions = []
         for s in raw_subs:
             state = _state_str(s.state)
-            subscriptions.append({
-                "subscriptionId": s.subscription_id,
-                "displayName": s.display_name,
-                "state": state,
-                "tenantId": tenant_id,
-            })
+            subscriptions.append(
+                {
+                    "subscriptionId": s.subscription_id,
+                    "displayName": s.display_name,
+                    "state": state,
+                    "tenantId": tenant_id,
+                }
+            )
 
         enabled_count = sum(1 for s in subscriptions if s["state"] == "Enabled")
 

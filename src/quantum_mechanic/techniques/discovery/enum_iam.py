@@ -53,10 +53,10 @@ from quantum_mechanic.core.technique import technique
 # ----------------------------------------------------------------
 # Loot schema — CloudFox-style output (loot.csv / table.txt)
 # ----------------------------------------------------------------
-LOOT_ITEMS_KEY = 'attached_policies'
+LOOT_ITEMS_KEY = "attached_policies"
 LOOT_SCHEMA = [
-    ('PolicyName', 'PolicyName'),
-    ('PolicyArn', 'PolicyArn'),
+    ("PolicyName", "PolicyName"),
+    ("PolicyArn", "PolicyArn"),
 ]
 
 try:
@@ -83,7 +83,9 @@ def format_iam_result(result: Any) -> None:
     principal = data.get("principal", "unknown")
     principal_type = data.get("principal_type", "unknown")
 
-    console.print(f"  [bold green]✓[/bold green] IAM Enumeration for {provider.upper()} {principal_type} [cyan]{principal}[/cyan]")
+    console.print(
+        f"  [bold green]✓[/bold green] IAM Enumeration for {provider.upper()} {principal_type} [cyan]{principal}[/cyan]"
+    )
 
     if provider == "aws":
         attached_policies = data.get("attached_policies", [])
@@ -94,7 +96,9 @@ def format_iam_result(result: Any) -> None:
             return
 
         if attached_policies:
-            table = Table(box=None, padding=(0, 2), title="Attached Managed Policies", title_style="bold cyan")
+            table = Table(
+                box=None, padding=(0, 2), title="Attached Managed Policies", title_style="bold cyan"
+            )
             table.add_column("Policy Name", style="white")
             table.add_column("Policy ARN", style="dim")
             for p in attached_policies:
@@ -102,7 +106,9 @@ def format_iam_result(result: Any) -> None:
             console.print(table)
 
         if inline_policies:
-            table = Table(box=None, padding=(0, 2), title="Inline Policies", title_style="bold yellow")
+            table = Table(
+                box=None, padding=(0, 2), title="Inline Policies", title_style="bold yellow"
+            )
             table.add_column("Policy Name", style="white")
             for p in inline_policies:
                 table.add_row(p.get("PolicyName", ""))
@@ -114,12 +120,16 @@ def format_iam_result(result: Any) -> None:
             console.print("  [dim]No Azure role assignments found.[/dim]")
             return
 
-        table = Table(box=None, padding=(0, 2), title="Azure Role Assignments", title_style="bold cyan")
+        table = Table(
+            box=None, padding=(0, 2), title="Azure Role Assignments", title_style="bold cyan"
+        )
         table.add_column("Role Name", style="bold white")
         table.add_column("Scope", style="dim")
         table.add_column("Definition ID", style="dim")
         for a in assignments:
-            table.add_row(a.get("roleName", "Unknown"), a.get("scope", ""), str(a.get("roleDefinitionId", "")))
+            table.add_row(
+                a.get("roleName", "Unknown"), a.get("scope", ""), str(a.get("roleDefinitionId", ""))
+            )
         console.print(table)
 
     elif provider == "gcp":
@@ -146,7 +156,9 @@ def format_iam_result(result: Any) -> None:
             return
 
         if groups:
-            table = Table(box=None, padding=(0, 2), title="OCI Group Memberships", title_style="bold cyan")
+            table = Table(
+                box=None, padding=(0, 2), title="OCI Group Memberships", title_style="bold cyan"
+            )
             table.add_column("Group Name", style="bold white")
             table.add_column("Group ID", style="dim")
             for g in groups:
@@ -154,7 +166,12 @@ def format_iam_result(result: Any) -> None:
             console.print(table)
 
         if policies:
-            table = Table(box=None, padding=(0, 2), title="OCI Policies (Across Compartments)", title_style="bold yellow")
+            table = Table(
+                box=None,
+                padding=(0, 2),
+                title="OCI Policies (Across Compartments)",
+                title_style="bold yellow",
+            )
             table.add_column("Policy Name", style="bold white")
             table.add_column("Compartment", style="dim")
             table.add_column("Statements", style="green")
@@ -166,7 +183,7 @@ def format_iam_result(result: Any) -> None:
 
 @technique(
     technique_id="discovery/enum_iam",
-    tactic='discovery',
+    tactic="discovery",
     mitre_id="T1087.004",
     providers=["aws", "azure", "gcp", "oci"],
     severity="info",
@@ -556,7 +573,9 @@ def _enum_oci(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
             tenancy_id, compartment_id_in_subtree=True, access_level="ACCESSIBLE"
         ).data
         compartment_ids.extend([c.id for c in child_compartments])
-        ctx.info(f"Discovered {len(compartment_ids)} accessible compartments for policy enumeration.")
+        ctx.info(
+            f"Discovered {len(compartment_ids)} accessible compartments for policy enumeration."
+        )
     except Exception as e:
         msg = getattr(e, "message", str(e))
         logger.warning(f"Failed to list child compartments: {msg}")
@@ -584,5 +603,6 @@ def _enum_oci(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         "groups": groups,
         "policies": policies,
     }
+
 
 # ================================================================

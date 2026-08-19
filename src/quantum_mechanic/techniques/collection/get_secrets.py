@@ -123,21 +123,23 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
                             value = value_resp["SecretString"]
                             content_type = "text/plain"
                         else:
-                            value = base64.b64encode(
-                                value_resp.get("SecretBinary", b"")
-                            ).decode("ascii")
+                            value = base64.b64encode(value_resp.get("SecretBinary", b"")).decode(
+                                "ascii"
+                            )
                             content_type = "binary/base64"
                     except Exception as e:
                         ctx.warn(f"Failed to access secret {name} in region {region}: {e}")
                         value = "[ACCESS DENIED]"
                         content_type = "Unknown"
 
-                    secrets.append({
-                        "vault": region,
-                        "name": name,
-                        "value": value,
-                        "content_type": content_type,
-                    })
+                    secrets.append(
+                        {
+                            "vault": region,
+                            "name": name,
+                            "value": value,
+                            "content_type": content_type,
+                        }
+                    )
 
                 next_token = response.get("NextToken")
                 if not next_token:
@@ -185,9 +187,8 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
                                 continue
 
                             full_vault = vault
-                            if (
-                                not getattr(vault, "properties", None)
-                                or not getattr(vault.properties, "vault_uri", None)
+                            if not getattr(vault, "properties", None) or not getattr(
+                                vault.properties, "vault_uri", None
                             ):
                                 try:
                                     rg = vault.id.split("/")[4]
@@ -211,9 +212,8 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
                     kv_client = KeyVaultManagementClient(cred, sub.subscription_id)
                     for vault in kv_client.vaults.list():
                         full_vault = vault
-                        if (
-                            not getattr(vault, "properties", None)
-                            or not getattr(vault.properties, "vault_uri", None)
+                        if not getattr(vault, "properties", None) or not getattr(
+                            vault.properties, "vault_uri", None
                         ):
                             try:
                                 rg = vault.id.split("/")[4]
@@ -239,12 +239,14 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
             if secret_name_param:
                 try:
                     secret = client.get_secret(secret_name_param)
-                    secrets.append({
-                        "vault": vault_name,
-                        "name": secret.name,
-                        "value": secret.value,
-                        "content_type": secret.properties.content_type or "Unknown",
-                    })
+                    secrets.append(
+                        {
+                            "vault": vault_name,
+                            "name": secret.name,
+                            "value": secret.value,
+                            "content_type": secret.properties.content_type or "Unknown",
+                        }
+                    )
                 except ResourceNotFoundError:
                     ctx.warn(f"Secret {secret_name_param} not found in vault {vault_name}.")
                 except ClientAuthenticationError:
@@ -254,19 +256,23 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
                     for secret_prop in client.list_properties_of_secrets():
                         try:
                             secret = client.get_secret(secret_prop.name)
-                            secrets.append({
-                                "vault": vault_name,
-                                "name": secret.name,
-                                "value": secret.value,
-                                "content_type": secret.properties.content_type or "Unknown",
-                            })
+                            secrets.append(
+                                {
+                                    "vault": vault_name,
+                                    "name": secret.name,
+                                    "value": secret.value,
+                                    "content_type": secret.properties.content_type or "Unknown",
+                                }
+                            )
                         except ClientAuthenticationError:
-                            secrets.append({
-                                "vault": vault_name,
-                                "name": secret_prop.name,
-                                "value": "[ACCESS DENIED]",
-                                "content_type": secret_prop.content_type or "Unknown",
-                            })
+                            secrets.append(
+                                {
+                                    "vault": vault_name,
+                                    "name": secret_prop.name,
+                                    "value": "[ACCESS DENIED]",
+                                    "content_type": secret_prop.content_type or "Unknown",
+                                }
+                            )
                 except ClientAuthenticationError:
                     ctx.warn(f"Access denied listing secrets in vault {vault_name}.")
 
@@ -336,12 +342,14 @@ def _gcp(ctx: ExecutionContext) -> dict[str, Any]:
                     payload = "[ACCESS DENIED]"
                     inferred_type = "Unknown"
 
-                secrets.append({
-                    "vault": project_id,
-                    "name": secret_name,
-                    "value": payload,
-                    "content_type": inferred_type,
-                })
+                secrets.append(
+                    {
+                        "vault": project_id,
+                        "name": secret_name,
+                        "value": payload,
+                        "content_type": inferred_type,
+                    }
+                )
         except Exception as e:
             ctx.warn(f"Failed to list Secret Manager secrets in project {project_id}: {e}")
 

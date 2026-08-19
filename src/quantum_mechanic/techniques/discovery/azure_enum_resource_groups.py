@@ -55,11 +55,11 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------
 LOOT_ITEMS_KEY = "resource_groups"
 LOOT_SCHEMA = [
-    ("name",               "Name",         "bold cyan"),
-    ("location",           "Location",     "dim"),
-    ("subscription_id",    "Subscription", "dim"),
-    ("provisioning_state", "State",        "green"),
-    ("resource_count",     "Resources",    "white"),
+    ("name", "Name", "bold cyan"),
+    ("location", "Location", "dim"),
+    ("subscription_id", "Subscription", "dim"),
+    ("provisioning_state", "State", "green"),
+    ("resource_count", "Resources", "white"),
 ]
 
 
@@ -188,16 +188,18 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                     if rg.properties and getattr(rg.properties, "provisioning_state", None)
                     else ""
                 )
-                resource_groups.append({
-                    "name": name,
-                    "location": rg.location or "",
-                    "subscription_id": sub_id,
-                    "subscription_name": sub_name,
-                    "provisioning_state": provisioning_state,
-                    "tags": rg.tags or {},
-                    "resource_count": resource_counts.get(name.lower(), 0),
-                    "id": rg.id or "",
-                })
+                resource_groups.append(
+                    {
+                        "name": name,
+                        "location": rg.location or "",
+                        "subscription_id": sub_id,
+                        "subscription_name": sub_name,
+                        "provisioning_state": provisioning_state,
+                        "tags": rg.tags or {},
+                        "resource_count": resource_counts.get(name.lower(), 0),
+                        "id": rg.id or "",
+                    }
+                )
 
             ctx.info(f"  {sub_name}: {len(rgs)} resource group(s)")
 

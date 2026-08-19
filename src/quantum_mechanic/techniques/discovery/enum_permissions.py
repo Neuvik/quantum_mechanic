@@ -40,10 +40,10 @@ from quantum_mechanic.core.technique import technique
 # ----------------------------------------------------------------
 # Loot schema — Declarative table mapping
 # ----------------------------------------------------------------
-LOOT_ITEMS_KEY = 'permissions'
+LOOT_ITEMS_KEY = "permissions"
 LOOT_SCHEMA = [
-    ('action', 'Action', 'bold cyan'),
-    ('status', 'Status', 'white'),
+    ("action", "Action", "bold cyan"),
+    ("status", "Status", "white"),
 ]
 
 logger = logging.getLogger(__name__)
@@ -66,8 +66,12 @@ def format_permissions_result(result: Any) -> None:
     principal = data.get("principal", "unknown")
     method = data.get("method", "unknown")
 
-    console.print(f"  [bold green]✓[/bold green] Permission Enumeration Successful — [dim]{provider.upper()}[/dim]")
-    console.print(f"  [dim]Principal: [cyan]{principal}[/cyan] | Method: [yellow]{method}[/yellow][/dim]")
+    console.print(
+        f"  [bold green]✓[/bold green] Permission Enumeration Successful — [dim]{provider.upper()}[/dim]"
+    )
+    console.print(
+        f"  [dim]Principal: [cyan]{principal}[/cyan] | Method: [yellow]{method}[/yellow][/dim]"
+    )
 
     allowed = data.get("allowed_actions", [])
     denied = data.get("denied_actions", [])
@@ -96,7 +100,7 @@ def format_permissions_result(result: Any) -> None:
 
 @technique(
     technique_id="discovery/enum_permissions",
-    tactic='discovery',
+    tactic="discovery",
     mitre_id="T1087",
     providers=["aws", "azure", "gcp", "oci"],
     severity="info",
@@ -145,7 +149,10 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         }
 
     # Analyze discovered permissions to generate actionable guidance
-    if "allowed_actions" in result and getattr(result, "get", lambda x: None)("status") == "success":
+    if (
+        "allowed_actions" in result
+        and getattr(result, "get", lambda x: None)("status") == "success"
+    ):
         steps = _generate_next_steps(ctx.provider_name, result.get("allowed_actions", []))
         if steps:
             result["next_steps"] = steps
@@ -177,7 +184,7 @@ def _enum_aws(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         "s3:ListAllMyBuckets",
         "secretsmanager:ListSecrets",
         "iam:CreateUser",
-        "iam:CreateAccessKey"
+        "iam:CreateAccessKey",
     ]
 
     allowed = []
@@ -209,11 +216,13 @@ def _enum_aws(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
             "principal": arn,
             "allowed_actions": sorted(allowed),
             "denied_actions": sorted(denied),
-            "errors": errors
+            "errors": errors,
         }
 
     except Exception as e:
-        logger.debug(f"iam:SimulatePrincipalPolicy failed or denied: {e}. Falling back to active probing/DryRun.")
+        logger.debug(
+            f"iam:SimulatePrincipalPolicy failed or denied: {e}. Falling back to active probing/DryRun."
+        )
 
     # Approach 2: Active API Call Probing / DryRun Fallback
     # If we lack permission to use the simulator, we must actively check the endpoints.
@@ -258,7 +267,7 @@ def _enum_aws(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         "allowed_actions": sorted(active_allowed),
         "denied_actions": sorted(active_denied),
         "errors": active_errors,
-        "note": "Simulator access denied. Fell back to partial DryRun probing. Results are incomplete."
+        "note": "Simulator access denied. Fell back to partial DryRun probing. Results are incomplete.",
     }
 
 
@@ -334,7 +343,7 @@ def _enum_azure(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         "denied_actions": sorted(list(not_actions)),
         "data_actions": sorted(list(data_actions)),
         "denied_data_actions": sorted(list(not_data_actions)),
-        "errors": errors
+        "errors": errors,
     }
 
 
@@ -359,7 +368,7 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         "compute.instances.setMetadata",
         "storage.buckets.list",
         "storage.objects.get",
-        "resourcemanager.projects.getIamPolicy"
+        "resourcemanager.projects.getIamPolicy",
     ]
 
     client = resourcemanager_v3.ProjectsClient(credentials=ctx.session)
@@ -391,13 +400,14 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
 
     for pid in set(projects):
         try:
-            req = {
-                "resource": f"projects/{pid}",
-                "permissions": ACTIONS_TO_TEST
-            }
+            req = {"resource": f"projects/{pid}", "permissions": ACTIONS_TO_TEST}
             response = client.test_iam_permissions(request=req)
 
-            perms = response.permissions if hasattr(response, "permissions") else response.get("permissions", [])
+            perms = (
+                response.permissions
+                if hasattr(response, "permissions")
+                else response.get("permissions", [])
+            )
             for action in ACTIONS_TO_TEST:
                 if action in perms:
                     allowed_actions.add(action)
@@ -414,7 +424,7 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         "principal": whoami_res.friendly_name,
         "allowed_actions": sorted(list(allowed_actions)),
         "denied_actions": sorted(list(denied_actions)),
-        "errors": errors
+        "errors": errors,
     }
 
 
@@ -463,7 +473,11 @@ def _enum_oci(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
             method(**kwargs)
             allowed_actions.append(action_name)
         except oci.exceptions.ServiceError as e:
-            if getattr(e, "status", None) == 404 and "NotAuthorizedOrNotFound" in getattr(e, "message", "") or getattr(e, "status", None) == 401:
+            if (
+                getattr(e, "status", None) == 404
+                and "NotAuthorizedOrNotFound" in getattr(e, "message", "")
+                or getattr(e, "status", None) == 401
+            ):
                 denied_actions.append(action_name)
             else:
                 errors.append(f"{action_name}: {getattr(e, 'message', str(e))}")
@@ -489,7 +503,7 @@ def _enum_oci(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
             "list_buckets",
             namespace_name=ns,
             compartment_id=tenancy_id,
-            limit=1
+            limit=1,
         )
     except Exception as e:
         denied_actions.append("object_storage:get_namespace")
@@ -511,11 +525,17 @@ def _generate_next_steps(provider: str, allowed: list[str]) -> list[str]:
 
     if provider == "aws":
         if "iam:PassRole" in allowed and "ec2:RunInstances" in allowed:
-            steps.append("You have ec2:RunInstances and iam:PassRole. Use 'escalation/compute_identity_abuse' to launch an EC2 instance and steal target IAM roles via IMDS.")
+            steps.append(
+                "You have ec2:RunInstances and iam:PassRole. Use 'escalation/compute_identity_abuse' to launch an EC2 instance and steal target IAM roles via IMDS."
+            )
         if "sts:AssumeRole" in allowed:
-            steps.append("You can assume other roles. Use 'escalation/assume_role_chain' to scan for accessible roles.")
+            steps.append(
+                "You can assume other roles. Use 'escalation/assume_role_chain' to scan for accessible roles."
+            )
         if "ssm:SendCommand" in allowed:
-            steps.append("You can execute commands on EC2 instances. Check for managed instances and use SSM to gain RCE.")
+            steps.append(
+                "You can execute commands on EC2 instances. Check for managed instances and use SSM to gain RCE."
+            )
 
     elif provider == "azure":
         # Note: action strings from ARM are usually exact or wildcard matched.
@@ -523,22 +543,38 @@ def _generate_next_steps(provider: str, allowed: list[str]) -> list[str]:
         allowed_lower = [a.lower() for a in allowed]
 
         if any("runcommand/action" in a for a in allowed_lower):
-            steps.append("You can execute code on Virtual Machines. Use 'lateral_movement/vm_execute_command' to gain RCE on targets.")
+            steps.append(
+                "You can execute code on Virtual Machines. Use 'lateral_movement/vm_execute_command' to gain RCE on targets."
+            )
         if any("roleassignments/write" in a for a in allowed_lower):
-            steps.append("You have RBAC write access. You can assign yourself or others Highly Privileged roles (e.g., Owner/Contributor).")
-        if any("managedidentities/assign/action" in a for a in allowed_lower) and any("virtualmachines/write" in a for a in allowed_lower):
-            steps.append("You can attach Managed Identities to VMs. Use 'escalation/compute_identity_abuse' to steal their access tokens.")
+            steps.append(
+                "You have RBAC write access. You can assign yourself or others Highly Privileged roles (e.g., Owner/Contributor)."
+            )
+        if any("managedidentities/assign/action" in a for a in allowed_lower) and any(
+            "virtualmachines/write" in a for a in allowed_lower
+        ):
+            steps.append(
+                "You can attach Managed Identities to VMs. Use 'escalation/compute_identity_abuse' to steal their access tokens."
+            )
 
     elif provider == "gcp":
         if "iam.serviceAccounts.actAs" in allowed and "compute.instances.create" in allowed:
-            steps.append("You can launch Compute Engine instances with Service Accounts. Use 'escalation/compute_identity_abuse' to harvest their tokens.")
+            steps.append(
+                "You can launch Compute Engine instances with Service Accounts. Use 'escalation/compute_identity_abuse' to harvest their tokens."
+            )
         if "iam.serviceAccountKeys.create" in allowed:
-            steps.append("You can generate new keys for Service Accounts. Use 'escalation/gcp_sa_token_creator'.")
+            steps.append(
+                "You can generate new keys for Service Accounts. Use 'escalation/gcp_sa_token_creator'."
+            )
         if "compute.instances.osLogin" in allowed:
-            steps.append("You can log into instances using OS Login. Generate an ephemeral SSH key and authenticate to target instances.")
+            steps.append(
+                "You can log into instances using OS Login. Generate an ephemeral SSH key and authenticate to target instances."
+            )
 
     # Generic fallback if no specific primitives matched, but they have access
     if not steps and allowed:
-        steps.append("Review the 'allowed_actions' list for native management console or CLI exploitation paths.")
+        steps.append(
+            "Review the 'allowed_actions' list for native management console or CLI exploitation paths."
+        )
 
     return steps

@@ -17,6 +17,7 @@ from quantum_mechanic.core.database import Database
 
 logger = logging.getLogger(__name__)
 
+
 class ActivityStore:
     """Operations for the activity_log table."""
 
@@ -25,11 +26,7 @@ class ActivityStore:
         self._workspace_id = workspace_id
 
     def add(
-        self,
-        technique_id: str,
-        level: str,
-        message: str,
-        data: dict[str, Any] | None = None
+        self, technique_id: str, level: str, message: str, data: dict[str, Any] | None = None
     ) -> int:
         """Add a log entry to the activity log."""
         now = datetime.now(UTC).isoformat()
@@ -48,10 +45,7 @@ class ActivityStore:
         return row[0] if row else 0
 
     def list(
-        self,
-        technique_id: str | None = None,
-        level: str | None = None,
-        limit: int = 100
+        self, technique_id: str | None = None, level: str | None = None, limit: int = 100
     ) -> list[dict]:
         """List log entries, optionally filtered by technique or level."""
         query = "SELECT * FROM activity_log WHERE workspace_id = ?"

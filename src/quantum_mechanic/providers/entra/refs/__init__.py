@@ -51,6 +51,7 @@ _BASELINE_FOCI: dict[str, str] = {
 # Raw loaders — cached, one filesystem read per process.
 # ----------------------------------------------------------------
 
+
 @lru_cache(maxsize=1)
 def _load_graph_preconsent() -> list[dict[str, Any]]:
     """Load the GraphPreConsent YAML. Returns [] on any error."""
@@ -95,6 +96,7 @@ def _load_microsoft_apps() -> list[dict[str, Any]]:
 # ----------------------------------------------------------------
 # Public accessors — the surface detectors and other callers use.
 # ----------------------------------------------------------------
+
 
 def foci_client_ids() -> dict[str, str]:
     """Return {client_id: name} for every FOCI-flagged first-party client.

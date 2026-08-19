@@ -50,9 +50,7 @@ def get_engine(sqlite_path: Path | None = None) -> Engine:
         return create_engine(url, pool_pre_ping=True)
 
     if sqlite_path is None:
-        raise ValueError(
-            "Either QM_DATABASE_URL or sqlite_path must be provided."
-        )
+        raise ValueError("Either QM_DATABASE_URL or sqlite_path must be provided.")
 
     engine = create_engine(
         f"sqlite:///{sqlite_path}",

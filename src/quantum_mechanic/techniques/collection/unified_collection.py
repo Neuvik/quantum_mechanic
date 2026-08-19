@@ -34,17 +34,18 @@ from quantum_mechanic.techniques.collection import scan_disk_content, storage_se
 
 logger = logging.getLogger(__name__)
 
-LOOT_ITEMS_KEY = 'hits'
+LOOT_ITEMS_KEY = "hits"
 LOOT_SCHEMA = [
-    ('source',  'Source',           'bold cyan'),
-    ('path',    'Location',         'white'),
-    ('type',    'Matched Pattern',  'yellow'),
-    ('note',    'Note',             'dim'),
+    ("source", "Source", "bold cyan"),
+    ("path", "Location", "white"),
+    ("type", "Matched Pattern", "yellow"),
+    ("note", "Note", "dim"),
 ]
+
 
 @technique(
     technique_id="collection/unified_collection",
-    tactic='collection',
+    tactic="collection",
     providers=["aws", "azure", "gcp", "oci"],
     severity="high",
     safe=True,
@@ -52,11 +53,16 @@ LOOT_SCHEMA = [
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,
     parameters=[
-        Parameter("mode", "Scan mode: 'storage', 'disk', or 'all'.", default="all", choices=["storage", "disk", "all"]),
+        Parameter(
+            "mode",
+            "Scan mode: 'storage', 'disk', or 'all'.",
+            default="all",
+            choices=["storage", "disk", "all"],
+        ),
         Parameter("target", "Target a specific bucket (storage mode)."),
         Parameter("snapshot", "Target a specific snapshot (disk mode)."),
         Parameter("region", "Cloud region to target."),
-    ]
+    ],
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Execute unified collection across storage and disks."""
@@ -69,40 +75,41 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         # We can reuse the existing technique function by wrapping the context or passing it
         storage_params = {"target": ctx.get_param("target")}
         with ctx.subtask("storage_search", params=storage_params) as sub_ctx:
-             res = storage_search.execute(sub_ctx)
-             for hit in res.get("hits", []):
-                 all_hits.append({
-                     "source": "Object Storage",
-                     "path": f"{hit.get('bucket')}/{hit.get('key')}",
-                     "type": hit.get("type", "Pattern Match"),
-                     "note": f"Provider: {ctx.provider_name}"
-                 })
+            res = storage_search.execute(sub_ctx)
+            for hit in res.get("hits", []):
+                all_hits.append(
+                    {
+                        "source": "Object Storage",
+                        "path": f"{hit.get('bucket')}/{hit.get('key')}",
+                        "type": hit.get("type", "Pattern Match"),
+                        "note": f"Provider: {ctx.provider_name}",
+                    }
+                )
 
     # 2. Disk / Snapshot Scan
     if mode in ["all", "disk"]:
         ctx.info("Initiating Disk Snapshot scan...")
-        disk_params = {
-            "snapshot": ctx.get_param("snapshot"),
-            "region": ctx.get_param("region")
-        }
+        disk_params = {"snapshot": ctx.get_param("snapshot"), "region": ctx.get_param("region")}
 
         # If no targeted snapshot, we should ideally enumerate them first
         # For now, we rely on the targeted snapshot param or existing mounts
         if ctx.provider_name == "aws" and not disk_params["snapshot"]:
-             ctx.info("No specific snapshot provided. Skipping AWS Direct scan (auto-enumeration coming soon).")
+            ctx.info(
+                "No specific snapshot provided. Skipping AWS Direct scan (auto-enumeration coming soon)."
+            )
         else:
             with ctx.subtask("scan_disk_content", params=disk_params) as sub_ctx:
-                 res = scan_disk_content.execute(sub_ctx)
-                 for hit in res.get("hits", []):
-                     all_hits.append({
-                         "source": "Disk/Snapshot",
-                         "path": hit.get("path"),
-                         "type": hit.get("type"),
-                         "note": "Ghost Scan" if "Block" in hit.get("path", "") else "Mount Scan"
-                     })
+                res = scan_disk_content.execute(sub_ctx)
+                for hit in res.get("hits", []):
+                    all_hits.append(
+                        {
+                            "source": "Disk/Snapshot",
+                            "path": hit.get("path"),
+                            "type": hit.get("type"),
+                            "note": "Ghost Scan"
+                            if "Block" in hit.get("path", "")
+                            else "Mount Scan",
+                        }
+                    )
 
-    return {
-        "hits": all_hits,
-        "count": len(all_hits),
-        "mode": mode
-    }
+    return {"hits": all_hits, "count": len(all_hits), "mode": mode}

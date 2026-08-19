@@ -41,6 +41,7 @@ from quantum_mechanic.core.technique import Parameter, technique
 
 logger = logging.getLogger(__name__)
 
+
 # ----------------------------------------------------------------
 # Operational Formatter — Human-centric output brief
 # ----------------------------------------------------------------
@@ -54,17 +55,32 @@ def format_exec_result(result: Any) -> None:
     target = data.get("target", "unknown")
 
     if data.get("error"):
-        console.print(f"  [bold red]✗[/bold red] Remote Command Execution FAILED on [cyan]{provider}[/cyan] Target [bold]{target}[/bold]")
+        console.print(
+            f"  [bold red]✗[/bold red] Remote Command Execution FAILED on [cyan]{provider}[/cyan] Target [bold]{target}[/bold]"
+        )
         console.print(f"  [red]{data['error']}[/red]")
         return
 
-    console.print(f"  [bold green]✓[/bold green] Remote Command Execution on [cyan]{provider}[/cyan] Target [bold]{target}[/bold]")
+    console.print(
+        f"  [bold green]✓[/bold green] Remote Command Execution on [cyan]{provider}[/cyan] Target [bold]{target}[/bold]"
+    )
 
     if data.get("stdout"):
-        console.print(Panel(data["stdout"].strip(), title="Standard Output", border_style="dim", padding=(1, 2)))
+        console.print(
+            Panel(
+                data["stdout"].strip(), title="Standard Output", border_style="dim", padding=(1, 2)
+            )
+        )
 
     if data.get("stderr"):
-        console.print(Panel(data["stderr"].strip(), title="Standard Error", border_style="bold red", padding=(1, 2)))
+        console.print(
+            Panel(
+                data["stderr"].strip(),
+                title="Standard Error",
+                border_style="bold red",
+                padding=(1, 2),
+            )
+        )
 
     status = data.get("status", "Success")
     console.print(f"  [dim]Execution Status: {status}[/dim]")
@@ -72,7 +88,7 @@ def format_exec_result(result: Any) -> None:
 
 @technique(
     technique_id="lateral_movement/vm_execute_command",
-    tactic='lateral_movement',
+    tactic="lateral_movement",
     mitre_id="T1569.002",
     providers=["aws", "azure"],
     severity="critical",
@@ -81,10 +97,20 @@ def format_exec_result(result: Any) -> None:
     description="Execute remote commands on a cloud VM using native administrative agents.",
     formatter=format_exec_result,
     parameters=[
-        Parameter("target", "The target instance ID or full resource ID.", required=True, example="i-0abcdef1234567890"),
+        Parameter(
+            "target",
+            "The target instance ID or full resource ID.",
+            required=True,
+            example="i-0abcdef1234567890",
+        ),
         Parameter("cmd", "The command to execute.", required=True, example="id && hostname"),
-        Parameter("shell", "Target shell type (auto-detected if omitted).", choices=["bash", "powershell"], default=None),
-    ]
+        Parameter(
+            "shell",
+            "Target shell type (auto-detected if omitted).",
+            choices=["bash", "powershell"],
+            default=None,
+        ),
+    ],
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Execute command based on the active cloud provider."""
@@ -127,10 +153,15 @@ def _exec_aws(ctx: ExecutionContext) -> dict[str, Any]:
                         "stderr": inv.get("StandardErrorContent", ""),
                     }
             except Exception as e:
-                if "InvocationDoesNotExist" not in str(e): raise
+                if "InvocationDoesNotExist" not in str(e):
+                    raise
             time.sleep(2)
 
-        return {"target": target, "status": "TimedOut", "error": "Operation exceeded polling limit."}
+        return {
+            "target": target,
+            "status": "TimedOut",
+            "error": "Operation exceeded polling limit.",
+        }
     except Exception as e:
         return {"error": str(e), "target": target}
 
@@ -182,7 +213,9 @@ def _exec_azure(ctx: ExecutionContext) -> dict[str, Any]:
         else:
             try:
                 vm_meta = compute.virtual_machines.get(rg_name, vm_name)
-                os_type = str(getattr(vm_meta.storage_profile.os_disk, "os_type", "Linux") or "Linux")
+                os_type = str(
+                    getattr(vm_meta.storage_profile.os_disk, "os_type", "Linux") or "Linux"
+                )
                 cmd_id = "RunPowerShellScript" if "windows" in os_type.lower() else "RunShellScript"
             except Exception:
                 cmd_id = "RunShellScript"
@@ -197,11 +230,14 @@ def _exec_azure(ctx: ExecutionContext) -> dict[str, Any]:
         raw_values = getattr(result, "value", []) or []
         for item in raw_values:
             msg = getattr(item, "message", "")
-            if "StdOut" in getattr(item, "code", ""): stdout = msg.strip()
-            elif "StdErr" in getattr(item, "code", ""): stderr = msg.strip()
+            if "StdOut" in getattr(item, "code", ""):
+                stdout = msg.strip()
+            elif "StdErr" in getattr(item, "code", ""):
+                stderr = msg.strip()
             elif "[stdout]" in msg:
                 stdout = msg.split("[stdout]")[1].split("[stderr]")[0].strip()
-                if "[stderr]" in msg: stderr = msg.split("[stderr]")[1].strip()
+                if "[stderr]" in msg:
+                    stderr = msg.split("[stderr]")[1].strip()
 
         return {"target": vm_name, "status": "Success", "stdout": stdout, "stderr": stderr}
     except Exception as e:

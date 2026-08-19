@@ -25,6 +25,7 @@ from typing import Any
 # Summary result — what agent mode outputs instead of raw data.
 # ================================================================
 
+
 class AgentSummary:
     """Compact output for agent mode consumption."""
 
@@ -78,6 +79,7 @@ class AgentSummary:
 # Each function receives the raw data dict and returns
 # (summary: str, risk_flags: list[str], stats: dict)
 # ================================================================
+
 
 def _summarize_whoami(data: dict, provider: str) -> tuple[str, list[str], dict]:
     name = data.get("friendly_name", "unknown")
@@ -200,9 +202,12 @@ def _summarize_enum_compute(data: dict, provider: str) -> tuple[str, list[str], 
 
     summary = f"{total} instance(s). {len(with_identity)} with attached identit{'ies' if len(with_identity) != 1 else 'y'}."
     if high_value:
-        summary += f" High-value: {', '.join(high_value[:3])}{'...' if len(high_value) > 3 else ''}."
+        summary += (
+            f" High-value: {', '.join(high_value[:3])}{'...' if len(high_value) > 3 else ''}."
+        )
 
     return summary, flags, stats
+
 
 def _summarize_assume_role_chain(data: dict, provider: str) -> tuple[str, list[str], dict]:
     chains = data.get("chains", [])
@@ -231,7 +236,7 @@ def _summarize_assume_role_chain(data: dict, provider: str) -> tuple[str, list[s
     elif assumed:
         summary = (
             f"{start} pivoted through {len(assumed)} role(s). "
-            f"Derived credentials stored. Max depth: {max(c.get('depth',0) for c in assumed)+1}."
+            f"Derived credentials stored. Max depth: {max(c.get('depth', 0) for c in assumed) + 1}."
         )
     else:
         summary = f"{start} — no assumable roles found."
@@ -274,11 +279,11 @@ def _summarize_vm_execute_command(data: dict, provider: str) -> tuple[str, list[
 # ================================================================
 
 _SUMMARIZERS: dict[str, Any] = {
-    "discovery/whoami":                    _summarize_whoami,
-    "discovery/enum_iam":                  _summarize_enum_iam,
-    "discovery/enum_compute":              _summarize_enum_compute,
-    "escalation/assume_role_chain":        _summarize_assume_role_chain,
-    "lateral_movement/vm_execute_command":  _summarize_vm_execute_command,
+    "discovery/whoami": _summarize_whoami,
+    "discovery/enum_iam": _summarize_enum_iam,
+    "discovery/enum_compute": _summarize_enum_compute,
+    "escalation/assume_role_chain": _summarize_assume_role_chain,
+    "lateral_movement/vm_execute_command": _summarize_vm_execute_command,
 }
 
 
@@ -286,6 +291,7 @@ _SUMMARIZERS: dict[str, Any] = {
 # Generic fallback for any technique without a registered
 # summarizer. Produces a minimal summary from whatever keys exist.
 # ================================================================
+
 
 def _generic_summary(data: dict, technique_id: str) -> tuple[str, list[str], dict]:
     total = data.get("total")
@@ -301,6 +307,7 @@ def _generic_summary(data: dict, technique_id: str) -> tuple[str, list[str], dic
 # ================================================================
 # Public API
 # ================================================================
+
 
 def summarize(
     technique_id: str,
@@ -347,6 +354,7 @@ def summarize(
     # --------------------------------------------------------
     if hasattr(data, "__dataclass_fields__"):
         from dataclasses import asdict
+
         data_dict: dict = asdict(data)
     elif isinstance(data, dict):
         data_dict = data

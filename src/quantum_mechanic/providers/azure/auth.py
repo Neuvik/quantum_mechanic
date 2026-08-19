@@ -69,18 +69,18 @@ class AzureAuthProvider(AuthProvider):
         if "token_store" in secret_data:
             from quantum_mechanic.providers.entra.arm_credential import EntraTokenCredential
             from quantum_mechanic.providers.entra.token_store import EntraTokenStore
+
             store = EntraTokenStore.from_dict(secret_data["token_store"])
             return EntraTokenCredential(store)
 
         # Captured token (new — primary path for `import azure --default`)
         if method == "captured_token":
             from quantum_mechanic.providers.azure.static_token import StaticTokenCredential
+
             token = secret_data.get("access_token")
             expires_on = secret_data.get("expires_on")
             if not token or not expires_on:
-                raise ValueError(
-                    "captured_token method requires 'access_token' and 'expires_on'"
-                )
+                raise ValueError("captured_token method requires 'access_token' and 'expires_on'")
             return StaticTokenCredential(access_token=token, expires_on=expires_on)
 
         # Service principal

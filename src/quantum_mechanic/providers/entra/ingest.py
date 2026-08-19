@@ -34,17 +34,18 @@ logger = logging.getLogger(__name__)
 # Mirrors capcom/browserdump entraTokenRules.
 # ----------------------------------------------------------------
 _COOKIE_RULES: dict[str, tuple[str, bool]] = {
-    "ESTSAUTHPERSISTENT":         ("ests_cookie", False),
-    "ESTSAUTH":                   ("ests_cookie", False),
-    "ESTSAUTHLIGHT":              ("ests_cookie", False),
-    "x-ms-RefreshTokenCredential": ("prt_cookie",  True),
-    "x-ms-CredentialKey":         ("ests_cookie", False),
+    "ESTSAUTHPERSISTENT": ("ests_cookie", False),
+    "ESTSAUTH": ("ests_cookie", False),
+    "ESTSAUTHLIGHT": ("ests_cookie", False),
+    "x-ms-RefreshTokenCredential": ("prt_cookie", True),
+    "x-ms-CredentialKey": ("ests_cookie", False),
 }
 
 
 # ----------------------------------------------------------------
 # browserdump JSON ingestion
 # ----------------------------------------------------------------
+
 
 def ingest_browserdump(path: str | Path) -> list[EntraTokenStore]:
     """Parse browserdump JSON output into a list of EntraTokenStores.
@@ -81,16 +82,9 @@ def ingest_browserdump(path: str | Path) -> list[EntraTokenStore]:
 
 def _parse_profile(data: dict[str, Any]) -> EntraTokenStore | None:
     """Parse one browserdump profile dict into an EntraTokenStore."""
-    tenant = (
-        data.get("tenant")
-        or data.get("tenant_id")
-        or data.get("tenantId")
-    )
+    tenant = data.get("tenant") or data.get("tenant_id") or data.get("tenantId")
     profile_name = (
-        data.get("profile")
-        or data.get("profile_name")
-        or data.get("profileName")
-        or "Default"
+        data.get("profile") or data.get("profile_name") or data.get("profileName") or "Default"
     )
 
     store = EntraTokenStore(tenant_id=tenant)
@@ -134,7 +128,7 @@ def _parse_token_entry(
     store: EntraTokenStore,
 ) -> EntraToken | None:
     """Classify and build an EntraToken from a single browserdump entry."""
-    name  = entry.get("name", "")
+    name = entry.get("name", "")
     value = entry.get("value", "").strip()
     if not value:
         return None
@@ -176,6 +170,7 @@ def _parse_token_entry(
 # Individual token ingest functions
 # ----------------------------------------------------------------
 
+
 def ingest_prt_cookie(jwt: str) -> EntraToken:
     """Build an EntraToken from an x-ms-RefreshTokenCredential JWT.
 
@@ -186,6 +181,7 @@ def ingest_prt_cookie(jwt: str) -> EntraToken:
     claims = decode_jwt_claims(jwt)
     # PRT cookies use "exp" for nonce expiry.
     from datetime import datetime
+
     expires_at = None
     if "exp" in claims:
         try:
@@ -282,6 +278,7 @@ def ingest_prt_key(
 # .roadtools_auth ingestion
 # ----------------------------------------------------------------
 
+
 def ingest_roadtools(path: str | Path) -> EntraTokenStore:
     """Parse a .roadtools_auth JSON file into an EntraTokenStore.
 
@@ -301,10 +298,10 @@ def ingest_roadtools(path: str | Path) -> EntraTokenStore:
     data: dict[str, Any] = json.loads(raw)
 
     tenant_id = data.get("tenantId") or data.get("tenant_id")
-    user_upn   = data.get("userId")   or data.get("user_upn")
-    client_id  = data.get("_clientId")
-    resource   = data.get("_resource", GRAPH)
-    is_mrrt    = data.get("isMRRT", False)
+    user_upn = data.get("userId") or data.get("user_upn")
+    client_id = data.get("_clientId")
+    resource = data.get("_resource", GRAPH)
+    is_mrrt = data.get("isMRRT", False)
 
     store = EntraTokenStore(tenant_id=tenant_id, user_upn=user_upn)
 
@@ -318,10 +315,11 @@ def ingest_roadtools(path: str | Path) -> EntraTokenStore:
         # roadtools may not have expiry in the same field — try expiresOn.
         if not tok.expires_at and data.get("expiresOn"):
             from datetime import datetime
+
             try:
-                tok.expires_at = datetime.strptime(
-                    data["expiresOn"], "%Y-%m-%d %H:%M:%S"
-                ).replace(tzinfo=UTC)
+                tok.expires_at = datetime.strptime(data["expiresOn"], "%Y-%m-%d %H:%M:%S").replace(
+                    tzinfo=UTC
+                )
             except ValueError:
                 pass
         store.add_token(tok)

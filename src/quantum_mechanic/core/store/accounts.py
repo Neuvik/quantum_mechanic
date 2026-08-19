@@ -35,8 +35,12 @@ class AccountStore:
             VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
-                account.id, account.provider, account.name,
-                account.account_type, account.parent_id, account.metadata,
+                account.id,
+                account.provider,
+                account.name,
+                account.account_type,
+                account.parent_id,
+                account.metadata,
             ),
         )
         self._db.commit()
@@ -47,8 +51,11 @@ class AccountStore:
         if row is None:
             return None
         return Account(
-            id=row["id"], provider=row["provider"], name=row["name"],
-            account_type=row["account_type"], parent_id=row["parent_id"],
+            id=row["id"],
+            provider=row["provider"],
+            name=row["name"],
+            account_type=row["account_type"],
+            parent_id=row["parent_id"],
             metadata=row["metadata"],
         )
 
@@ -63,8 +70,11 @@ class AccountStore:
             rows = self._db.fetchall("SELECT * FROM accounts ORDER BY name")
         return [
             Account(
-                id=r["id"], provider=r["provider"], name=r["name"],
-                account_type=r["account_type"], parent_id=r["parent_id"],
+                id=r["id"],
+                provider=r["provider"],
+                name=r["name"],
+                account_type=r["account_type"],
+                parent_id=r["parent_id"],
                 metadata=r["metadata"],
             )
             for r in rows

@@ -71,10 +71,10 @@ _WORDLISTS_DIR = Path(__file__).parent.parent.parent / "data" / "wordlists"
 
 LOOT_ITEMS_KEY = "buckets"
 LOOT_SCHEMA = [
-    ("bucket",   "Bucket",   "bold cyan"),
-    ("status",   "Status",   "green"),
-    ("region",   "Region",   "dim"),
-    ("acl",      "ACL",      "bold red"),
+    ("bucket", "Bucket", "bold cyan"),
+    ("status", "Status", "green"),
+    ("region", "Region", "dim"),
+    ("acl", "ACL", "bold red"),
 ]
 
 
@@ -169,7 +169,10 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     # ── Resolve wordlist ─────────────────────────────────────────
     names = _load_wordlist(wordlist_param)
     if names is None:
-        return {"error": f"Wordlist not found: '{wordlist_param}'. Use a built-in name (s3-common, s3-permutations) or a valid file path.", "buckets": []}
+        return {
+            "error": f"Wordlist not found: '{wordlist_param}'. Use a built-in name (s3-common, s3-permutations) or a valid file path.",
+            "buckets": [],
+        }
 
     # ── Build candidate list ─────────────────────────────────────
     candidates: list[str] = []
@@ -250,6 +253,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 # ----------------------------------------------------------------
 # Helpers
 # ----------------------------------------------------------------
+
 
 def _load_wordlist(param: str | None) -> list[str] | None:
     """Resolve built-in name or file path → list of lines."""

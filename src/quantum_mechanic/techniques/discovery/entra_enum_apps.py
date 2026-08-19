@@ -230,8 +230,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         return graph_error_to_result(e, applications=[], service_principals=[], apps=[])
 
     multi_tenant = [
-        a for a in applications
-        if a.get("signInAudience", "") not in ("AzureADMyOrg", "")
+        a for a in applications if a.get("signInAudience", "") not in ("AzureADMyOrg", "")
     ]
     with_secrets = [a for a in applications if a.get("passwordCredentials")]
 
@@ -257,34 +256,37 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         # without opening a per-app drilldown. Only ControlPlane tier —
         # lower tiers show as their tier label only.
         cp_perms = [
-            p for p in perm_names
-            if eam.classify_graph_permission(p) == eam.TIER_CONTROL_PLANE
+            p for p in perm_names if eam.classify_graph_permission(p) == eam.TIER_CONTROL_PLANE
         ]
-        apps.append({
-            "displayName": a.get("displayName"),
-            "type": "App Registration",
-            "appId": a.get("appId"),
-            "signInAudience": a.get("signInAudience"),
-            "secrets": len(a.get("passwordCredentials", [])),
-            "enabled": "—",
-            "id": a.get("id"),
-            "highest_perm_tier": _highest_tier(perm_names),
-            "top_cp_perms": cp_perms[:3],
-            "cp_perm_count": len(cp_perms),
-        })
+        apps.append(
+            {
+                "displayName": a.get("displayName"),
+                "type": "App Registration",
+                "appId": a.get("appId"),
+                "signInAudience": a.get("signInAudience"),
+                "secrets": len(a.get("passwordCredentials", [])),
+                "enabled": "—",
+                "id": a.get("id"),
+                "highest_perm_tier": _highest_tier(perm_names),
+                "top_cp_perms": cp_perms[:3],
+                "cp_perm_count": len(cp_perms),
+            }
+        )
     for sp in service_principals:
-        apps.append({
-            "displayName": sp.get("displayName"),
-            "type": "Service Principal",
-            "appId": sp.get("appId"),
-            "signInAudience": "—",
-            "secrets": 0,
-            "enabled": "Yes" if sp.get("accountEnabled") else "No",
-            "id": sp.get("id"),
-            # Service principals do not carry requiredResourceAccess; tier resolution for
-            # SPs requires appRoleAssignments enumeration (out of scope here).
-            "highest_perm_tier": eam.TIER_UNKNOWN,
-        })
+        apps.append(
+            {
+                "displayName": sp.get("displayName"),
+                "type": "Service Principal",
+                "appId": sp.get("appId"),
+                "signInAudience": "—",
+                "secrets": 0,
+                "enabled": "Yes" if sp.get("accountEnabled") else "No",
+                "id": sp.get("id"),
+                # Service principals do not carry requiredResourceAccess; tier resolution for
+                # SPs requires appRoleAssignments enumeration (out of scope here).
+                "highest_perm_tier": eam.TIER_UNKNOWN,
+            }
+        )
 
     return {
         "status": "success",

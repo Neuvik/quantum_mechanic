@@ -188,7 +188,9 @@ def import_browser_session(
                     "Chrome rejected the CDP websocket origin. Relaunch the browser with "
                     f"--remote-allow-origins=http://127.0.0.1:{port} and retry."
                 ) from exc
-            raise ValueError(f"Browser CDP websocket handshake failed: HTTP {exc.status_code}") from exc
+            raise ValueError(
+                f"Browser CDP websocket handshake failed: HTTP {exc.status_code}"
+            ) from exc
         except websocket.WebSocketException as exc:
             raise OSError(f"CDP websocket connection failed: {exc}") from exc
         try:
@@ -230,7 +232,9 @@ def import_browser_session(
             "port": port,
         }
     except httpx.HTTPError as exc:
-        raise OSError(f"Failed to reach browser CDP endpoint at http://{host}:{port}: {exc}") from exc
+        raise OSError(
+            f"Failed to reach browser CDP endpoint at http://{host}:{port}: {exc}"
+        ) from exc
     finally:
         if owned:
             client.close()
