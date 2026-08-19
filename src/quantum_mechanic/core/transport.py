@@ -24,9 +24,10 @@
 from __future__ import annotations
 
 import logging
-from importlib import import_module
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
+from importlib import import_module
+from typing import TYPE_CHECKING
 
 from quantum_mechanic.core.context import EventCallback
 from quantum_mechanic.core.loader import TechniqueLoader
@@ -34,6 +35,9 @@ from quantum_mechanic.core.runner import TechniqueResult, TechniqueRunner
 from quantum_mechanic.core.technique import TechniqueMetadata
 from quantum_mechanic.core.workspace import Workspace
 from quantum_mechanic.providers.base import ProviderRegistry
+
+if TYPE_CHECKING:
+    import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -330,7 +334,7 @@ class RemoteTransport(Transport):
             TokenError: If the token is expired, tampered, or malformed.
         """
         pki = import_module("quantum_mechanic." + "daemon.pki")
-        decode_token = getattr(pki, "decode_token")
+        decode_token = pki.decode_token
 
         # --------------------------------------------------------
         # Resolve to a validated OperatorToken.

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -15,6 +16,7 @@ import yaml
 
 if TYPE_CHECKING:
     from quantum_mechanic.core.runner import TechniqueResult, TechniqueRunner
+    from quantum_mechanic.core.telemetry import TelemetryEvent
 
 logger = logging.getLogger(__name__)
 

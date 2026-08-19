@@ -21,7 +21,7 @@ import csv
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -35,6 +35,9 @@ from quantum_mechanic.providers.entra.graph import (
     graph_list,
 )
 from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
+
+if TYPE_CHECKING:
+    from quantum_mechanic.core.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 

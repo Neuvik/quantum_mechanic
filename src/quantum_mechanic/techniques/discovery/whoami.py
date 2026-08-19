@@ -46,6 +46,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 
