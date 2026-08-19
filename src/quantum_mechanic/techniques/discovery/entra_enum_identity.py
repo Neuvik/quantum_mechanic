@@ -42,7 +42,7 @@ import httpx
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 from quantum_mechanic.providers.entra.foci import foci_expand
-from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore, decode_jwt_claims
+from quantum_mechanic.providers.entra.token_store import GRAPH, OAUTH_REFRESH, EntraTokenStore, decode_jwt_claims
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +169,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     if token is None:
         return {"error": "No Graph token available. Import or acquire credentials first."}
 
-    if token.token_type == "refresh_token":
+    if token.token_type == OAUTH_REFRESH:
         token = foci_expand(store, GRAPH)
         if token is None:
             return {"error": "FOCI expansion for Graph failed — refresh token may be expired."}

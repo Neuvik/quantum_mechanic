@@ -62,6 +62,19 @@ CAP_ERRORS: dict[str, str] = {
 }
 
 
+# ----------------------------------------------------------------
+# EntraToken.token_type values — OAuth2/Entra spec vocabulary, not
+# secrets. Named here so comparisons don't repeat the literal string
+# at every call site (and so a variable/constant named "token_*"
+# assigned a plain string doesn't read as a hardcoded credential).
+# ----------------------------------------------------------------
+OAUTH_ACCESS = "access_token"
+OAUTH_REFRESH = "refresh_token"
+PRT_WITH_KEY = "prt_with_key"
+PRT_COOKIE = "prt_cookie"
+ESTS_COOKIE = "ests_cookie"
+
+
 @dataclass
 class EntraToken:
     """A single token artifact — access token, refresh token, cookie, or raw PRT."""
@@ -147,7 +160,7 @@ class EntraTokenStore:
     def _valid_access_token(self, resource: str) -> EntraToken | None:
         for tok in self.tokens:
             if (
-                tok.token_type == "access_token"
+                tok.token_type == OAUTH_ACCESS
                 and not tok.is_expired
                 and _resource_matches(tok.resource, resource)
             ):
@@ -157,14 +170,14 @@ class EntraTokenStore:
     def foci_refresh_token(self) -> EntraToken | None:
         """Return the first valid FOCI refresh token."""
         for tok in self.tokens:
-            if tok.token_type == "refresh_token" and tok.foci and not tok.is_expired:
+            if tok.token_type == OAUTH_REFRESH and tok.foci and not tok.is_expired:
                 return tok
         return None
 
     def refresh_token(self, resource: str | None = None) -> EntraToken | None:
         """Return the best refresh token, optionally scoped to a resource."""
         for tok in self.tokens:
-            if tok.token_type == "refresh_token" and not tok.is_expired:
+            if tok.token_type == OAUTH_REFRESH and not tok.is_expired:
                 if resource is None or _resource_matches(tok.resource, resource):
                     return tok
         return None
@@ -172,14 +185,14 @@ class EntraTokenStore:
     def prt_material(self) -> EntraToken | None:
         """Return stored raw PRT + session key material if present."""
         for tok in self.tokens:
-            if tok.token_type == "prt_with_key":
+            if tok.token_type == PRT_WITH_KEY:
                 return tok
         return None
 
     def prt_cookie(self) -> EntraToken | None:
         """Return the most recent PRT cookie (x-ms-RefreshTokenCredential)."""
         for tok in self.tokens:
-            if tok.token_type == "prt_cookie" and not tok.is_expired:
+            if tok.token_type == PRT_COOKIE and not tok.is_expired:
                 return tok
         return None
 
@@ -201,15 +214,15 @@ class EntraTokenStore:
         for tok in self.tokens:
             if tok.is_expired:
                 continue
-            if tok.token_type == "prt_with_key":
+            if tok.token_type == PRT_WITH_KEY:
                 labels.append("PRT")
-            elif tok.token_type == "prt_cookie":
+            elif tok.token_type == PRT_COOKIE:
                 labels.append("PRTcookie")
-            elif tok.token_type == "refresh_token" and tok.foci:
+            elif tok.token_type == OAUTH_REFRESH and tok.foci:
                 labels.append("FOCI")
-            elif tok.token_type == "refresh_token":
+            elif tok.token_type == OAUTH_REFRESH:
                 labels.append("RT")
-            elif tok.token_type == "access_token":
+            elif tok.token_type == OAUTH_ACCESS:
                 if "management.azure.com" in tok.resource:
                     labels.append("ARM")
                 elif "graph.microsoft.com" in tok.resource:
@@ -234,7 +247,7 @@ class EntraTokenStore:
         """
         out: list[dict[str, Any]] = []
         for tok in self.tokens:
-            claims = decode_jwt_claims(tok.value) if tok.token_type == "access_token" else {}
+            claims = decode_jwt_claims(tok.value) if tok.token_type == OAUTH_ACCESS else {}
             # scp = delegated (space-separated), roles = application (list)
             scp = claims.get("scp") or ""
             scopes = scp.split() if isinstance(scp, str) else []
@@ -242,13 +255,13 @@ class EntraTokenStore:
             if isinstance(roles, str):
                 roles = [roles]
 
-            if tok.token_type == "prt_with_key":
+            if tok.token_type == PRT_WITH_KEY:
                 kind = "PRT"
-            elif tok.token_type == "prt_cookie":
+            elif tok.token_type == PRT_COOKIE:
                 kind = "PRTcookie"
-            elif tok.token_type == "refresh_token":
+            elif tok.token_type == OAUTH_REFRESH:
                 kind = "FOCI RT" if tok.foci else "RT"
-            elif tok.token_type == "access_token":
+            elif tok.token_type == OAUTH_ACCESS:
                 if "management.azure.com" in (tok.resource or ""):
                     kind = "ARM AT"
                 elif "graph.microsoft.com" in (tok.resource or ""):
@@ -284,7 +297,7 @@ class EntraTokenStore:
         by including cookie_name in the deduplication key.
         """
         cookie_name = None
-        if token.token_type == "ests_cookie":
+        if token.token_type == ESTS_COOKIE:
             cookie_name = token.raw_claims.get("cookie_name")
         self.tokens = [
             t
@@ -293,7 +306,7 @@ class EntraTokenStore:
                 t.token_type == token.token_type
                 and t.resource == token.resource
                 and (
-                    token.token_type != "ests_cookie"
+                    token.token_type != ESTS_COOKIE
                     or t.raw_claims.get("cookie_name") == cookie_name
                 )
             )

@@ -27,6 +27,7 @@ import httpx
 from quantum_mechanic.providers.base import AuthProvider, WhoAmIResult
 from quantum_mechanic.providers.entra.token_store import (
     GRAPH,
+    OAUTH_REFRESH,
     EntraTokenStore,
     decode_jwt_claims,
 )
@@ -95,7 +96,7 @@ class EntraAuthProvider(AuthProvider):
             )
 
         # If the best token is a refresh token (FOCI), expand to access token first.
-        if token.token_type == "refresh_token":
+        if token.token_type == OAUTH_REFRESH:
             from quantum_mechanic.providers.entra.foci import foci_expand
 
             access = foci_expand(store, GRAPH)

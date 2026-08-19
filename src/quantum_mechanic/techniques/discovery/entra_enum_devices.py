@@ -40,7 +40,7 @@ from quantum_mechanic.providers.entra.graph import (
     graph_error_to_result,
     graph_list,
 )
-from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
+from quantum_mechanic.providers.entra.token_store import GRAPH, OAUTH_REFRESH, EntraTokenStore
 
 _DEVICES_URL = (
     "https://graph.microsoft.com/v1.0/devices"
@@ -142,7 +142,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     if token is None:
         return {"error": "No Graph token available."}
 
-    if token.token_type == "refresh_token":
+    if token.token_type == OAUTH_REFRESH:
         token = foci_expand(store, GRAPH)
         if token is None:
             return {"error": "FOCI expansion for Graph failed."}

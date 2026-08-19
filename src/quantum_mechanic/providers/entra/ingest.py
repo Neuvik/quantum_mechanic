@@ -20,7 +20,11 @@ from typing import Any
 
 from quantum_mechanic.providers.entra.foci import FOCI_CLIENT_IDS
 from quantum_mechanic.providers.entra.token_store import (
+    ESTS_COOKIE,
     GRAPH,
+    OAUTH_REFRESH,
+    PRT_COOKIE,
+    PRT_WITH_KEY,
     EntraToken,
     EntraTokenStore,
     decode_jwt_claims,
@@ -154,7 +158,7 @@ def _parse_token_entry(
     if name == "x-ms-CredentialKey":
         # Session key material — store as raw for later prt_key import.
         return EntraToken(
-            token_type="ests_cookie",
+            token_type=ESTS_COOKIE,
             value=value,
             resource="",
             tenant_id=store.tenant_id,
@@ -190,7 +194,7 @@ def ingest_prt_cookie(jwt: str) -> EntraToken:
             pass
 
     return EntraToken(
-        token_type="prt_cookie",
+        token_type=PRT_COOKIE,
         value=jwt,
         resource="",
         tenant_id=claims.get("tid"),
@@ -214,7 +218,7 @@ def ingest_ests_cookie(
     if cookie_domain:
         raw_claims["cookie_domain"] = cookie_domain
     return EntraToken(
-        token_type="ests_cookie",
+        token_type=ESTS_COOKIE,
         value=value,
         resource="",
         tenant_id=tenant_id,
@@ -241,7 +245,7 @@ def ingest_refresh_token(
     """
     is_foci = client_id in FOCI_CLIENT_IDS if client_id else False
     return EntraToken(
-        token_type="refresh_token",
+        token_type=OAUTH_REFRESH,
         value=token,
         resource="",
         tenant_id=tenant_id,
@@ -262,7 +266,7 @@ def ingest_prt_key(
     No expiry pressure — PRTs are 14-day credentials.
     """
     return EntraToken(
-        token_type="prt_with_key",
+        token_type=PRT_WITH_KEY,
         value=prt_value,
         resource="",
         tenant_id=tenant_id,
@@ -327,7 +331,7 @@ def ingest_roadtools(path: str | Path) -> EntraTokenStore:
     if data.get("refreshToken"):
         is_foci = bool(is_mrrt) or (client_id in FOCI_CLIENT_IDS if client_id else False)
         rt = EntraToken(
-            token_type="refresh_token",
+            token_type=OAUTH_REFRESH,
             value=data["refreshToken"],
             resource=resource,
             tenant_id=tenant_id,

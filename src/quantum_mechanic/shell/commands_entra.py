@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING, Any
 from rich.console import Console
 from rich.table import Table
 
+from quantum_mechanic.providers.entra.token_store import ESTS_COOKIE, OAUTH_ACCESS
+
 if TYPE_CHECKING:
     from quantum_mechanic.shell.commands import ShellState
 
@@ -186,7 +188,7 @@ def _import_browserdump(
             console.print("  [red]✗[/red] PRT cookie has expired (nonce window passed).")
 
         # Exchange ESTS cookies.
-        for tok in [t for t in store.tokens if t.token_type == "ests_cookie" and t.value]:
+        for tok in [t for t in store.tokens if t.token_type == ESTS_COOKIE and t.value]:
             tenant = store.tenant_id or tok.tenant_id or "common"
             cookie_name = tok.raw_claims.get("cookie_name", "ESTSAUTHPERSISTENT")
             resp = exchange_ests_cookie(
@@ -248,7 +250,7 @@ def _import_browser_cdp(state: ShellState, opts: dict[str, str]) -> None:
             )
             _apply_token_response(store, resp, resource=_GRAPH, client_id=FOCI_DEFAULT_CLIENT)
 
-        for tok in [t for t in store.tokens if t.token_type == "ests_cookie" and t.value]:
+        for tok in [t for t in store.tokens if t.token_type == ESTS_COOKIE and t.value]:
             tenant = store.tenant_id or tok.tenant_id or "common"
             cookie_name = tok.raw_claims.get("cookie_name", "ESTSAUTHPERSISTENT")
             resp = exchange_ests_cookie(
@@ -737,7 +739,7 @@ def _acquire_refresh(state: ShellState, opts: dict[str, str]) -> None:
     # renewal (level up in place). If not, this is a new pivot and gets
     # its own credential row so the operator can move between them.
     prior = store.best_token(resource)
-    is_renewal = prior is not None and prior.token_type == "access_token" and not prior.is_expired
+    is_renewal = prior is not None and prior.token_type == OAUTH_ACCESS and not prior.is_expired
 
     resp = exchange_refresh_token(
         rt.value,
@@ -795,7 +797,7 @@ def _acquire_arm(state: ShellState, opts: dict[str, str]) -> None:
         return
 
     existing = store.best_token(_ARM)
-    if existing and existing.token_type == "access_token" and not existing.is_expired:
+    if existing and existing.token_type == OAUTH_ACCESS and not existing.is_expired:
         mins = existing.minutes_remaining
         console.print(
             "  [green]✓[/green] ARM token already present "
@@ -898,7 +900,7 @@ def _export_token(state: ShellState, opts: dict[str, str]) -> None:
 
     resource = opts.get("resource", _GRAPH)
     tok = store.best_token(resource)
-    if tok is None or tok.token_type != "access_token":
+    if tok is None or tok.token_type != OAUTH_ACCESS:
         console.print(
             f"  [red]✗[/red] No access token for {resource}. "
             "Run: acquire entra refresh --resource <res>"
@@ -1047,7 +1049,7 @@ def _entra_friendly_name(store: EntraTokenStore) -> str:
         from quantum_mechanic.providers.entra.token_store import decode_jwt_claims
 
         for tok in store.tokens:
-            if tok.token_type == "access_token":
+            if tok.token_type == OAUTH_ACCESS:
                 claims = tok.raw_claims or decode_jwt_claims(tok.value)
                 if not upn:
                     upn = claims.get("upn") or claims.get("unique_name")
