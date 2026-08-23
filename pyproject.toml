@@ -128,6 +128,7 @@ ignore = ["S101"]  # Allow assert in tests
 "src/quantum_mechanic/daemon/receiver/server.py" = ["N802"]  # gRPC method overrides
 "src/quantum_mechanic/techniques/discovery/enum_compute.py" = ["N806"]  # optional import fallback
 "src/quantum_mechanic/techniques/discovery/unified_enum_*.py" = ["E402"]  # sibling technique delegation
+"tools/extract_support_surface.py" = ["A002"]  # RawRow.id is the schema field name
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
