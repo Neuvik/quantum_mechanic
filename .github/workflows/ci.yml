@@ -30,6 +30,7 @@ jobs:
       - run: uv run python tools/check-test-domain-hygiene.py
       - run: uv run python tools/check-public-boundary.py
       - run: uv run python tools/lint_technique_capabilities.py
+      - run: uv run python tools/check_cheap_gates.py
       - name: pip-audit
         run: |
           uv export --format requirements-txt --no-hashes --no-emit-project > /tmp/requirements.txt
