@@ -14,23 +14,23 @@ from __future__ import annotations
 
 import json
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from quantum_mechanic.core.runner import TechniqueResult
 from quantum_mechanic.core.workspace import Workspace
 from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
+from quantum_mechanic.providers.entra.scope_exchange import ScopeExchangeResult
 from quantum_mechanic.providers.entra.token_store import (
     EntraToken,
     EntraTokenStore,
 )
-from quantum_mechanic.providers.entra.scope_exchange import ScopeExchangeResult
 from quantum_mechanic.shell.commands import _maybe_offer_scope_retry
 
 
 def _future(mins: int = 60) -> datetime:
-    return datetime.now(timezone.utc) + timedelta(minutes=mins)
+    return datetime.now(UTC) + timedelta(minutes=mins)
 
 
 def _store_with_foci() -> EntraTokenStore:

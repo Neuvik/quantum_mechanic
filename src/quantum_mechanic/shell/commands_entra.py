@@ -49,7 +49,7 @@ _IMPORT_USAGE = """\
     access_token <jwt>                              Raw JWT access token
     refresh_token <token> --tenant <id>             Raw refresh token
                           [--client <id>]
-    prt_cookie  <jwt>                               x-ms-RefreshTokenCredential (exchanges immediately)
+    prt_cookie  <jwt>                               x-ms-RefreshTokenCredential
     ests_cookie <value>   --tenant <id>             ESTSAUTHPERSISTENT / ESTSAUTH cookie
     prt_key               --prt <val>               Raw PRT + session key (no expiry pressure)
                           --session-key <key>
@@ -57,8 +57,8 @@ _IMPORT_USAGE = """\
     help                                            Print this usage
 
   Don't have an artifact? Get one via live authentication:
-    [cyan]acquire entra device_code[/cyan]                    Phone-verify OAuth (no local az session needed)
-    [cyan]acquire entra interactive[/cyan]                    Browser OAuth (survives Conditional Access)
+    [cyan]acquire entra device_code[/cyan]              Phone-verify OAuth
+    [cyan]acquire entra interactive[/cyan]              Browser OAuth (PKCE)
     [cyan]acquire entra ropc[/cyan] --username <u> --password <p> --tenant <t>
                                              Username+password → FOCI RT
     Then: [cyan]acquire entra arm[/cyan] / [cyan]acquire entra refresh --resource <res>[/cyan]
