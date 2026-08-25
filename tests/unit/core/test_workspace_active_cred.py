@@ -164,6 +164,125 @@ def test_use_raises_on_principal_id_mismatch_after_backward_compat_recovery():
             friendly_name="bob_user",
             principal_id="arn:aws:iam::111:user/bob_user",
         )
-        with _patch_aws(who_bob):
-            with pytest.raises(CredentialMismatchError, match="bob_user"):
-                ws.active_credential_id = cred_id
+        with _patch_aws(who_bob), pytest.raises(CredentialMismatchError, match="bob_user"):
+            ws.active_credential_id = cred_id
+
+
+# ----------------------------------------------------------------
+# EI-15: Entra credential activation with expired Graph AT
+# ----------------------------------------------------------------
+
+
+def test_entra_expired_graph_at_with_refresh_token_activates():
+    """EI-15: Entra cred with expired Graph AT but valid RT must activate.
+
+    The chicken/egg: use <id> fails → can't acquire entra refresh →
+    operator is trapped. Fix: if whoami fails but a refresh token
+    exists, allow activation in recovery mode.
+    """
+    from quantum_mechanic.providers.entra.token_store import (
+        GRAPH,
+        OAUTH_ACCESS,
+        OAUTH_REFRESH,
+        EntraToken,
+        EntraTokenStore,
+    )
+
+    store = EntraTokenStore(tenant_id="test-tenant-0000")
+    store.add_token(EntraToken(
+        token_type=OAUTH_ACCESS,
+        resource=GRAPH,
+        value="expired.jwt.token",
+        tenant_id="test-tenant-0000",
+        client_id="test-client",
+        foci=False,
+        expires_at=0,
+    ))
+    store.add_token(EntraToken(
+        token_type=OAUTH_REFRESH,
+        resource=GRAPH,
+        value="valid-refresh-token",
+        tenant_id="test-tenant-0000",
+        client_id="test-client",
+        foci=True,
+    ))
+
+    secret = json.dumps({"token_store": store.to_dict()})
+
+    with tempfile.TemporaryDirectory() as td:
+        ws = Workspace.create("test-ei15", workspace_dir=Path(td))
+        cred_id = ws.add_credential(
+            provider="entra",
+            credential_type="token_store",
+            secret_data=secret,
+            friendly_name="test-entra-expired",
+        )
+
+        with patch(
+            "quantum_mechanic.providers.entra.auth.EntraAuthProvider.whoami",
+            side_effect=ValueError("No valid Graph token available"),
+        ):
+            ws.active_credential_id = cred_id
+
+        assert ws.active_credential_id == cred_id
+
+
+def test_entra_authenticate_raises_still_blocks():
+    """If authenticate() itself raises, session is None — must still raise."""
+    with tempfile.TemporaryDirectory() as td:
+        ws = Workspace.create("test-ei15-auth-fail", workspace_dir=Path(td))
+        cred_id = ws.add_credential(
+            provider="entra",
+            credential_type="token_store",
+            secret_data=json.dumps({"token_store": {"tokens": []}}),
+            friendly_name="test-auth-fail",
+        )
+        with (
+            patch(
+                "quantum_mechanic.providers.entra.auth.EntraAuthProvider.authenticate",
+                side_effect=ValueError("broken store"),
+            ),
+            pytest.raises(CredentialMismatchError),
+        ):
+            ws.active_credential_id = cred_id
+
+
+def test_entra_expired_graph_at_no_refresh_token_raises():
+    """EI-15 guard: expired AT with no refresh token at all → still raise."""
+    from quantum_mechanic.providers.entra.token_store import (
+        GRAPH,
+        OAUTH_ACCESS,
+        EntraToken,
+        EntraTokenStore,
+    )
+
+    store = EntraTokenStore(tenant_id="test-tenant-0000")
+    store.add_token(EntraToken(
+        token_type=OAUTH_ACCESS,
+        resource=GRAPH,
+        value="expired.jwt.token",
+        tenant_id="test-tenant-0000",
+        client_id="test-client",
+        foci=False,
+        expires_at=0,
+    ))
+
+    secret = json.dumps({"token_store": store.to_dict()})
+
+    with tempfile.TemporaryDirectory() as td:
+        ws = Workspace.create("test-ei15-no-rt", workspace_dir=Path(td))
+        cred_id = ws.add_credential(
+            provider="entra",
+            credential_type="token_store",
+            secret_data=secret,
+            friendly_name="test-entra-no-rt",
+        )
+
+        with (
+            patch(
+                "quantum_mechanic.providers.entra.auth.EntraAuthProvider.whoami",
+                side_effect=ValueError("No valid Graph token available"),
+            ),
+            pytest.raises(CredentialMismatchError),
+        ):
+            ws.active_credential_id = cred_id

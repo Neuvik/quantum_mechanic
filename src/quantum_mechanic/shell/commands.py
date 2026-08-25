@@ -713,6 +713,35 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
     formatters.format_credentials(creds)
 
 
+def _check_entra_recovery_needed(state: ShellState, cred_id: int) -> None:
+    """Warn if the Entra store's Graph AT is expired but a refresh token exists."""
+    if state.workspace is None:
+        return
+    try:
+        import json as _json
+
+        from quantum_mechanic.providers.entra.token_store import (
+            GRAPH,
+            OAUTH_ACCESS,
+            EntraTokenStore,
+        )
+
+        raw = state.workspace.get_credential_secret(cred_id)
+        if not raw:
+            return
+        data = _json.loads(raw)
+        store = EntraTokenStore.from_dict(data.get("token_store", data))
+        best = store.best_token(GRAPH)
+        has_live_at = best is not None and best.token_type == OAUTH_ACCESS
+        if not has_live_at and store.refresh_token() is not None:
+            console.print(
+                "  [yellow]⚠[/yellow]  Graph token expired. "
+                "Run [bold]acquire entra refresh[/bold] to restore."
+            )
+    except Exception:
+        logger.debug("Failed to check Entra recovery state for cred %s", cred_id)
+
+
 def _try_restore_arm_pivot(state: ShellState) -> None:
     """If the active Entra credential has ARM/FOCI capability, unlock Azure techniques."""
     import logging as _logging
@@ -816,6 +845,7 @@ def cmd_use(state: ShellState, args: list[str]) -> None:
     console.print(f"  [green]✓[/green] Active: {provider.upper()} {identity} (#{cred_id})")
 
     if provider == "entra":
+        _check_entra_recovery_needed(state, cred_id)
         _try_restore_arm_pivot(state)
 
 

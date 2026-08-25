@@ -182,10 +182,26 @@ class Workspace:
         except _json.JSONDecodeError:
             secret_data = {}
 
+        session = None
         try:
             session = provider.authenticate(secret_data)
             result = provider.whoami(session)
         except Exception as e:
+            if cred.provider == "entra" and session is not None:
+                from quantum_mechanic.providers.entra.token_store import EntraTokenStore
+
+                if isinstance(session, EntraTokenStore) and session.refresh_token() is not None:
+                    # Recovery mode: identity check is skipped. The operator
+                    # must run 'acquire entra refresh' to get a valid Graph AT,
+                    # which will re-establish identity on the next whoami.
+                    logger.warning(
+                        "Entra credential %d: whoami failed (%s) but a refresh "
+                        "token is available. Activating in recovery mode — run "
+                        "'acquire entra refresh' to restore Graph access.",
+                        cred_id,
+                        e,
+                    )
+                    return
             raise CredentialMismatchError(
                 f"Credential id={cred_id} ({cred.provider}, "
                 f"{cred.friendly_name!r}) could not be loaded for verification: {e}"
