@@ -260,6 +260,28 @@ def _enum_aws(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         else:
             active_errors.append(f"ec2:RunInstances check failed: {str(e)}")
 
+    # Check sts:AssumeRole — attempt to assume a non-existent role.
+    # If the error is NoSuchEntity/trust rejection, we have the permission.
+    # If the error explicitly says 'not authorized to perform: sts:AssumeRole', we don't.
+    try:
+        sts_client = ctx.session.client("sts")
+        sts_client.assume_role(
+            RoleArn="arn:aws:iam::000000000000:role/qm-probe",
+            RoleSessionName="qm-probe",
+        )
+        active_allowed.append("sts:AssumeRole")
+    except Exception as e:
+        msg = str(e).lower()
+        error_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+        if (
+            ("not authorized to perform" in msg and "sts:assumerole" in msg)
+            or (error_code == "AccessDenied" and "sts:AssumeRole" in str(e))
+        ):
+            active_denied.append("sts:AssumeRole")
+        else:
+            # Got past authz (NoSuchEntity, MalformedPolicy, or trust rejection)
+            active_allowed.append("sts:AssumeRole")
+
     return {
         "status": "success",
         "method": "active_dryrun_fallback",
