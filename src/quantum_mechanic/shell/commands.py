@@ -3131,16 +3131,24 @@ def cmd_acquire(state: ShellState, args: list[str]) -> None:
     if not args:
         console.print("  Usage: acquire <provider> <method> [options]", style="yellow")
         console.print(
-            "    acquire entra device_code [--tenant <tid>] [--client <id>] [--resource <url>]"
+            "    acquire entra device_code [--tenant <tid>] [--client <id>]"
+            " [--scope <perm> | --bundle <name>]"
         )
         console.print(
-            "    acquire entra interactive [--tenant <tid>] [--client <id>] [--resource <url>]"
+            "    acquire entra interactive [--tenant <tid>] [--client <id>]"
+            " [--scope <perm> | --bundle <name>]"
         )
-        console.print("    acquire entra ropc --username <upn> --password <pw> [--tenant <tid>]")
+        console.print(
+            "    acquire entra ropc --username <upn> --password <pw>"
+            " [--tenant <tid>]"
+        )
         console.print("    acquire entra refresh [--tenant <tid>] [--resource <url>]")
         console.print(
-            "    acquire entra arm                                  Pivot to Azure ARM via FOCI"
+            "    acquire entra arm"
+            "                                  Pivot to Azure ARM via FOCI"
         )
+        console.print()
+        console.print("  Bundles: basic-graph, ca-read, pim-read, entra-admin-read")
         return
 
     provider = args[0].lower()
@@ -3396,20 +3404,27 @@ COMMAND_HELP: dict[str, CommandHelp] = {
         synopsis="Acquire a new Entra credential interactively",
         description=(
             "Drives device-code or browser flows to obtain Entra tokens. "
-            "--client accepts a short alias instead of a raw client GUID."
+            "--client accepts a short alias instead of a raw client GUID. "
+            "--bundle requests a named scope set (pim-read, ca-read, etc.)."
         ),
         subcommands=[
             SubcommandHelp(
                 name="entra device_code",
                 synopsis="Interactive device-code login",
-                args="[--client <id>] [--resource <url>] [--tenant <id>]",
-                example="acquire entra device_code --client graph-cli",
+                args=(
+                    "[--client <id>] [--tenant <id>] "
+                    "[--scope <perm> | --bundle <name>]"
+                ),
+                example="acquire entra device_code --bundle pim-read",
             ),
             SubcommandHelp(
                 name="entra interactive",
                 synopsis="Browser-based OAuth login (auth code + PKCE)",
-                args="[--tenant <id>] [--client <id>] [--resource <url>] [--timeout <secs>]",
-                example="acquire entra interactive --tenant contoso.onmicrosoft.com",
+                args=(
+                    "[--tenant <id>] [--client <id>] "
+                    "[--scope <perm> | --bundle <name>]"
+                ),
+                example="acquire entra interactive --bundle pim-read",
             ),
             SubcommandHelp(
                 name="entra arm",
