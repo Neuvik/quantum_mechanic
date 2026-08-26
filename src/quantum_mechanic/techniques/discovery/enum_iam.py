@@ -53,10 +53,9 @@ from quantum_mechanic.core.technique import technique
 # ----------------------------------------------------------------
 # Loot schema — CloudFox-style output (loot.csv / table.txt)
 # ----------------------------------------------------------------
-LOOT_ITEMS_KEY = "attached_policies"
+LOOT_ITEMS_KEY = "policies"
 LOOT_SCHEMA = [
     ("PolicyName", "PolicyName"),
-    ("PolicyArn", "PolicyArn"),
 ]
 
 try:
@@ -313,6 +312,8 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         "attached_policies": attached_policies,
         "inline_policies": inline_policies,
         "policy_documents": policy_documents,
+        # Union for loot.csv serialization — covers both managed and inline
+        "policies": attached_policies + inline_policies,
     }
 
 
