@@ -47,14 +47,15 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------
 LOOT_ITEMS_KEY = "assignments"
 LOOT_SCHEMA = [
-    ("tier",           "Tier",           "bold red"),
-    ("role_name",      "Role Name",      "bold yellow"),
-    ("principal_name", "Principal",      "bold cyan"),
-    ("principal_type", "Type",           "dim"),
-    ("assignment_type", "Assignment",     "white"),
-    ("expires_at",     "Expires At",     "dim"),
-    ("principal_id",   "Object ID",      "dim"),
+    ("tier", "Tier", "bold red"),
+    ("role_name", "Role Name", "bold yellow"),
+    ("principal_name", "Principal", "bold cyan"),
+    ("principal_type", "Type", "dim"),
+    ("assignment_type", "Assignment", "white"),
+    ("expires_at", "Expires At", "dim"),
+    ("principal_id", "Object ID", "dim"),
 ]
+
 
 def format_privileged_roles(result: Any) -> None:
     """Formatter for Privileged Role discovery results."""
@@ -78,8 +79,7 @@ def format_privileged_roles(result: Any) -> None:
 
     glyph = "[bold yellow]⚠[/bold yellow]" if status == "partial" else "[bold green]✓[/bold green]"
     console.print(
-        f"  {glyph} Discovered "
-        f"[bold cyan]{len(assignments)}[/bold cyan] privileged assignment(s)"
+        f"  {glyph} Discovered [bold cyan]{len(assignments)}[/bold cyan] privileged assignment(s)"
     )
 
     if status == "partial":
@@ -89,13 +89,9 @@ def format_privileged_roles(result: Any) -> None:
             console.print("    [yellow]PIM visibility incomplete[/yellow]")
         if missing_scopes:
             console.print(
-                "    [dim]Missing delegated scope(s): "
-                + ", ".join(missing_scopes)
-                + "[/dim]"
+                "    [dim]Missing delegated scope(s): " + ", ".join(missing_scopes) + "[/dim]"
             )
-            console.print(
-                "    [dim]Next step: acquire entra interactive --bundle pim-read[/dim]"
-            )
+            console.print("    [dim]Next step: acquire entra interactive --bundle pim-read[/dim]")
 
     tbl = Table(box=box.ROUNDED, border_style="dim")
     tbl.add_column("Tier", style="bold")
@@ -121,10 +117,11 @@ def format_privileged_roles(result: Any) -> None:
             a.get("role_name", "Unknown"),
             a.get("principal_name", "—"),
             a.get("principal_type", "—"),
-            a.get("assignment_type", "Permanent")
+            a.get("assignment_type", "Permanent"),
         )
 
     console.print(tbl)
+
 
 @technique(
     technique_id="discovery/entra_enum_privileged_roles",
@@ -156,9 +153,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     headers = {"Authorization": f"Bearer {token.value}"}
     results = []
 
-    role_defs_url = (
-        "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions"
-    )
+    role_defs_url = "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions"
     role_assignments_url = (
         "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments"
         "?$expand=principal"
@@ -212,16 +207,18 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                 or a.get("principalId")
             )
 
-            results.append({
-                "tier": tier,
-                "role_name": role_name,
-                "role_id": role_id,
-                "principal_name": p_name,
-                "principal_id": a.get("principalId"),
-                "principal_type": p_type,
-                "assignment_type": "Active/Permanent",
-                "expires_at": None,
-            })
+            results.append(
+                {
+                    "tier": tier,
+                    "role_name": role_name,
+                    "role_id": role_id,
+                    "principal_name": p_name,
+                    "principal_id": a.get("principalId"),
+                    "principal_type": p_type,
+                    "assignment_type": "Active/Permanent",
+                    "expires_at": None,
+                }
+            )
 
         # 3. Try to get PIM eligibility (Role Eligibility Schedules)
         # This requires more permissions but is high value.
@@ -248,16 +245,18 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                 or e.get("principalId")
             )
 
-            results.append({
-                "tier": tier,
-                "role_name": role_name,
-                "role_id": role_id,
-                "principal_name": p_name,
-                "principal_id": e.get("principalId"),
-                "principal_type": p_type,
-                "assignment_type": "Eligible (PIM)",
-                "expires_at": None,
-            })
+            results.append(
+                {
+                    "tier": tier,
+                    "role_name": role_name,
+                    "role_id": role_id,
+                    "principal_name": p_name,
+                    "principal_id": e.get("principalId"),
+                    "principal_type": p_type,
+                    "assignment_type": "Eligible (PIM)",
+                    "expires_at": None,
+                }
+            )
 
         # 4. Cross-reference currently-activated PIM assignments so
         # active standing admins are not conflated with time-boxed PIM

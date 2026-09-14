@@ -293,6 +293,19 @@ class TestWorkspaceApiLog:
 class TestWorkspaceLifecycle:
     """Test workspace creation, listing, and loading."""
 
+    def test_workspace_dir_isolated_per_workspace(self, tmp_path):
+        """Each workspace writes file artifacts below its own sibling directory."""
+        alpha = Workspace.create("alpha", tmp_path)
+        beta = Workspace.create("beta", tmp_path)
+        try:
+            assert alpha.workspace_dir == tmp_path / "alpha"
+            assert beta.workspace_dir == tmp_path / "beta"
+            assert alpha.workspace_dir.is_dir()
+            assert beta.workspace_dir.is_dir()
+        finally:
+            alpha.close()
+            beta.close()
+
     def test_create_and_load(self, tmp_path):
         """A workspace can be created and then loaded by name."""
         ws1 = Workspace.create("lifecycle-test", tmp_path)

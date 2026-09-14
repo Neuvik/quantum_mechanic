@@ -15,6 +15,8 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from quantum_mechanic.providers.entra.token_store import OAUTH_REFRESH
+
 if TYPE_CHECKING:
     from quantum_mechanic.providers.entra.token_store import EntraTokenStore
 
@@ -45,21 +47,15 @@ class EntraTokenCredential:
         resource = _scope_to_resource(scopes[0] if scopes else _DEFAULT_RESOURCE)
 
         tok = self._store.best_token(resource)
-        if tok is None or tok.token_type == "refresh_token":
+        if tok is None or tok.token_type == OAUTH_REFRESH:
             from quantum_mechanic.providers.entra.foci import foci_expand
+
             tok = foci_expand(self._store, resource)
 
         if tok is None:
-            raise ValueError(
-                f"No ARM token available for {resource}. "
-                "Run: acquire entra arm"
-            )
+            raise ValueError(f"No ARM token available for {resource}. Run: acquire entra arm")
 
-        expires_on = (
-            int(tok.expires_at.timestamp())
-            if tok.expires_at
-            else int(time.time()) + 3600
-        )
+        expires_on = int(tok.expires_at.timestamp()) if tok.expires_at else int(time.time()) + 3600
         return AccessToken(tok.value, expires_on)
 
     def get_token_info(self, *scopes: str, **kwargs) -> object:

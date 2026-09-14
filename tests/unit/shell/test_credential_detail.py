@@ -25,13 +25,13 @@ def test_detail_shows_cred_id_and_provider_header():
         "id": 3,
         "provider": "entra",
         "credential_type": "token_store",
-        "friendly_name": "alice@x.com",
+        "friendly_name": "alice@x.example",
         "status": "active",
     }
     out = _capture(f.format_credential_detail, cred, [])
     assert "#3" in out
     assert "ENTRA" in out
-    assert "alice@x.com" in out
+    assert "alice@x.example" in out
 
 
 def test_detail_shows_derived_from_link_when_present():
@@ -42,7 +42,7 @@ def test_detail_shows_derived_from_link_when_present():
         "id": 4,
         "provider": "entra",
         "credential_type": "token_store",
-        "friendly_name": "alice@x.com",
+        "friendly_name": "alice@x.example",
         "status": "active",
         "derived_from_id": 2,
     }
@@ -54,7 +54,7 @@ def test_detail_shows_derived_from_link_when_present():
 def test_detail_shows_expiration_and_resource_per_token():
     cred = {
         "id": 1, "provider": "entra", "credential_type": "token_store",
-        "friendly_name": "alice@x.com", "status": "active",
+        "friendly_name": "alice@x.example", "status": "active",
     }
     details = [
         {

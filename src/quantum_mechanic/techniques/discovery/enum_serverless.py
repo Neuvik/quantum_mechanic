@@ -79,24 +79,24 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------
 # Loot schema — Declarative table mapping
 # ----------------------------------------------------------------
-LOOT_ITEMS_KEY = 'functions'
+LOOT_ITEMS_KEY = "functions"
 LOOT_SCHEMA = [
-    ('name',           'Function Name', 'bold cyan'),
-    ('runtime',        'Runtime',       'dim'),
-    ('region',         'Region',        'dim'),
-    ('role',           'Execution Identity', 'yellow'),
-    ('env_var_count',  'Env Vars',      'white'),
+    ("name", "Function Name", "bold cyan"),
+    ("runtime", "Runtime", "dim"),
+    ("region", "Region", "dim"),
+    ("role", "Execution Identity", "yellow"),
+    ("env_var_count", "Env Vars", "white"),
 ]
 
 
 @technique(
-    technique_id='discovery/enum_serverless',
-    tactic='discovery',
-    mitre_id='T1580',
-    providers=['aws', 'azure', 'gcp', 'oci'],
-    severity='medium',
+    technique_id="discovery/enum_serverless",
+    tactic="discovery",
+    mitre_id="T1580",
+    providers=["aws", "azure", "gcp", "oci"],
+    severity="medium",
     safe=True,
-    description='Enumerate serverless functions, execution identities, and environment variables.',
+    description="Enumerate serverless functions, execution identities, and environment variables.",
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,
 )
@@ -107,13 +107,13 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     Generated from: enum_serverless.yaml
     See: docs/architecture/attack_maps/ for full attack chain.
     """
-    if ctx.provider_name == 'aws':
+    if ctx.provider_name == "aws":
         return _aws(ctx)
-    if ctx.provider_name == 'azure':
+    if ctx.provider_name == "azure":
         return _azure(ctx)
-    if ctx.provider_name == 'gcp':
+    if ctx.provider_name == "gcp":
         return _gcp(ctx)
-    if ctx.provider_name == 'oci':
+    if ctx.provider_name == "oci":
         return _oci(ctx)
 
     return {}
@@ -144,6 +144,7 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
     # Requires lambda:ListFunctions. The technique iterates through all AWS regions invoking lambda.list_functions(). Extracts the execution Role ARN, Runtime, and Environment Variables (Environment.Variables).
     try:
         from botocore.exceptions import BotoCoreError, ClientError
+
         ec2 = ctx.session.client("ec2")
 
         try:
@@ -160,7 +161,7 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
                 for page in paginator.paginate():
                     for f in page.get("Functions", []):
                         env_vars = f.get("Environment", {}).get("Variables", {})
-                        
+
                         code_location = None
                         try:
                             # Try to get function details to extract the pre-signed code download URL
@@ -169,25 +170,25 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
                         except (BotoCoreError, ClientError):
                             pass
 
-                        functions.append({
-                            "name": f.get("FunctionName"),
-                            "role": f.get("Role"),
-                            "runtime": f.get("Runtime"),
-                            "region": region,
-                            "env_var_count": len(env_vars),
-                            "env_vars": env_vars,
-                            "code_location": code_location,
-                        })
+                        functions.append(
+                            {
+                                "name": f.get("FunctionName"),
+                                "role": f.get("Role"),
+                                "runtime": f.get("Runtime"),
+                                "region": region,
+                                "env_var_count": len(env_vars),
+                                "env_vars": env_vars,
+                                "code_location": code_location,
+                            }
+                        )
             except ClientError:
                 pass
 
-        return {
-            "provider": "aws",
-            "functions": functions,
-            "total": len(functions)
-        }
+        return {"provider": "aws", "functions": functions, "total": len(functions)}
     except Exception as e:
         return {"provider": "aws", "error": str(e)}
+
+
 def _azure(ctx: ExecutionContext) -> dict[str, Any]:
     """
     Requires Microsoft.Web/sites/read and optionally
@@ -213,8 +214,8 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
     # -----------------------------------------------------------------
     # Requires Microsoft.Web/sites/read and optionally Microsoft.Web/sites/config/Read. Calls WebSiteManagementClient.web_apps.list() filtering for objects where kind contains 'functionapp'. Extracts Managed Identity configurations and attempts to pull list_application_settings() to discover plaintext connection strings.
     try:
-        from azure.mgmt.web import WebSiteManagementClient
         from azure.mgmt.subscription import SubscriptionClient
+        from azure.mgmt.web import WebSiteManagementClient
     except ImportError:
         return {"error": "azure-mgmt-web not installed.", "functions": []}
 
@@ -234,33 +235,49 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
 
                     identity = app.identity
                     identity_type = (
-                        identity.type.value if hasattr(identity.type, "value") else str(identity.type)
-                    ) if identity and getattr(identity, "type", None) else "None"
+                        (
+                            identity.type.value
+                            if hasattr(identity.type, "value")
+                            else str(identity.type)
+                        )
+                        if identity and getattr(identity, "type", None)
+                        else "None"
+                    )
 
                     env_vars: dict = {}
                     try:
                         parts = (app.id or "").split("/")
-                        rg = parts[parts.index("resourceGroups") + 1] if "resourceGroups" in parts else None
+                        rg = (
+                            parts[parts.index("resourceGroups") + 1]
+                            if "resourceGroups" in parts
+                            else None
+                        )
                         if rg:
                             settings = web_client.web_apps.list_application_settings(rg, app.name)
                             env_vars = settings.properties or {}
                     except Exception:
                         pass
 
-                    functions.append({
-                        "name": app.name,
-                        "runtime": kind,
-                        "region": app.location,
-                        "role": identity_type,
-                        "env_var_count": len(env_vars),
-                        "env_vars": env_vars,
-                    })
+                    functions.append(
+                        {
+                            "name": app.name,
+                            "runtime": kind,
+                            "region": app.location,
+                            "role": identity_type,
+                            "env_var_count": len(env_vars),
+                            "env_vars": env_vars,
+                        }
+                    )
             except Exception as e:
-                logger.warning("Failed to enumerate Function Apps in subscription %s: %s", sub_id, e)
+                logger.warning(
+                    "Failed to enumerate Function Apps in subscription %s: %s", sub_id, e
+                )
 
         return {"provider": "azure", "functions": functions, "total": len(functions)}
     except Exception as e:
         return {"error": str(e), "functions": []}
+
+
 def _gcp(ctx: ExecutionContext) -> dict[str, Any]:
     """
     Requires cloudfunctions.functions.list. Iterates cloudfunctions.proj
@@ -281,6 +298,8 @@ def _gcp(ctx: ExecutionContext) -> dict[str, Any]:
     # -----------------------------------------------------------------
     # Requires cloudfunctions.functions.list. Iterates cloudfunctions.projects().locations().functions().list(parent=parent). Extracts the executing serviceAccountEmail and the build/environmentVariables dictionary.
     return {"error": "GCP serverless enumeration not yet implemented.", "functions": []}
+
+
 def _oci(ctx: ExecutionContext) -> dict[str, Any]:
     """
     Requires FUNCTIONS_APPLICATION_INSPECT and
@@ -301,4 +320,3 @@ def _oci(ctx: ExecutionContext) -> dict[str, Any]:
     # -----------------------------------------------------------------
     # Requires FUNCTIONS_APPLICATION_INSPECT and FUNCTIONS_FUNCTION_INSPECT. Queries FunctionsManagementClient.list_applications() cross-compartment, iterating into list_functions() for each app to scrape defined trace configs and functions.
     return {"error": "OCI serverless enumeration not yet implemented.", "functions": []}
-

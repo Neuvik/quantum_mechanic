@@ -2,36 +2,40 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc2 |
-| **Issued** | 2026-08-04 |
-| **Last reviewed** | 2026-08-04 |
+| **Version** | v1.0.0 |
+| **Issued** | 2026-09-14 |
+| **Last reviewed** | 2026-09-14 |
 | **Status** | Active |
 
-Quantum Mechanic (QM) is a cross-cloud offensive security framework covering
-cloud and identity workflows across AWS, Azure, Entra, GCP, and OCI from a
-single shell.
+One shell for cloud offense. Import a credential, run discovery, escalate,
+move laterally, and generate a report. QM handles the evidence pipeline
+and credential chain tracking so you can focus on the assessment.
+
+Covers AWS, Azure, Entra ID, GCP, and OCI from a single prompt.
 
 ```
 qm[acme-prod][aws:AKIA...]> run discovery/enum_iam
 ```
 
+## Authorized Use
+
+QM is for authorized assessments, labs, and sanctioned red team ops only.
+Have documented permission before you point it at anything.
+
 ---
 
-## Table of Contents
+## Pages
 
-### Getting Started
-1. [Getting Started](./Getting-Started.md) — install, first workspace, first run
-
-### Command Reference
-2. [Shell Reference](./Shell-Reference.md) — every command, every flag
-
-### Guides
-3. [Workspaces](./Workspaces.md) — create and manage engagements
-4. [Credentials](./Credentials.md) — import, switch, inspect credentials
-5. [Techniques](./Techniques.md) — browse, run, and understand techniques
-6. [Evidence](./Evidence.md) — how QM records notes and attack paths
-7. [Report](./Report.md) — engagement narrative and findings
-8. [Agent Mode](./Agent-Mode.md) — the `ask` command and RAG agent
+| | |
+|---|---|
+| [Getting Started](./Getting-Started.md) | Install, first workspace, first technique |
+| [Shell Reference](./Shell-Reference.md) | Every command and flag |
+| [Workspaces](./Workspaces.md) | Create and manage engagement databases |
+| [Credentials](./Credentials.md) | Import, switch, inspect credentials |
+| [Techniques](./Techniques.md) | Browse, run, and read technique docs |
+| [Evidence](./Evidence.md) | How QM records API logs and attack paths |
+| [Report](./Report.md) | Engagement narrative and findings |
+| [Agent Mode](./Agent-Mode.md) | The `ask` command and local RAG advisor |
 
 ---
 
@@ -39,4 +43,11 @@ qm[acme-prod][aws:AKIA...]> run discovery/enum_iam
 
 See [Release Notes](./Release-Notes.md) for what changed in each version.
 
-**Current:** `v1.0-rc2` — public release candidate (2026-08-04)
+**Current:** `v1.0.0` — general availability release (2026-09-14)
+
+## Change Log
+
+| Rev | Date | Change |
+|-----|------|--------|
+| v1.0.0 | 2026-09-14 | General availability release. |
+| v1.0-rc3 | 2026-08-07 | Added authorized-use guidance and updated release metadata. |

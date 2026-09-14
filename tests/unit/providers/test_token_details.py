@@ -24,7 +24,7 @@ def _past(mins: int = 10) -> datetime:
 
 
 def _store_with(tokens: list[EntraToken]) -> EntraTokenStore:
-    store = EntraTokenStore(tenant_id="tenant-1", user_upn="alice@x.com")
+    store = EntraTokenStore(tenant_id="tenant-1", user_upn="alice@x.example")
     for t in tokens:
         store.add_token(t)
     return store

@@ -29,25 +29,27 @@ from typing import Any
 
 class ParameterType(enum.StrEnum):
     """Supported data types for technique parameters."""
-    STRING  = "string"
+
+    STRING = "string"
     INTEGER = "integer"
     BOOLEAN = "boolean"
-    LIST    = "list"
+    LIST = "list"
 
     @property
     def label(self) -> str:
         """Operational label for display."""
         return {
-            ParameterType.STRING:  "Text",
+            ParameterType.STRING: "Text",
             ParameterType.INTEGER: "Number",
             ParameterType.BOOLEAN: "Toggle",
-            ParameterType.LIST:    "List",
+            ParameterType.LIST: "List",
         }.get(self, "Unknown")
 
 
 @dataclass(frozen=True)
 class Parameter:
     """Definition of a single technique parameter."""
+
     name: str
     description: str
     required: bool = False
@@ -74,10 +76,12 @@ class TechniqueMetadata:
     description: str = ""  # One-line description
     safe_mode_available: bool = False  # Can this run in check-only mode?
     exploit_pack: bool = False  # Hidden from main menu; use 'exploits' submenu
+    capabilities: frozenset[str] = frozenset()
     formatter_func: Callable | None = None  # Function to render rich output in shell
     loot_schema: list[tuple[str, str | None, str | None]] | None = None  # Declarative table schema
     loot_items_key: str | None = None  # Key in result data containing the list of items
     parameters: list[Parameter] = field(default_factory=list)
+
 
 def technique(
     *,
@@ -90,6 +94,7 @@ def technique(
     description: str = "",
     safe_mode_available: bool = False,
     exploit_pack: bool = False,
+    capabilities: frozenset[str] | None = None,
     formatter: Callable | None = None,
     loot_schema: list[tuple[str, str | None, str | None]] | None = None,
     loot_items_key: str | None = None,
@@ -125,9 +130,7 @@ def technique(
     # to the same canonical display value ('Discovery',
     # 'Privilege Escalation', etc.).
     # ----------------------------------------------------------------
-    normalized_tactic = " ".join(
-        word.capitalize() for word in tactic.replace("_", " ").split()
-    )
+    normalized_tactic = " ".join(word.capitalize() for word in tactic.replace("_", " ").split())
 
     metadata = TechniqueMetadata(
         id=technique_id,
@@ -139,6 +142,7 @@ def technique(
         description=description,
         safe_mode_available=safe_mode_available,
         exploit_pack=exploit_pack,
+        capabilities=capabilities or frozenset(),
         formatter_func=formatter,
         loot_schema=loot_schema,
         loot_items_key=loot_items_key,

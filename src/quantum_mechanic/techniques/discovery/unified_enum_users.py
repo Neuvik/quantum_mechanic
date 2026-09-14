@@ -16,8 +16,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import httpx
-
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 
@@ -26,17 +24,19 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------
 # Loot & Formatter
 # ----------------------------------------------------------------
-LOOT_ITEMS_KEY = 'users'
+LOOT_ITEMS_KEY = "users"
 LOOT_SCHEMA = [
-    ('username', 'Username/UPN', 'bold cyan'),
-    ('type',     'Type',         'white'),
-    ('id',       'ID',           'dim'),
-    ('info',     'Info',         'dim'),
+    ("username", "Username/UPN", "bold cyan"),
+    ("type", "Type", "white"),
+    ("id", "ID", "dim"),
+    ("info", "Info", "dim"),
 ]
+
 
 def format_unified_users(result: Any) -> None:
     """Formatter for Unified User discovery results."""
     from rich.table import Table
+
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
@@ -47,8 +47,10 @@ def format_unified_users(result: Any) -> None:
         console.print(f"  [dim]No users discovered for {provider} (or access denied).[/dim]")
         return
 
-    console.print(f"  [bold green]✓[/bold green] Discovered [bold cyan]{len(users)}[/bold cyan] {provider} User(s)")
-    
+    console.print(
+        f"  [bold green]✓[/bold green] Discovered [bold cyan]{len(users)}[/bold cyan] {provider} User(s)"
+    )
+
     tbl = Table(box=None, padding=(0, 2), show_header=True)
     tbl.add_column("Username/UPN", style="bold cyan")
     tbl.add_column("Type", style="white")
@@ -58,19 +60,17 @@ def format_unified_users(result: Any) -> None:
     # Limit display to first 100 for brevity in the shell
     for u in users[:100]:
         tbl.add_row(
-            u.get("username", "—"),
-            u.get("type", "—"),
-            u.get("id", "—"),
-            u.get("info", "—")
+            u.get("username", "—"), u.get("type", "—"), u.get("id", "—"), u.get("info", "—")
         )
-            
+
     console.print(tbl)
     if len(users) > 100:
         console.print(f"  [dim]... and {len(users) - 100} more users in result data[/dim]")
 
+
 @technique(
     technique_id="discovery/unified_enum_users",
-    tactic='discovery',
+    tactic="discovery",
     mitre_id="T1087.004",
     providers=["aws", "azure", "gcp", "oci", "entra"],
     severity="info",
@@ -89,32 +89,36 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         "oci": _enum_oci,
         "entra": _enum_entra,
     }
-    
+
     handler = dispatch.get(ctx.provider_name)
     if handler is None:
         return {"error": f"Provider {ctx.provider_name} not implemented.", "users": []}
-        
+
     return handler(ctx)
+
 
 # ================================================================
 # AWS — IAM User Discovery
 # ================================================================
+
 
 def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
     iam = ctx.session.client("iam")
     users = []
 
     try:
-        paginator = iam.get_paginator('list_users')
+        paginator = iam.get_paginator("list_users")
         ctx.info("Enumerating AWS IAM users...")
         for page in paginator.paginate():
             for u in page.get("Users", []):
-                users.append({
-                    "username": u["UserName"],
-                    "type": "IAM User",
-                    "id": u["UserId"],
-                    "info": f"Created: {u['CreateDate'].strftime('%Y-%m-%d')}"
-                })
+                users.append(
+                    {
+                        "username": u["UserName"],
+                        "type": "IAM User",
+                        "id": u["UserId"],
+                        "info": f"Created: {u['CreateDate'].strftime('%Y-%m-%d')}",
+                    }
+                )
         ctx.success(f"Discovered {len(users)} AWS users.")
     except Exception as e:
         ctx.debug(f"AWS IAM user enumeration failed: {e}")
@@ -122,21 +126,26 @@ def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
 
     return {"status": "success", "users": users}
 
+
 # ================================================================
 # Azure / Entra — delegate to entra_enum_users (authoritative)
 # ================================================================
 
 from quantum_mechanic.techniques.discovery import entra_enum_users
 
+
 def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
     return _enum_entra(ctx)
+
 
 def _enum_entra(ctx: ExecutionContext) -> dict[str, Any]:
     return entra_enum_users.execute(ctx)
 
+
 # ================================================================
 # GCP — Project Member Discovery
 # ================================================================
+
 
 def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
     try:
@@ -146,10 +155,10 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
 
     users = []
     client = resourcemanager_v3.ProjectsClient(credentials=ctx.session)
-    
+
     whoami = ctx.whoami()
     project_id = whoami.account_id
-    
+
     if not project_id or project_id == "unknown":
         return {"error": "No GCP project identified.", "users": []}
 
@@ -169,11 +178,11 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
                         "username": name,
                         "type": mtype,
                         "id": member,
-                        "info": f"Role: {binding.role.split('/')[-1]}"
+                        "info": f"Role: {binding.role.split('/')[-1]}",
                     }
                 else:
                     # Append additional roles if member seen before
-                    role_short = binding.role.split('/')[-1]
+                    role_short = binding.role.split("/")[-1]
                     if role_short not in seen_members[member]["info"]:
                         seen_members[member]["info"] += f", {role_short}"
 
@@ -185,9 +194,11 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
 
     return {"status": "success", "users": users}
 
+
 # ================================================================
 # OCI — Identity User Discovery
 # ================================================================
+
 
 def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
     try:
@@ -198,8 +209,12 @@ def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
     users = []
     config = ctx.session["config"]
     signer = ctx.session.get("signer")
-    
-    identity = oci.identity.IdentityClient(config, signer=signer) if signer else oci.identity.IdentityClient(config)
+
+    identity = (
+        oci.identity.IdentityClient(config, signer=signer)
+        if signer
+        else oci.identity.IdentityClient(config)
+    )
     tenancy_id = config.get("tenancy")
 
     try:
@@ -207,12 +222,14 @@ def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
         # Use oci.pagination to handle large result sets automatically
         all_users = oci.pagination.list_call_get_all_results(identity.list_users, tenancy_id).data
         for u in all_users:
-            users.append({
-                "username": u.name,
-                "type": "OCI User",
-                "id": u.id,
-                "info": f"State: {u.lifecycle_state}"
-            })
+            users.append(
+                {
+                    "username": u.name,
+                    "type": "OCI User",
+                    "id": u.id,
+                    "info": f"State: {u.lifecycle_state}",
+                }
+            )
         ctx.success(f"Discovered {len(users)} OCI users.")
     except Exception as e:
         ctx.debug(f"OCI user enumeration failed: {e}")

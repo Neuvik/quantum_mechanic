@@ -127,9 +127,7 @@ def _format_app_perms(result: Any) -> None:
     providers=["entra"],
     severity="info",
     safe=True,
-    description=(
-        "Drill down into one Entra app registration's requested API permissions."
-    ),
+    description=("Drill down into one Entra app registration's requested API permissions."),
     formatter=_format_app_perms,
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,
@@ -171,10 +169,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
         if resp.status_code == 404:
             # Fall back to appId filter (client id GUID).
-            filt_url = (
-                "https://graph.microsoft.com/v1.0/applications?"
-                f"$filter=appId eq '{app_id}'"
-            )
+            filt_url = f"https://graph.microsoft.com/v1.0/applications?$filter=appId eq '{app_id}'"
             try:
                 resp = http.get(filt_url, headers=headers)
             except Exception as exc:
@@ -220,13 +215,17 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                 # aligned with the input order — same as resolver contract).
                 for entry, name in zip(perm_entries, names, strict=False):
                     kind = "Application" if entry.get("type") == "Role" else "Delegated"
-                    perms.append({
-                        "resource_app_id": resource_app_id,
-                        "resource_display_name": _WELL_KNOWN.get(resource_app_id, resource_app_id),
-                        "name": name,
-                        "kind": kind,
-                        "tier": eam.classify_graph_permission(name),
-                    })
+                    perms.append(
+                        {
+                            "resource_app_id": resource_app_id,
+                            "resource_display_name": _WELL_KNOWN.get(
+                                resource_app_id, resource_app_id
+                            ),
+                            "name": name,
+                            "kind": kind,
+                            "tier": eam.classify_graph_permission(name),
+                        }
+                    )
         except GraphError as e:
             return graph_error_to_result(
                 e,

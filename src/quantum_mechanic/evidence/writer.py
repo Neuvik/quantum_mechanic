@@ -32,7 +32,7 @@ def _now() -> str:
 
 def _detection_block(technique_id: str) -> str:
     """Return the blue team detection block for a technique."""
-    _DETECTIONS: dict[str, str] = {
+    detections: dict[str, str] = {
         "discovery/whoami": textwrap.dedent("""\
             | Provider | Event |
             |----------|-------|
@@ -58,7 +58,9 @@ def _detection_block(technique_id: str) -> str:
             | OCI      | OCI Audit: `instance.list` |
         """),
     }
-    return _DETECTIONS.get(technique_id, "_Detection signatures not yet documented for this technique._\n")
+    return detections.get(
+        technique_id, "_Detection signatures not yet documented for this technique._\n"
+    )
 
 
 def write_technique_note(
@@ -195,11 +197,10 @@ def write_finding_note(
 
     detection_section = ""
     if detection_signatures:
-        rows = "\n".join(
-            f"| {k} | `{v}` |"
-            for k, v in detection_signatures.items()
+        rows = "\n".join(f"| {k} | `{v}` |" for k, v in detection_signatures.items())
+        detection_section = (
+            f"\n## Detection Signatures (Blue Team)\n\n| Provider | Event |\n|---|---|\n{rows}\n"
         )
-        detection_section = f"\n## Detection Signatures (Blue Team)\n\n| Provider | Event |\n|---|---|\n{rows}\n"
 
     remediation_section = f"\n## Remediation\n\n{remediation}\n" if remediation else ""
 

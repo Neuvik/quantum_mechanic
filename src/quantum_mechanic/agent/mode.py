@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from quantum_mechanic import __version__
 from quantum_mechanic.core.loader import TechniqueLoader
 from quantum_mechanic.core.runner import TechniqueRunner
 from quantum_mechanic.core.workspace import Workspace
@@ -188,7 +189,7 @@ def _cmd_capabilities(
         {
             "ok": True,
             "capabilities": {
-                "version": "0.1.0",
+                "version": __version__,
                 "providers": providers,
                 "techniques": techniques,
                 "workspace": workspace_info,
@@ -284,7 +285,9 @@ def _cmd_run(
         _error_out(str(e))
 
 
-def _cmd_import(extra_args: list[str], args: argparse.Namespace, workspace_dir: Path | None = None) -> None:
+def _cmd_import(
+    extra_args: list[str], args: argparse.Namespace, workspace_dir: Path | None = None
+) -> None:
     """Import credentials in agent mode."""
     if not args.workspace:
         _error_out("--workspace required for 'import' command")
@@ -327,6 +330,7 @@ def _cmd_import(extra_args: list[str], args: argparse.Namespace, workspace_dir: 
             )
         elif provider == "azure":
             from quantum_mechanic.shell.commands import _capture_azure_token
+
             try:
                 secret_dict = _capture_azure_token()
             except Exception as e:
@@ -344,6 +348,7 @@ def _cmd_import(extra_args: list[str], args: argparse.Namespace, workspace_dir: 
             )
         elif provider == "gcp":
             from quantum_mechanic.shell.commands import _capture_gcp_token
+
             try:
                 secret_dict = _capture_gcp_token()
             except Exception as e:

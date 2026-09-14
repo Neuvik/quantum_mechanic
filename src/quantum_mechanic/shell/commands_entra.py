@@ -20,14 +20,16 @@ from typing import TYPE_CHECKING, Any
 from rich.console import Console
 from rich.table import Table
 
+from quantum_mechanic.providers.entra.token_store import ESTS_COOKIE, OAUTH_ACCESS
+
 if TYPE_CHECKING:
     from quantum_mechanic.shell.commands import ShellState
 
 logger = logging.getLogger(__name__)
 console = Console()
 
-_GRAPH   = "https://graph.microsoft.com"
-_ARM     = "https://management.azure.com"
+_GRAPH = "https://graph.microsoft.com"
+_ARM = "https://management.azure.com"
 
 _IMPORT_USAGE = """\
   Usage: import entra <subcommand> [args]
@@ -37,16 +39,17 @@ _IMPORT_USAGE = """\
 
   Import subcommands:
     browserdump <path>                              Parse browserdump JSON output
-    browser_cdp  [--browser edge|chrome]            Print local Chrome/Edge CDP launch guidance
-                 [--os windows|linux|macos]         for operator-assisted browser import
-                 [--port <n>] [--browser-path <p>]
-                 [--user-data-dir <p>]
-                 [--launch] [--attach] [--host <h>]
+    browser_cdp                                     Operator-assisted browser import, TWO phases:
+      phase 1: [--browser edge|chrome] [--launch]     launch a CDP-enabled Chrome/Edge (or print its
+               [--os windows|linux|macos] [--port <n>]  command); sign in to the Microsoft app,
+               [--browser-path <p>] [--user-data-dir <p>]  leave it open
+      phase 2: --attach [--host <h>] [--port <n>]     harvest cookies from that live session and
+                                                        exchange them into a credential
     roadtools   <path>                              Import .roadtools_auth file
     access_token <jwt>                              Raw JWT access token
     refresh_token <token> --tenant <id>             Raw refresh token
                           [--client <id>]
-    prt_cookie  <jwt>                               x-ms-RefreshTokenCredential (exchanges immediately)
+    prt_cookie  <jwt>                               x-ms-RefreshTokenCredential
     ests_cookie <value>   --tenant <id>             ESTSAUTHPERSISTENT / ESTSAUTH cookie
     prt_key               --prt <val>               Raw PRT + session key (no expiry pressure)
                           --session-key <key>
@@ -54,8 +57,8 @@ _IMPORT_USAGE = """\
     help                                            Print this usage
 
   Don't have an artifact? Get one via live authentication:
-    [cyan]acquire entra device_code[/cyan]                    Phone-verify OAuth (no local az session needed)
-    [cyan]acquire entra interactive[/cyan]                    Browser OAuth (survives Conditional Access)
+    [cyan]acquire entra device_code[/cyan]              Phone-verify OAuth
+    [cyan]acquire entra interactive[/cyan]              Browser OAuth (PKCE)
     [cyan]acquire entra ropc[/cyan] --username <u> --password <p> --tenant <t>
                                              Username+password → FOCI RT
     Then: [cyan]acquire entra arm[/cyan] / [cyan]acquire entra refresh --resource <res>[/cyan]
@@ -98,13 +101,14 @@ _EXPORT_USAGE = """\
 # import entra
 # ================================================================
 
+
 def import_entra(state: ShellState, args: list[str]) -> None:
     """Dispatch: import entra <subcommand> ..."""
     if not args:
         console.print(_IMPORT_USAGE)
         return
 
-    sub  = args[0].lower()
+    sub = args[0].lower()
     rest = args[1:]
     opts = _parse_opts(rest)
 
@@ -165,7 +169,11 @@ def _import_browserdump(
             mins = prt.minutes_remaining
             console.print(
                 "  [yellow]⚡[/yellow] PRT cookie detected"
-                + (f" — {mins:.1f}m remaining. Exchanging now..." if mins else " — exchanging now...")
+                + (
+                    f" — {mins:.1f}m remaining. Exchanging now..."
+                    if mins
+                    else " — exchanging now..."
+                )
             )
             tenant = store.tenant_id or prt.tenant_id or "common"
             resp = exchange_prt_cookie(
@@ -180,7 +188,7 @@ def _import_browserdump(
             console.print("  [red]✗[/red] PRT cookie has expired (nonce window passed).")
 
         # Exchange ESTS cookies.
-        for tok in [t for t in store.tokens if t.token_type == "ests_cookie" and t.value]:
+        for tok in [t for t in store.tokens if t.token_type == ESTS_COOKIE and t.value]:
             tenant = store.tenant_id or tok.tenant_id or "common"
             cookie_name = tok.raw_claims.get("cookie_name", "ESTSAUTHPERSISTENT")
             resp = exchange_ests_cookie(
@@ -191,9 +199,7 @@ def _import_browserdump(
                 cookie_name=cookie_name,
             )
             if "access_token" in resp:
-                _apply_token_response(
-                    store, resp, resource=_GRAPH, client_id=FOCI_DEFAULT_CLIENT
-                )
+                _apply_token_response(store, resp, resource=_GRAPH, client_id=FOCI_DEFAULT_CLIENT)
 
         cred_id = _persist_store(state, store)
         if cred_id:
@@ -203,20 +209,21 @@ def _import_browserdump(
 
 def _import_browser_cdp(state: ShellState, opts: dict[str, str]) -> None:
     """Phase 1: print cross-platform browser CDP launch guidance."""
+    from quantum_mechanic.providers.entra.browser_cdp import (
+        build_launch_plan,
+        default_browser_for_os,
+        detect_os_name,
+        import_browser_session,
+        launch_browser,
+    )
     from quantum_mechanic.providers.entra.exchange import (
         exchange_ests_cookie,
         exchange_prt_cookie,
     )
     from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT
-    from quantum_mechanic.providers.entra.browser_cdp import (
-        build_launch_plan,
-        detect_os_name,
-        import_browser_session,
-        launch_browser,
-    )
 
-    browser = opts.get("browser", "edge")
     os_name = opts.get("os") or detect_os_name()
+    browser = opts.get("browser") or default_browser_for_os(os_name)
     port = int(opts.get("port", "9222"))
     host = opts.get("host", "127.0.0.1")
     browser_path = opts.get("browser-path")
@@ -243,7 +250,7 @@ def _import_browser_cdp(state: ShellState, opts: dict[str, str]) -> None:
             )
             _apply_token_response(store, resp, resource=_GRAPH, client_id=FOCI_DEFAULT_CLIENT)
 
-        for tok in [t for t in store.tokens if t.token_type == "ests_cookie" and t.value]:
+        for tok in [t for t in store.tokens if t.token_type == ESTS_COOKIE and t.value]:
             tenant = store.tenant_id or tok.tenant_id or "common"
             cookie_name = tok.raw_claims.get("cookie_name", "ESTSAUTHPERSISTENT")
             resp = exchange_ests_cookie(
@@ -254,9 +261,7 @@ def _import_browser_cdp(state: ShellState, opts: dict[str, str]) -> None:
                 cookie_name=cookie_name,
             )
             if "access_token" in resp:
-                _apply_token_response(
-                    store, resp, resource=_GRAPH, client_id=FOCI_DEFAULT_CLIENT
-                )
+                _apply_token_response(store, resp, resource=_GRAPH, client_id=FOCI_DEFAULT_CLIENT)
 
         cred_id = _persist_store(state, store)
         if cred_id:
@@ -307,23 +312,22 @@ def _import_browser_cdp(state: ShellState, opts: dict[str, str]) -> None:
     console.print(f"     [cyan]{plan.command}[/cyan]")
     console.print()
     console.print("  2. In that launched browser, sign in to the Microsoft app/page")
-    console.print("     that demonstrates the visibility you need (Entra portal, Azure portal, PIM, etc.).")
-    console.print()
-    console.print("  3. Keep that browser session open. Phase 2 will attach to the")
-    console.print("     CDP endpoint and import usable auth artifacts.")
-    console.print()
     console.print(
-        "  [dim]Port:[/dim] "
-        f"{plan.port}    [dim]Profile:[/dim] {plan.user_data_dir}"
+        "     that demonstrates the visibility you need (Entra portal, Azure portal, PIM, etc.)."
     )
+    console.print()
+    console.print("  3. Keep that browser session open, then attach (Phase 2) to")
+    console.print("     harvest cookies from the live session and import a credential:")
+    attach_cmd = "import entra browser_cdp --attach"
+    if plan.port != 9222:
+        attach_cmd += f" --port {plan.port}"
+    console.print(f"     [cyan]{attach_cmd}[/cyan]")
+    console.print()
+    console.print(f"  [dim]Port:[/dim] {plan.port}    [dim]Profile:[/dim] {plan.user_data_dir}")
     console.print(
         "  [dim]This is separate from `acquire entra interactive` — the "
         "browser session may see data through a different Microsoft app or "
         "backend token path.[/dim]"
-    )
-    console.print(
-        "  [dim]Next step after launch/sign-in: rerun `import entra browser_cdp` "
-        "once the attach/import slice lands.[/dim]"
     )
 
 
@@ -423,7 +427,9 @@ def _import_prt_cookie(
     tok = ingest_prt_cookie(jwt)
 
     if tok.is_expired:
-        console.print("  [red]✗[/red] PRT cookie has expired. The nonce window (~5 min) has passed.")
+        console.print(
+            "  [red]✗[/red] PRT cookie has expired. The nonce window (~5 min) has passed."
+        )
         return
 
     mins = tok.minutes_remaining
@@ -436,9 +442,7 @@ def _import_prt_cookie(
     client_id = resolve_client_alias(opts.get("client")) or FOCI_DEFAULT_CLIENT
     resource = opts.get("resource", _GRAPH)
 
-    resp = exchange_prt_cookie(
-        jwt, tenant_id=tenant, client_id=client_id, resource=resource
-    )
+    resp = exchange_prt_cookie(jwt, tenant_id=tenant, client_id=client_id, resource=resource)
 
     store = EntraTokenStore(tenant_id=tenant)
     store.add_token(tok)
@@ -475,9 +479,7 @@ def _import_ests_cookie(
     store.add_token(tok)
 
     console.print("  Exchanging ESTS cookie for tokens...")
-    resp = exchange_ests_cookie(
-        value, tenant_id=tenant, client_id=client_id, resource=resource
-    )
+    resp = exchange_ests_cookie(value, tenant_id=tenant, client_id=client_id, resource=resource)
     _apply_token_response(store, resp, resource=resource, client_id=client_id)
 
     cred_id = _persist_store(state, store)
@@ -498,9 +500,7 @@ def _import_prt_key(
     tenant = opts.get("tenant", "")
 
     if not prt_val or not session_key or not tenant:
-        console.print(
-            "  [red]✗[/red] Required: --prt <value> --session-key <key> --tenant <id>"
-        )
+        console.print("  [red]✗[/red] Required: --prt <value> --session-key <key> --tenant <id>")
         return
 
     tok = ingest_prt_key(prt_val, session_key, tenant_id=tenant)
@@ -520,13 +520,14 @@ def _import_prt_key(
 # acquire entra  (EI-4)
 # ================================================================
 
+
 def acquire_entra(state: ShellState, args: list[str]) -> None:
     """Dispatch: acquire entra <subcommand> ..."""
     if not args:
         console.print(_ACQUIRE_USAGE)
         return
 
-    sub  = args[0].lower()
+    sub = args[0].lower()
     rest = args[1:]
     opts = _parse_opts(rest)
 
@@ -557,6 +558,7 @@ def _acquire_device_code(state: ShellState, opts: dict[str, str]) -> None:
         poll_device_code,
     )
     from quantum_mechanic.providers.entra.foci import FOCI_DEFAULT_CLIENT, resolve_client_alias
+
     scope_label, scopes = _resolve_explicit_scopes(opts)
     if scope_label is None and ("scope" in opts or "bundle" in opts):
         return
@@ -631,6 +633,7 @@ def _acquire_interactive(state: ShellState, opts: dict[str, str]) -> None:
         INTERACTIVE_DEFAULT_CLIENT,
         resolve_client_alias,
     )
+
     scope_label, scopes = _resolve_explicit_scopes(opts)
     if scope_label is None and ("scope" in opts or "bundle" in opts):
         return
@@ -644,8 +647,7 @@ def _acquire_interactive(state: ShellState, opts: dict[str, str]) -> None:
 
     console.print("  Opening browser for interactive sign-in...")
     console.print(
-        f"  [dim]Tenant: {tenant}   Client: {client_id[:8]}...   "
-        f"Resource: {resource}[/dim]"
+        f"  [dim]Tenant: {tenant}   Client: {client_id[:8]}...   Resource: {resource}[/dim]"
     )
     if scope_label:
         console.print(f"  [dim]Acquisition mode: {scope_label}[/dim]")
@@ -681,11 +683,9 @@ def _acquire_ropc(state: ShellState, opts: dict[str, str]) -> None:
 
     username = opts.get("username", "")
     password = opts.get("password", "")
-    tenant   = opts.get("tenant", "")
+    tenant = opts.get("tenant", "")
     if not username or not password or not tenant:
-        console.print(
-            "  [red]✗[/red] Required: --username <upn> --password <pass> --tenant <id>"
-        )
+        console.print("  [red]✗[/red] Required: --username <upn> --password <pass> --tenant <id>")
         return
 
     console.print(
@@ -694,11 +694,14 @@ def _acquire_ropc(state: ShellState, opts: dict[str, str]) -> None:
     )
 
     client_id = resolve_client_alias(opts.get("client")) or FOCI_DEFAULT_CLIENT
-    resource  = opts.get("resource", _GRAPH)
+    resource = opts.get("resource", _GRAPH)
 
     resp = exchange_ropc(
-        username, password,
-        tenant_id=tenant, client_id=client_id, resource=resource,
+        username,
+        password,
+        tenant_id=tenant,
+        client_id=client_id,
+        resource=resource,
     )
 
     if "error" in resp:
@@ -706,9 +709,7 @@ def _acquire_ropc(state: ShellState, opts: dict[str, str]) -> None:
         console.print(guidance or f"  [red]✗[/red] {resp.get('error_description', resp['error'])}")
         return
 
-    store = _store_from_response(
-        resp, tenant_id=tenant, resource=resource, client_id=client_id
-    )
+    store = _store_from_response(resp, tenant_id=tenant, resource=resource, client_id=client_id)
     store.user_upn = username
     cred_id = _persist_store(state, store)
     if cred_id:
@@ -730,19 +731,15 @@ def _acquire_refresh(state: ShellState, opts: dict[str, str]) -> None:
         console.print("  [red]✗[/red] No refresh token in active store.")
         return
 
-    resource  = opts.get("resource", _GRAPH)
+    resource = opts.get("resource", _GRAPH)
     client_id = resolve_client_alias(opts.get("client")) or rt.client_id or FOCI_DEFAULT_CLIENT
-    tenant    = store.tenant_id or rt.tenant_id or "common"
+    tenant = store.tenant_id or rt.tenant_id or "common"
 
     # Was there already a live AT for this resource? If so, this is a
     # renewal (level up in place). If not, this is a new pivot and gets
     # its own credential row so the operator can move between them.
     prior = store.best_token(resource)
-    is_renewal = (
-        prior is not None
-        and prior.token_type == "access_token"
-        and not prior.is_expired
-    )
+    is_renewal = prior is not None and prior.token_type == OAUTH_ACCESS and not prior.is_expired
 
     resp = exchange_refresh_token(
         rt.value,
@@ -760,15 +757,14 @@ def _acquire_refresh(state: ShellState, opts: dict[str, str]) -> None:
 
     if is_renewal:
         _update_store(state, store)
-        console.print(
-            f"  [green]✓[/green] Access token renewed for {resource}"
-        )
+        console.print(f"  [green]✓[/green] Access token renewed for {resource}")
     else:
         parent_id = state.active_credential_id
         # Compact label — strip the https:// prefix so the row stays readable.
         label = resource.replace("https://", "").rstrip("/")
         new_id = _mint_derived_cred(
-            state, store,
+            state,
+            store,
             label_suffix=f"→ {label}",
             obtained_via=f"acquire entra refresh --resource {resource}",
             new_token_resource=resource,
@@ -779,14 +775,10 @@ def _acquire_refresh(state: ShellState, opts: dict[str, str]) -> None:
                 f"stored as credential [bold cyan]#{new_id}[/bold cyan] "
                 f"(derived from #{parent_id})"
             )
-            console.print(
-                f"  [dim]Now active. Use `use {parent_id}` to switch back.[/dim]"
-            )
+            console.print(f"  [dim]Now active. Use `use {parent_id}` to switch back.[/dim]")
         else:
             _update_store(state, store)
-            console.print(
-                f"  [green]✓[/green] Access token acquired for {resource}"
-            )
+            console.print(f"  [green]✓[/green] Access token acquired for {resource}")
 
 
 def _acquire_arm(state: ShellState, opts: dict[str, str]) -> None:
@@ -805,10 +797,10 @@ def _acquire_arm(state: ShellState, opts: dict[str, str]) -> None:
         return
 
     existing = store.best_token(_ARM)
-    if existing and existing.token_type == "access_token" and not existing.is_expired:
+    if existing and existing.token_type == OAUTH_ACCESS and not existing.is_expired:
         mins = existing.minutes_remaining
         console.print(
-            f"  [green]✓[/green] ARM token already present "
+            "  [green]✓[/green] ARM token already present "
             + (f"({mins:.0f}m remaining)" if mins else "")
         )
         return
@@ -824,7 +816,8 @@ def _acquire_arm(state: ShellState, opts: dict[str, str]) -> None:
 
     parent_id = state.active_credential_id
     new_id = _mint_derived_cred(
-        state, store,
+        state,
+        store,
         label_suffix="→ ARM",
         obtained_via="acquire entra arm",
         new_token_resource=_ARM,
@@ -841,21 +834,19 @@ def _acquire_arm(state: ShellState, opts: dict[str, str]) -> None:
             f"(derived from #{parent_id}){exp_str}"
         )
         console.print(
-            "  [dim]Now active. Use `use "
-            f"{parent_id}` to switch back to the Graph pivot.[/dim]"
+            f"  [dim]Now active. Use `use {parent_id}` to switch back to the Graph pivot.[/dim]"
         )
     else:
         # Fallback: no workspace context (shouldn't happen in practice).
         _update_store(state, store)
         console.print(f"  [green]✓[/green] ARM access token acquired{exp_str}")
-    console.print(
-        "  Azure techniques now visible. Run: [cyan]techniques[/cyan]"
-    )
+    console.print("  Azure techniques now visible. Run: [cyan]techniques[/cyan]")
 
 
 # ================================================================
 # export entra  (EI-5)
 # ================================================================
+
 
 def export_entra(state: ShellState, args: list[str]) -> None:
     """Dispatch: export entra <subcommand> ..."""
@@ -863,7 +854,7 @@ def export_entra(state: ShellState, args: list[str]) -> None:
         console.print(_EXPORT_USAGE)
         return
 
-    sub  = args[0].lower()
+    sub = args[0].lower()
     rest = args[1:]
     opts = _parse_opts(rest)
 
@@ -896,7 +887,9 @@ def _export_roadtools(state: ShellState, opts: dict[str, str]) -> None:
     out_path = Path(".roadtools_auth")
     out_path.write_text(json.dumps(data, indent=2))
     console.print(f"  [green]✓[/green] Written to {out_path.resolve()}")
-    console.print("  Run: roadrecon gather --access-token $(cat .roadtools_auth | jq -r .accessToken)")
+    console.print(
+        "  Run: roadrecon gather --access-token $(cat .roadtools_auth | jq -r .accessToken)"
+    )
 
 
 def _export_token(state: ShellState, opts: dict[str, str]) -> None:
@@ -907,7 +900,7 @@ def _export_token(state: ShellState, opts: dict[str, str]) -> None:
 
     resource = opts.get("resource", _GRAPH)
     tok = store.best_token(resource)
-    if tok is None or tok.token_type != "access_token":
+    if tok is None or tok.token_type != OAUTH_ACCESS:
         console.print(
             f"  [red]✗[/red] No access token for {resource}. "
             "Run: acquire entra refresh --resource <res>"
@@ -947,8 +940,22 @@ def _export_describe(state: ShellState, opts: dict[str, str]) -> None:
     table.add_column("Claim", style="cyan")
     table.add_column("Value")
 
-    priority = ["oid", "upn", "unique_name", "tid", "appid", "azp", "scp", "roles",
-                "deviceid", "join_type", "amr", "exp", "iat", "nbf"]
+    priority = [
+        "oid",
+        "upn",
+        "unique_name",
+        "tid",
+        "appid",
+        "azp",
+        "scp",
+        "roles",
+        "deviceid",
+        "join_type",
+        "amr",
+        "exp",
+        "iat",
+        "nbf",
+    ]
 
     shown: set[str] = set()
     for key in priority:
@@ -974,6 +981,7 @@ def _export_describe(state: ShellState, opts: dict[str, str]) -> None:
 # Shared helpers
 # ================================================================
 
+
 def _apply_token_response(
     store: EntraTokenStore,
     resp: dict[str, Any],
@@ -995,12 +1003,14 @@ def _apply_token_response(
 
     if "access_token" in resp:
         store.add_token(
-            token_from_jwt(resp["access_token"], "access_token",
-                           resource=resource, client_id=client_id)
+            token_from_jwt(
+                resp["access_token"], "access_token", resource=resource, client_id=client_id
+            )
         )
 
     if "refresh_token" in resp:
         from quantum_mechanic.providers.entra.ingest import ingest_refresh_token
+
         rt = ingest_refresh_token(
             resp["refresh_token"],
             tenant_id=store.tenant_id,
@@ -1010,6 +1020,7 @@ def _apply_token_response(
 
     if store.tenant_id is None and "access_token" in resp:
         from quantum_mechanic.providers.entra.token_store import decode_jwt_claims
+
         claims = decode_jwt_claims(resp["access_token"])
         store.tenant_id = claims.get("tid")
         if not store.user_upn:
@@ -1036,8 +1047,9 @@ def _entra_friendly_name(store: EntraTokenStore) -> str:
     # Try to recover UPN and real tenant GUID from any access token JWT claims.
     try:
         from quantum_mechanic.providers.entra.token_store import decode_jwt_claims
+
         for tok in store.tokens:
-            if tok.token_type == "access_token":
+            if tok.token_type == OAUTH_ACCESS:
                 claims = tok.raw_claims or decode_jwt_claims(tok.value)
                 if not upn:
                     upn = claims.get("upn") or claims.get("unique_name")
@@ -1051,7 +1063,7 @@ def _entra_friendly_name(store: EntraTokenStore) -> str:
                 if upn and tid:
                     break
     except Exception:
-        pass
+        logger.debug("Failed to extract UPN/tenant from Entra token claims")
     if upn:
         return upn
     if tenant and tenant != "common":
@@ -1248,6 +1260,7 @@ def _print_no_entra_cred_guidance(state: ShellState, action: str) -> None:
 
 def _cap_guidance(error_text: str) -> str | None:
     from quantum_mechanic.providers.entra.token_store import EntraTokenStore
+
     return EntraTokenStore.cap_guidance(error_text)
 
 
@@ -1365,6 +1378,7 @@ def _print_import_summary(store: EntraTokenStore, cred_id: int) -> None:
 def _add_claim_row(table: Table, key: str, value: Any) -> None:
     """Format a JWT claim for the describe table."""
     from datetime import datetime
+
     if key in ("exp", "iat", "nbf") and isinstance(value, int):
         try:
             dt = datetime.fromtimestamp(value, tz=UTC)

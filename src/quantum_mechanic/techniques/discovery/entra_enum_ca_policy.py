@@ -74,8 +74,7 @@ def _format_ca_policy(result: Any) -> None:
     name = policy.get("displayName", "unknown")
     state = policy.get("state", "unknown")
     console.print(
-        f"  [bold green]✓[/bold green] [bold]{name}[/bold]  "
-        f"[dim]state:[/dim] [bold]{state}[/bold]"
+        f"  [bold green]✓[/bold green] [bold]{name}[/bold]  [dim]state:[/dim] [bold]{state}[/bold]"
     )
     console.print(
         "  [dim]Exclusion semantics: a subject is exempted if ANY single "
@@ -110,23 +109,27 @@ def _format_ca_policy(result: Any) -> None:
 
     grant = policy.get("grantControls") or {}
     if grant:
-        console.print(Panel(
-            f"Operator: [bold]{grant.get('operator', '—')}[/bold]\n"
-            f"Built-in controls: {', '.join(grant.get('builtInControls') or []) or 'None'}\n"
-            f"Custom auth strengths: {(grant.get('authenticationStrength') or {}).get('displayName') or 'None'}",
-            title="Grant Controls",
-            border_style="green",
-        ))
+        console.print(
+            Panel(
+                f"Operator: [bold]{grant.get('operator', '—')}[/bold]\n"
+                f"Built-in controls: {', '.join(grant.get('builtInControls') or []) or 'None'}\n"
+                f"Custom auth strengths: {(grant.get('authenticationStrength') or {}).get('displayName') or 'None'}",
+                title="Grant Controls",
+                border_style="green",
+            )
+        )
 
     session = policy.get("sessionControls") or {}
     if session:
         entries = [f"{k}: {v}" for k, v in session.items() if v]
         if entries:
-            console.print(Panel(
-                "\n".join(entries),
-                title="Session Controls",
-                border_style="cyan",
-            ))
+            console.print(
+                Panel(
+                    "\n".join(entries),
+                    title="Session Controls",
+                    border_style="cyan",
+                )
+            )
 
 
 @technique(
@@ -205,10 +208,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             return graph_error_to_result(e, policy={})
 
         needle = name_query.lower()
-        matches = [
-            p for p in policies
-            if needle in (p.get("displayName") or "").lower()
-        ]
+        matches = [p for p in policies if needle in (p.get("displayName") or "").lower()]
         if not matches:
             return {
                 "status": "error",

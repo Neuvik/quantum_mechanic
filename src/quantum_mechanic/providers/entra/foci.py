@@ -21,6 +21,9 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from quantum_mechanic.providers.entra.refs import foci_client_ids as _foci_client_ids
+from quantum_mechanic.providers.entra.token_store import OAUTH_ACCESS, OAUTH_REFRESH
+
 if TYPE_CHECKING:
     from quantum_mechanic.providers.entra.token_store import EntraToken, EntraTokenStore
 
@@ -36,7 +39,6 @@ logger = logging.getLogger(__name__)
 # import never blows up. See providers/entra/refs/README.md for
 # attribution + how to refresh.
 # ----------------------------------------------------------------
-from quantum_mechanic.providers.entra.refs import foci_client_ids as _foci_client_ids
 
 FOCI_CLIENT_IDS: dict[str, str] = _foci_client_ids()
 
@@ -76,6 +78,7 @@ def resolve_client_alias(value: str | None) -> str | None:
         return None
     return CLIENT_ALIASES.get(value.strip().lower(), value)
 
+
 # ----------------------------------------------------------------
 # Resource → typical FOCI client mapping.
 # Used to pick the most appropriate client for each resource.
@@ -90,7 +93,7 @@ RESOURCE_CLIENT_HINTS: dict[str, str] = {
     "https://database.windows.net": "d3590ed6-52b3-4102-aeff-aad2292ab01c",
 }
 
-TOKEN_ENDPOINT = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+OAUTH2_ENDPOINT = "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
 
 
 def foci_expand(
@@ -113,7 +116,7 @@ def foci_expand(
         return None
 
     tenant = store.tenant_id or refresh.tenant_id or "common"
-    url = TOKEN_ENDPOINT.format(tenant=tenant)
+    url = OAUTH2_ENDPOINT.format(tenant=tenant)
 
     # Try resource-hinted client first, then all FOCI members.
     hint = RESOURCE_CLIENT_HINTS.get(resource.rstrip("/"), FOCI_DEFAULT_CLIENT)
@@ -156,7 +159,7 @@ def foci_expand(
 
                 access_tok = token_from_jwt(
                     access_jwt,
-                    token_type="access_token",
+                    token_type=OAUTH_ACCESS,
                     resource=resource,
                     client_id=client_id,
                 )
@@ -166,7 +169,7 @@ def foci_expand(
                 if "refresh_token" in data:
                     new_refresh = token_from_jwt(
                         data["refresh_token"],
-                        token_type="refresh_token",
+                        token_type=OAUTH_REFRESH,
                         resource=resource,
                         client_id=client_id,
                     )

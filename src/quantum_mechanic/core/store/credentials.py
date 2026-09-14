@@ -85,19 +85,29 @@ class CredentialStore:
         """
         if self._use_orm:
             return self._add_orm(
-                provider=provider, credential_type=credential_type,
-                secret_data=secret_data, friendly_name=friendly_name,
-                principal_id=principal_id, account_id=account_id,
-                derived_from_id=derived_from_id, expires_at=expires_at,
-                auto_refresh=auto_refresh, obtained_via=obtained_via,
+                provider=provider,
+                credential_type=credential_type,
+                secret_data=secret_data,
+                friendly_name=friendly_name,
+                principal_id=principal_id,
+                account_id=account_id,
+                derived_from_id=derived_from_id,
+                expires_at=expires_at,
+                auto_refresh=auto_refresh,
+                obtained_via=obtained_via,
                 raw_data=raw_data,
             )
         return self._add_sqlite(
-            provider=provider, credential_type=credential_type,
-            secret_data=secret_data, friendly_name=friendly_name,
-            principal_id=principal_id, account_id=account_id,
-            derived_from_id=derived_from_id, expires_at=expires_at,
-            auto_refresh=auto_refresh, obtained_via=obtained_via,
+            provider=provider,
+            credential_type=credential_type,
+            secret_data=secret_data,
+            friendly_name=friendly_name,
+            principal_id=principal_id,
+            account_id=account_id,
+            derived_from_id=derived_from_id,
+            expires_at=expires_at,
+            auto_refresh=auto_refresh,
+            obtained_via=obtained_via,
             raw_data=raw_data,
         )
 
@@ -216,9 +226,7 @@ class CredentialStore:
         self._db.execute(sql, tuple(params))
         self._db.commit()
 
-    def _update_secret_orm(
-        self, cred_id: int, secret_data: str, friendly_name: str | None
-    ) -> None:
+    def _update_secret_orm(self, cred_id: int, secret_data: str, friendly_name: str | None) -> None:
         from quantum_mechanic.core.orm.tables import CredentialRow
 
         with self._SessionLocal() as session:
@@ -306,9 +314,7 @@ class CredentialStore:
         """Retrieve the encrypted secret_data (explicit access to sensitive material)."""
         if self._use_orm:
             return self._get_secret_orm(cred_id)
-        row = self._db.fetchone(
-            "SELECT secret_data FROM credentials WHERE id = ?", (cred_id,)
-        )
+        row = self._db.fetchone("SELECT secret_data FROM credentials WHERE id = ?", (cred_id,))
         if row is None:
             return None
         return row["secret_data"]
@@ -320,17 +326,13 @@ class CredentialStore:
             row = session.get(CredentialRow, cred_id)
             return row.secret_data if row else None
 
-    def list(
-        self, *, provider: str | None = None, status: str | None = None
-    ) -> list[Credential]:
+    def list(self, *, provider: str | None = None, status: str | None = None) -> list[Credential]:
         """List credentials with optional filters."""
         if self._use_orm:
             return self._list_orm(provider=provider, status=status)
         return self._list_sqlite(provider=provider, status=status)
 
-    def _list_sqlite(
-        self, *, provider: str | None, status: str | None
-    ) -> list[Credential]:
+    def _list_sqlite(self, *, provider: str | None, status: str | None) -> list[Credential]:
         sql = "SELECT * FROM credentials WHERE 1=1"
         params: list[Any] = []
         if provider:
@@ -343,9 +345,7 @@ class CredentialStore:
         rows = self._db.fetchall(sql, tuple(params))
         return [self._row_to_credential(r) for r in rows]
 
-    def _list_orm(
-        self, *, provider: str | None, status: str | None
-    ) -> list[Credential]:
+    def _list_orm(self, *, provider: str | None, status: str | None) -> list[Credential]:
         from sqlalchemy import select
 
         from quantum_mechanic.core.orm.tables import CredentialRow

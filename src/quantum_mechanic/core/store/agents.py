@@ -94,11 +94,20 @@ class AgentStore:
                 last_seen = excluded.last_seen
             """,
             (
-                agent.id, self._workspace_id,
-                agent.hostname, agent.username, agent.internal_ip,
-                agent.platform, agent.arch, agent.os_version,
-                agent.agent_version, agent.profile, agent.status,
-                agent.latency_ms, agent.registered_at, agent.last_seen,
+                agent.id,
+                self._workspace_id,
+                agent.hostname,
+                agent.username,
+                agent.internal_ip,
+                agent.platform,
+                agent.arch,
+                agent.os_version,
+                agent.agent_version,
+                agent.profile,
+                agent.status,
+                agent.latency_ms,
+                agent.registered_at,
+                agent.last_seen,
             ),
         )
         self._db.commit()
@@ -182,9 +191,7 @@ class AgentStore:
                     row.status = status
                     session.commit()
         else:
-            self._db.execute(
-                "UPDATE agents SET status = ? WHERE id = ?", (status, agent_id)
-            )
+            self._db.execute("UPDATE agents SET status = ? WHERE id = ?", (status, agent_id))
             self._db.commit()
 
     def get(self, agent_id: str) -> Agent | None:
@@ -222,11 +229,12 @@ class AgentStore:
             from sqlalchemy import select
 
             from quantum_mechanic.core.orm.tables import AgentRow
+
             with self._SessionLocal() as session:
                 stmt = select(AgentRow).where(
                     AgentRow.workspace_id == self._workspace_id,
-                    AgentRow.status == 'active',
-                    AgentRow.last_seen < before_iso
+                    AgentRow.status == "active",
+                    AgentRow.last_seen < before_iso,
                 )
                 rows = session.scalars(stmt).all()
                 return [{"id": r.id, "last_seen": r.last_seen} for r in rows]
@@ -289,6 +297,7 @@ class AgentStore:
         # transaction with a unique batch ID.
         # ----------------------------------------------------------------
         import sqlite3
+
         batch_id = str(uuid.uuid4())
 
         try:
@@ -305,7 +314,8 @@ class AgentStore:
             )
             self._db.commit()
         except sqlite3.OperationalError as e:
-            if "RETURNING" not in str(e): raise
+            if "RETURNING" not in str(e):
+                raise
 
             # Fallback for older SQLite (3.34 and below)
             # 1. Mark with unique batch_id in one transaction
@@ -314,7 +324,7 @@ class AgentStore:
                 UPDATE tasks SET status = 'running', error = ?
                 WHERE workspace_id = ? AND agent_id = ? AND status = 'pending'
                 """,
-                (f"batch:{batch_id}", self._workspace_id, agent_id)
+                (f"batch:{batch_id}", self._workspace_id, agent_id),
             )
             # 2. Fetch those specific rows
             rows = self._db.fetchall(
@@ -324,10 +334,12 @@ class AgentStore:
                 FROM tasks
                 WHERE error = ?
                 """,
-                (f"batch:{batch_id}",)
+                (f"batch:{batch_id}",),
             )
             # 3. Clean up the temporary batch marker
-            self._db.execute("UPDATE tasks SET error = NULL WHERE error = ?", (f"batch:{batch_id}",))
+            self._db.execute(
+                "UPDATE tasks SET error = NULL WHERE error = ?", (f"batch:{batch_id}",)
+            )
             self._db.commit()
 
         tasks = []

@@ -294,7 +294,7 @@ class TestSerialization:
         assert tok.resource == GRAPH
 
     def test_round_trip_with_device_state(self):
-        store = EntraTokenStore(tenant_id="t", user_upn="u@t.com")
+        store = EntraTokenStore(tenant_id="t", user_upn="u@t.example")
         store.device = EntraDeviceState(
             device_id="dev-123",
             device_cert_pem="-----BEGIN CERTIFICATE-----",
@@ -327,7 +327,7 @@ class TestSerialization:
 
 class TestRoadtoolsExport:
     def test_export_format_keys(self):
-        store = EntraTokenStore(tenant_id="tenant-123", user_upn="u@t.com")
+        store = EntraTokenStore(tenant_id="tenant-123", user_upn="u@t.example")
         store.add_token(_make_access_token())
         store.add_token(_make_refresh_token())
         result = store.export_roadtools_auth()
@@ -340,14 +340,14 @@ class TestRoadtoolsExport:
         assert required_keys.issubset(result.keys())
 
     def test_export_tenant_id(self):
-        store = EntraTokenStore(tenant_id="tenant-abc", user_upn="u@t.com")
+        store = EntraTokenStore(tenant_id="tenant-abc", user_upn="u@t.example")
         store.add_token(_make_access_token(tenant_id="tenant-abc"))
         store.add_token(_make_refresh_token())
         result = store.export_roadtools_auth()
         assert result["tenantId"] == "tenant-abc"
 
     def test_export_is_mrrt_true_for_foci(self):
-        store = EntraTokenStore(tenant_id="t", user_upn="u@t.com")
+        store = EntraTokenStore(tenant_id="t", user_upn="u@t.example")
         store.add_token(_make_access_token())
         store.add_token(_make_refresh_token(foci=True))
         result = store.export_roadtools_auth()

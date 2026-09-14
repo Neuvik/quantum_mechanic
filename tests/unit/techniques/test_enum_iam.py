@@ -213,6 +213,130 @@ class TestEnumIAM:
             assert res["status"] == "error"
             assert "No projects found" in res["error"]
 
+    def test_gcp_expired_credential_caught_before_grpc_call(self, mock_ctx):
+        """OUTCOME: an expired static token is caught by the pre-flight
+        refresh check, before the gRPC client is ever constructed.
+
+        This matters because resourcemanager_v3.ProjectsClient uses gRPC
+        transport, and gRPC's AuthMetadataPlugin re-wraps ANY exception
+        raised during credential refresh as a generic
+        ServiceUnavailable("...Getting metadata from plugin failed...") —
+        which is not a subclass of any auth-specific exception type and
+        would otherwise be silently swallowed by the generic except-and-
+        continue path, reproducing a milder version of issue #1."""
+        mock_ctx.provider_name = "gcp"
+        mock_ctx.whoami.return_value.principal_id = "test@example.com"
+        mock_ctx.whoami.return_value.principal_type = "user"
+        mock_ctx.whoami.return_value.account_id = "proj-1"
+        mock_ctx.session.expired = True
+        mock_ctx.session.refresh.side_effect = ValueError(
+            "This GCP token was captured statically via `import gcp --default` "
+            "and has expired. Please run `import gcp --default` again."
+        )
+
+        with patch("quantum_mechanic.techniques.discovery.enum_iam.resourcemanager_v3") as mock_rm:
+            res = execute(mock_ctx)
+
+            assert res["status"] == "error"
+            assert "has expired" in res["error"]
+            # The pre-flight check must short-circuit BEFORE the gRPC
+            # client is ever constructed or called.
+            mock_rm.ProjectsClient.assert_not_called()
+
+    def test_gcp_fresh_credential_skips_refresh(self, mock_ctx):
+        """OUTCOME: a non-expired credential is never refreshed — no
+        needless network call on the common/happy path."""
+        mock_ctx.provider_name = "gcp"
+        mock_ctx.whoami.return_value.principal_id = "test@example.com"
+        mock_ctx.whoami.return_value.principal_type = "user"
+        mock_ctx.whoami.return_value.account_id = "proj-1"
+        mock_ctx.session.expired = False
+
+        with patch("quantum_mechanic.techniques.discovery.enum_iam.resourcemanager_v3") as mock_rm:
+            mock_client = MagicMock()
+            mock_rm.ProjectsClient.return_value = mock_client
+            mock_client.search_projects.return_value = []
+
+            execute(mock_ctx)
+
+            mock_ctx.session.refresh.assert_not_called()
+
+    def test_gcp_auth_failure_reports_error_not_empty_success(self, mock_ctx):
+        """OUTCOME: an auth-layer failure while searching projects is
+        reported as status=error, never as a "successful" empty result
+        (issue #1 — silent auth failures must not look like a clean scan)."""
+        from google.auth import exceptions as gauth_exceptions
+
+        mock_ctx.provider_name = "gcp"
+        mock_ctx.whoami.return_value.principal_id = "test@example.com"
+        mock_ctx.whoami.return_value.principal_type = "user"
+        mock_ctx.whoami.return_value.account_id = "proj-1"
+
+        with patch("quantum_mechanic.techniques.discovery.enum_iam.resourcemanager_v3") as mock_rm:
+            mock_client = MagicMock()
+            mock_rm.ProjectsClient.return_value = mock_client
+            mock_client.search_projects.side_effect = gauth_exceptions.RefreshError(
+                "can't compare offset-naive and offset-aware datetimes"
+            )
+
+            res = execute(mock_ctx)
+
+            assert res["status"] == "error"
+            assert "authentication failed" in res["error"]
+            assert res["project_roles"] == []
+
+    def test_gcp_auth_failure_on_all_projects_reports_error(self, mock_ctx):
+        """OUTCOME: if every project's IAM-policy fetch fails on auth
+        (not permission), the technique reports error, not empty success."""
+        from google.auth import exceptions as gauth_exceptions
+
+        mock_ctx.provider_name = "gcp"
+        mock_ctx.whoami.return_value.principal_id = "test@example.com"
+        mock_ctx.whoami.return_value.principal_type = "user"
+        mock_ctx.whoami.return_value.account_id = "proj-1"
+
+        with patch("quantum_mechanic.techniques.discovery.enum_iam.resourcemanager_v3") as mock_rm:
+            mock_client = MagicMock()
+            mock_rm.ProjectsClient.return_value = mock_client
+
+            mock_project = MagicMock()
+            mock_project.project_id = "proj-1"
+            mock_client.search_projects.return_value = [mock_project]
+            mock_client.get_iam_policy.side_effect = gauth_exceptions.RefreshError("expired")
+
+            res = execute(mock_ctx)
+
+            assert res["status"] == "error"
+            assert "authentication failed" in res["error"]
+            assert res["project_roles"] == []
+
+    def test_gcp_permission_denied_on_one_project_still_succeeds(self, mock_ctx):
+        """OUTCOME: a per-project permission denial (expected during real
+        enumeration) is NOT treated as an auth failure — it's distinct from
+        credentials being broken, and shouldn't abort the whole scan."""
+        from google.api_core import exceptions as gapi_exceptions
+
+        mock_ctx.provider_name = "gcp"
+        mock_ctx.whoami.return_value.principal_id = "test@example.com"
+        mock_ctx.whoami.return_value.principal_type = "user"
+        mock_ctx.whoami.return_value.account_id = "proj-1"
+
+        with patch("quantum_mechanic.techniques.discovery.enum_iam.resourcemanager_v3") as mock_rm:
+            mock_client = MagicMock()
+            mock_rm.ProjectsClient.return_value = mock_client
+
+            mock_project = MagicMock()
+            mock_project.project_id = "proj-1"
+            mock_client.search_projects.return_value = [mock_project]
+            mock_client.get_iam_policy.side_effect = gapi_exceptions.PermissionDenied(
+                "caller lacks resourcemanager.projects.getIamPolicy"
+            )
+
+            res = execute(mock_ctx)
+
+            assert res["status"] == "success"
+            assert res["project_roles"] == []
+
     def test_oci_instance_principal(self, mock_ctx):
         mock_ctx.provider_name = "oci"
         mock_ctx.whoami.return_value.principal_type = "instance_principal"

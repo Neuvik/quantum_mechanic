@@ -25,6 +25,7 @@ from typing import Any
 # Summary result — what agent mode outputs instead of raw data.
 # ================================================================
 
+
 class AgentSummary:
     """Compact output for agent mode consumption."""
 
@@ -79,6 +80,7 @@ class AgentSummary:
 # (summary: str, risk_flags: list[str], stats: dict)
 # ================================================================
 
+
 def _summarize_whoami(data: dict, provider: str) -> tuple[str, list[str], dict]:
     name = data.get("friendly_name", "unknown")
     ptype = data.get("principal_type", "unknown")
@@ -98,12 +100,12 @@ def _summarize_enum_iam(data: dict, provider: str) -> tuple[str, list[str], dict
         stats = {"attached_policies": len(attached), "inline_policies": len(inline)}
 
         # Risk detection — actions that can lead to privilege escalation
-        _RISKY_POLICIES = {
+        risky_policies = {
             "AdministratorAccess",
             "PowerUserAccess",
             "IAMFullAccess",
         }
-        _RISKY_TERMS = [
+        risky_terms = [
             "iam:PassRole",
             "iam:CreateAccessKey",
             "iam:AttachUserPolicy",
@@ -112,13 +114,13 @@ def _summarize_enum_iam(data: dict, provider: str) -> tuple[str, list[str], dict
             "iam:CreatePolicyVersion",
         ]
         for name in policy_names:
-            if name in _RISKY_POLICIES:
+            if name in risky_policies:
                 flags.append(f"policy:{name}")
 
         # Check inline policy statements for risky actions
         for p in inline:
             for stmt in p.get("statements", []):
-                for term in _RISKY_TERMS:
+                for term in risky_terms:
                     if term.lower() in str(stmt).lower() and term not in flags:
                         flags.append(term)
 
@@ -132,9 +134,9 @@ def _summarize_enum_iam(data: dict, provider: str) -> tuple[str, list[str], dict
         assignments = data.get("role_assignments", [])
         roles = [a.get("roleName", "") for a in assignments]
         stats = {"role_assignments": len(assignments)}
-        _RISKY_AZURE = {"Owner", "Contributor", "User Access Administrator"}
+        risky_azure = {"Owner", "Contributor", "User Access Administrator"}
         for role in roles:
-            if role in _RISKY_AZURE:
+            if role in risky_azure:
                 flags.append(f"role:{role}")
         principal = data.get("principal", "unknown")
         summary = f"{principal} has {len(assignments)} role assignment(s)."
@@ -144,10 +146,10 @@ def _summarize_enum_iam(data: dict, provider: str) -> tuple[str, list[str], dict
     elif provider == "gcp":
         roles = data.get("project_roles", [])
         stats = {"project_roles": len(roles)}
-        _RISKY_GCP = {"roles/owner", "roles/editor", "roles/iam.serviceAccountTokenCreator"}
+        risky_gcp = {"roles/owner", "roles/editor", "roles/iam.serviceAccountTokenCreator"}
         for r in roles:
             role_id = r.get("role", "")
-            if role_id in _RISKY_GCP:
+            if role_id in risky_gcp:
                 flags.append(f"role:{role_id}")
         principal = data.get("principal", "unknown")
         summary = f"{principal} has {len(roles)} project role(s)."
@@ -158,9 +160,9 @@ def _summarize_enum_iam(data: dict, provider: str) -> tuple[str, list[str], dict
         groups = data.get("groups", [])
         policies = data.get("policies", [])
         stats = {"groups": len(groups), "policies": len(policies)}
-        _RISKY_GROUPS = {"Administrators"}
+        risky_groups = {"Administrators"}
         for g in groups:
-            if g.get("name") in _RISKY_GROUPS:
+            if g.get("name") in risky_groups:
                 flags.append(f"group:{g.get('name')}")
         principal = data.get("principal", "unknown")
         summary = f"{principal} in {len(groups)} group(s), {len(policies)} polic{'ies' if len(policies) != 1 else 'y'} discovered across compartments."
@@ -200,9 +202,12 @@ def _summarize_enum_compute(data: dict, provider: str) -> tuple[str, list[str], 
 
     summary = f"{total} instance(s). {len(with_identity)} with attached identit{'ies' if len(with_identity) != 1 else 'y'}."
     if high_value:
-        summary += f" High-value: {', '.join(high_value[:3])}{'...' if len(high_value) > 3 else ''}."
+        summary += (
+            f" High-value: {', '.join(high_value[:3])}{'...' if len(high_value) > 3 else ''}."
+        )
 
     return summary, flags, stats
+
 
 def _summarize_assume_role_chain(data: dict, provider: str) -> tuple[str, list[str], dict]:
     chains = data.get("chains", [])
@@ -231,7 +236,7 @@ def _summarize_assume_role_chain(data: dict, provider: str) -> tuple[str, list[s
     elif assumed:
         summary = (
             f"{start} pivoted through {len(assumed)} role(s). "
-            f"Derived credentials stored. Max depth: {max(c.get('depth',0) for c in assumed)+1}."
+            f"Derived credentials stored. Max depth: {max(c.get('depth', 0) for c in assumed) + 1}."
         )
     else:
         summary = f"{start} — no assumable roles found."
@@ -274,11 +279,11 @@ def _summarize_vm_execute_command(data: dict, provider: str) -> tuple[str, list[
 # ================================================================
 
 _SUMMARIZERS: dict[str, Any] = {
-    "discovery/whoami":                    _summarize_whoami,
-    "discovery/enum_iam":                  _summarize_enum_iam,
-    "discovery/enum_compute":              _summarize_enum_compute,
-    "escalation/assume_role_chain":        _summarize_assume_role_chain,
-    "lateral_movement/vm_execute_command":  _summarize_vm_execute_command,
+    "discovery/whoami": _summarize_whoami,
+    "discovery/enum_iam": _summarize_enum_iam,
+    "discovery/enum_compute": _summarize_enum_compute,
+    "escalation/assume_role_chain": _summarize_assume_role_chain,
+    "lateral_movement/vm_execute_command": _summarize_vm_execute_command,
 }
 
 
@@ -286,6 +291,7 @@ _SUMMARIZERS: dict[str, Any] = {
 # Generic fallback for any technique without a registered
 # summarizer. Produces a minimal summary from whatever keys exist.
 # ================================================================
+
 
 def _generic_summary(data: dict, technique_id: str) -> tuple[str, list[str], dict]:
     total = data.get("total")
@@ -301,6 +307,7 @@ def _generic_summary(data: dict, technique_id: str) -> tuple[str, list[str], dic
 # ================================================================
 # Public API
 # ================================================================
+
 
 def summarize(
     technique_id: str,
@@ -347,6 +354,7 @@ def summarize(
     # --------------------------------------------------------
     if hasattr(data, "__dataclass_fields__"):
         from dataclasses import asdict
+
         data_dict: dict = asdict(data)
     elif isinstance(data, dict):
         data_dict = data

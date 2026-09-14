@@ -12,14 +12,20 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
 from quantum_mechanic.providers.entra.foci import FOCI_CLIENT_IDS
 from quantum_mechanic.providers.entra.token_store import (
+    ESTS_COOKIE,
     GRAPH,
+    OAUTH_REFRESH,
+    PRT_COOKIE,
+    PRT_WITH_KEY,
     EntraToken,
     EntraTokenStore,
     decode_jwt_claims,
@@ -33,17 +39,18 @@ logger = logging.getLogger(__name__)
 # Mirrors capcom/browserdump entraTokenRules.
 # ----------------------------------------------------------------
 _COOKIE_RULES: dict[str, tuple[str, bool]] = {
-    "ESTSAUTHPERSISTENT":         ("ests_cookie", False),
-    "ESTSAUTH":                   ("ests_cookie", False),
-    "ESTSAUTHLIGHT":              ("ests_cookie", False),
-    "x-ms-RefreshTokenCredential": ("prt_cookie",  True),
-    "x-ms-CredentialKey":         ("ests_cookie", False),
+    "ESTSAUTHPERSISTENT": ("ests_cookie", False),
+    "ESTSAUTH": ("ests_cookie", False),
+    "ESTSAUTHLIGHT": ("ests_cookie", False),
+    "x-ms-RefreshTokenCredential": ("prt_cookie", True),
+    "x-ms-CredentialKey": ("ests_cookie", False),
 }
 
 
 # ----------------------------------------------------------------
 # browserdump JSON ingestion
 # ----------------------------------------------------------------
+
 
 def ingest_browserdump(path: str | Path) -> list[EntraTokenStore]:
     """Parse browserdump JSON output into a list of EntraTokenStores.
@@ -64,10 +71,7 @@ def ingest_browserdump(path: str | Path) -> list[EntraTokenStore]:
     # Support two output shapes from browserdump:
     #   { "profiles": [ { ... }, ... ] }   ← multi-profile
     #   { "tokens": [...], "tenant": ... } ← single-profile flat
-    if "profiles" in data:
-        profiles = data["profiles"]
-    else:
-        profiles = [data]
+    profiles = data.get("profiles", [data])
 
     stores: list[EntraTokenStore] = []
     for profile_data in profiles:
@@ -80,16 +84,9 @@ def ingest_browserdump(path: str | Path) -> list[EntraTokenStore]:
 
 def _parse_profile(data: dict[str, Any]) -> EntraTokenStore | None:
     """Parse one browserdump profile dict into an EntraTokenStore."""
-    tenant = (
-        data.get("tenant")
-        or data.get("tenant_id")
-        or data.get("tenantId")
-    )
+    tenant = data.get("tenant") or data.get("tenant_id") or data.get("tenantId")
     profile_name = (
-        data.get("profile")
-        or data.get("profile_name")
-        or data.get("profileName")
-        or "Default"
+        data.get("profile") or data.get("profile_name") or data.get("profileName") or "Default"
     )
 
     store = EntraTokenStore(tenant_id=tenant)
@@ -133,7 +130,7 @@ def _parse_token_entry(
     store: EntraTokenStore,
 ) -> EntraToken | None:
     """Classify and build an EntraToken from a single browserdump entry."""
-    name  = entry.get("name", "")
+    name = entry.get("name", "")
     value = entry.get("value", "").strip()
     if not value:
         return None
@@ -159,7 +156,7 @@ def _parse_token_entry(
     if name == "x-ms-CredentialKey":
         # Session key material — store as raw for later prt_key import.
         return EntraToken(
-            token_type="ests_cookie",
+            token_type=ESTS_COOKIE,
             value=value,
             resource="",
             tenant_id=store.tenant_id,
@@ -175,6 +172,7 @@ def _parse_token_entry(
 # Individual token ingest functions
 # ----------------------------------------------------------------
 
+
 def ingest_prt_cookie(jwt: str) -> EntraToken:
     """Build an EntraToken from an x-ms-RefreshTokenCredential JWT.
 
@@ -184,16 +182,15 @@ def ingest_prt_cookie(jwt: str) -> EntraToken:
     """
     claims = decode_jwt_claims(jwt)
     # PRT cookies use "exp" for nonce expiry.
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     expires_at = None
     if "exp" in claims:
-        try:
-            expires_at = datetime.fromtimestamp(claims["exp"], tz=timezone.utc)
-        except (ValueError, OSError):
-            pass
+        with contextlib.suppress(ValueError, OSError):
+            expires_at = datetime.fromtimestamp(claims["exp"], tz=UTC)
 
     return EntraToken(
-        token_type="prt_cookie",
+        token_type=PRT_COOKIE,
         value=jwt,
         resource="",
         tenant_id=claims.get("tid"),
@@ -217,7 +214,7 @@ def ingest_ests_cookie(
     if cookie_domain:
         raw_claims["cookie_domain"] = cookie_domain
     return EntraToken(
-        token_type="ests_cookie",
+        token_type=ESTS_COOKIE,
         value=value,
         resource="",
         tenant_id=tenant_id,
@@ -244,7 +241,7 @@ def ingest_refresh_token(
     """
     is_foci = client_id in FOCI_CLIENT_IDS if client_id else False
     return EntraToken(
-        token_type="refresh_token",
+        token_type=OAUTH_REFRESH,
         value=token,
         resource="",
         tenant_id=tenant_id,
@@ -265,7 +262,7 @@ def ingest_prt_key(
     No expiry pressure — PRTs are 14-day credentials.
     """
     return EntraToken(
-        token_type="prt_with_key",
+        token_type=PRT_WITH_KEY,
         value=prt_value,
         resource="",
         tenant_id=tenant_id,
@@ -280,6 +277,7 @@ def ingest_prt_key(
 # ----------------------------------------------------------------
 # .roadtools_auth ingestion
 # ----------------------------------------------------------------
+
 
 def ingest_roadtools(path: str | Path) -> EntraTokenStore:
     """Parse a .roadtools_auth JSON file into an EntraTokenStore.
@@ -300,10 +298,10 @@ def ingest_roadtools(path: str | Path) -> EntraTokenStore:
     data: dict[str, Any] = json.loads(raw)
 
     tenant_id = data.get("tenantId") or data.get("tenant_id")
-    user_upn   = data.get("userId")   or data.get("user_upn")
-    client_id  = data.get("_clientId")
-    resource   = data.get("_resource", GRAPH)
-    is_mrrt    = data.get("isMRRT", False)
+    user_upn = data.get("userId") or data.get("user_upn")
+    client_id = data.get("_clientId")
+    resource = data.get("_resource", GRAPH)
+    is_mrrt = data.get("isMRRT", False)
 
     store = EntraTokenStore(tenant_id=tenant_id, user_upn=user_upn)
 
@@ -316,19 +314,18 @@ def ingest_roadtools(path: str | Path) -> EntraTokenStore:
         )
         # roadtools may not have expiry in the same field — try expiresOn.
         if not tok.expires_at and data.get("expiresOn"):
-            from datetime import datetime, timezone
-            try:
-                tok.expires_at = datetime.strptime(
-                    data["expiresOn"], "%Y-%m-%d %H:%M:%S"
-                ).replace(tzinfo=timezone.utc)
-            except ValueError:
-                pass
+            from datetime import datetime
+
+            with contextlib.suppress(ValueError):
+                tok.expires_at = datetime.strptime(data["expiresOn"], "%Y-%m-%d %H:%M:%S").replace(
+                    tzinfo=UTC
+                )
         store.add_token(tok)
 
     if data.get("refreshToken"):
         is_foci = bool(is_mrrt) or (client_id in FOCI_CLIENT_IDS if client_id else False)
         rt = EntraToken(
-            token_type="refresh_token",
+            token_type=OAUTH_REFRESH,
             value=data["refreshToken"],
             resource=resource,
             tenant_id=tenant_id,

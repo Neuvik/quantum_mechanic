@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -28,9 +27,9 @@ import httpx
 from quantum_mechanic.providers.base import AuthProvider, WhoAmIResult
 from quantum_mechanic.providers.entra.token_store import (
     GRAPH,
+    OAUTH_REFRESH,
     EntraTokenStore,
     decode_jwt_claims,
-    token_from_jwt,
 )
 
 logger = logging.getLogger(__name__)
@@ -97,8 +96,9 @@ class EntraAuthProvider(AuthProvider):
             )
 
         # If the best token is a refresh token (FOCI), expand to access token first.
-        if token.token_type == "refresh_token":
+        if token.token_type == OAUTH_REFRESH:
             from quantum_mechanic.providers.entra.foci import foci_expand
+
             access = foci_expand(store, GRAPH)
             if access is None:
                 raise ValueError("FOCI expansion for Graph failed. Check refresh token validity.")
@@ -158,9 +158,7 @@ class EntraAuthProvider(AuthProvider):
                 "foci_token": token.foci,
                 "roles": roles,
                 "wids": wids,
-                "token_expires": (
-                    token.expires_at.isoformat() if token.expires_at else None
-                ),
+                "token_expires": (token.expires_at.isoformat() if token.expires_at else None),
             },
             raw_response=me,
         )

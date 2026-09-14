@@ -21,7 +21,7 @@ def test_entra_path_delegates_to_entra_enum_privileged_roles():
             {
                 "tier": "Tier 0 (Critical)",
                 "role_name": "Global Administrator",
-                "principal_name": "alice@corp.com",
+                "principal_name": "alice@corp.example",
                 "principal_id": "oid-1",
                 "principal_type": "user",
                 "assignment_type": "Active/Permanent",
@@ -38,7 +38,7 @@ def test_entra_path_delegates_to_entra_enum_privileged_roles():
         result = execute(ctx)
 
     mock_delegate.assert_called_once_with(ctx)
-    assert result["admins"][0]["principal"] == "alice@corp.com"
+    assert result["admins"][0]["principal"] == "alice@corp.example"
     assert result["admins"][0]["role"] == "Global Administrator"
     assert "Tier 0" in result["admins"][0]["reason"]
 

@@ -126,6 +126,7 @@ def _parse_error_body(resp: httpx.Response) -> tuple[str, str]:
         return err.get("code", "Unknown"), err.get("message", "")
     return "Unknown", ""
 
+
 def parse_retry_after(value: str) -> float:
     """Parse Retry-After header (seconds or HTTP-date)."""
     if not value:
@@ -142,6 +143,7 @@ def parse_retry_after(value: str) -> float:
         except Exception:
             return 0.0
 
+
 def _get_client_id(headers: dict[str, str]) -> str:
     """Extract client ID from Authorization header if possible."""
     auth = headers.get("Authorization", "")
@@ -151,13 +153,14 @@ def _get_client_id(headers: dict[str, str]) -> str:
         return claims.get("appid") or claims.get("azp") or "unknown"
     return "unknown"
 
+
 def _graph_call(
     http: httpx.Client,
     method: str,
     url: str,
     headers: dict[str, str],
     json_data: dict[str, Any] | None = None,
-    max_retries: int = 3
+    max_retries: int = 3,
 ) -> httpx.Response:
     """Execute a Graph API call with jittered exponential backoff for 429/5xx."""
 
@@ -185,21 +188,26 @@ def _graph_call(
                 wait_time = retry_delay
 
             # Add jitter
-            wait_time *= random.uniform(0.5, 1.5)
+            wait_time *= random.SystemRandom().uniform(0.5, 1.5)
 
             client_id = _get_client_id(headers)
             logger.warning(
                 "Graph API throttled (HTTP %d) for client %s. Waiting %.1fs (Attempt %d/%d)",
-                resp.status_code, client_id, wait_time, attempt, max_retries
+                resp.status_code,
+                client_id,
+                wait_time,
+                attempt,
+                max_retries,
             )
             time.sleep(wait_time)
-            retry_delay *= 2 # Exponential backoff
+            retry_delay *= 2  # Exponential backoff
             continue
 
         return resp
 
     # Should not be reachable due to the return in the loop
     return resp
+
 
 def graph_list(
     http: httpx.Client,
@@ -250,7 +258,10 @@ def graph_list(
                 )
             logger.warning(
                 "Graph list partial failure at page %d of %s (HTTP %d): %s",
-                pages, next_url, resp.status_code, resp.text[:200],
+                pages,
+                next_url,
+                resp.status_code,
+                resp.text[:200],
             )
             break
 

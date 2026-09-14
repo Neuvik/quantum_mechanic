@@ -39,8 +39,8 @@ from quantum_mechanic.providers.entra.scope_bundles import build_scope_string
 logger = logging.getLogger(__name__)
 
 ESTS_BASE = "https://login.microsoftonline.com"
-TOKEN_EP  = ESTS_BASE + "/{tenant}/oauth2/v2.0/token"
-AUTH_EP   = ESTS_BASE + "/{tenant}/oauth2/v2.0/authorize"
+TOKEN_EP = ESTS_BASE + "/{tenant}/oauth2/v2.0/token"
+AUTH_EP = ESTS_BASE + "/{tenant}/oauth2/v2.0/authorize"
 DEVICE_EP = ESTS_BASE + "/{tenant}/oauth2/v2.0/devicecode"
 
 # Legacy v1 token endpoint — required for PRT cookie and ESTS cookie exchange.
@@ -316,6 +316,7 @@ def _default_server_factory(port: int) -> _CallbackServer:
 def _pick_free_port() -> int:
     """Pick an ephemeral port by binding-and-releasing a socket."""
     import socket
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
@@ -387,12 +388,15 @@ def interactive_authorize(
     # In tests, the fake server has captured_code pre-set and lacks handle_request.
     if hasattr(server, "handle_request"):
         import threading
+
         done = threading.Event()
+
         def _serve():
             try:
                 server.handle_request()
             finally:
                 done.set()
+
         threading.Thread(target=_serve, daemon=True).start()
         if not done.wait(timeout=timeout):
             return {
@@ -487,6 +491,7 @@ def exchange_ropc(
 # ----------------------------------------------------------------
 # Internal helpers
 # ----------------------------------------------------------------
+
 
 def _post_token(
     url: str,

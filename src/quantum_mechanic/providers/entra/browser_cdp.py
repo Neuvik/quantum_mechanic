@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+import os
 import platform
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -39,14 +40,16 @@ _DEFAULT_EXECUTABLES: dict[str, dict[str, str]] = {
     },
 }
 
+_TMPDIR = tempfile.gettempdir()
+
 _DEFAULT_PROFILES: dict[str, dict[str, str]] = {
     "macos": {
-        "edge": "/tmp/qm-edge-cdp",
-        "chrome": "/tmp/qm-chrome-cdp",
+        "edge": os.path.join(_TMPDIR, "qm-edge-cdp"),
+        "chrome": os.path.join(_TMPDIR, "qm-chrome-cdp"),
     },
     "linux": {
-        "edge": "/tmp/qm-edge-cdp",
-        "chrome": "/tmp/qm-chrome-cdp",
+        "edge": os.path.join(_TMPDIR, "qm-edge-cdp"),
+        "chrome": os.path.join(_TMPDIR, "qm-chrome-cdp"),
     },
     "windows": {
         "edge": r"$Env:TEMP\qm-edge-cdp",
@@ -78,6 +81,19 @@ def detect_os_name() -> str:
     if system == "windows":
         return "windows"
     return "linux"
+
+
+def default_browser_for_os(os_name: str) -> str:
+    """Pick the sensible default browser for an OS.
+
+    Edge is the Microsoft-native browser and is always present on Windows, so
+    it is the natural default there. On macOS/Linux Edge is uncommon (and its
+    default app path usually does not exist), while Chrome is the prevalent
+    Chromium browser — and since the launch uses a fresh throwaway profile with
+    manual sign-in, there is no existing-Edge-profile advantage to preserve.
+    Operators can always override with `--browser`.
+    """
+    return "edge" if os_name.strip().lower() == "windows" else "chrome"
 
 
 def build_launch_plan(
@@ -175,7 +191,9 @@ def import_browser_session(
                     "Chrome rejected the CDP websocket origin. Relaunch the browser with "
                     f"--remote-allow-origins=http://127.0.0.1:{port} and retry."
                 ) from exc
-            raise ValueError(f"Browser CDP websocket handshake failed: HTTP {exc.status_code}") from exc
+            raise ValueError(
+                f"Browser CDP websocket handshake failed: HTTP {exc.status_code}"
+            ) from exc
         except websocket.WebSocketException as exc:
             raise OSError(f"CDP websocket connection failed: {exc}") from exc
         try:
@@ -217,7 +235,9 @@ def import_browser_session(
             "port": port,
         }
     except httpx.HTTPError as exc:
-        raise OSError(f"Failed to reach browser CDP endpoint at http://{host}:{port}: {exc}") from exc
+        raise OSError(
+            f"Failed to reach browser CDP endpoint at http://{host}:{port}: {exc}"
+        ) from exc
     finally:
         if owned:
             client.close()
@@ -275,9 +295,7 @@ def _is_real_page_target(target: dict[str, Any]) -> bool:
     url = str(target.get("url", "")).strip().lower()
     if target_type != "page":
         return False
-    if not (url.startswith("http://") or url.startswith("https://")):
-        return False
-    return True
+    return url.startswith("http://") or url.startswith("https://")
 
 
 def _get_cookies_via_target_ws(ws_url: str) -> list[dict[str, Any]]:

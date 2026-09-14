@@ -50,6 +50,7 @@ def build_or_load_vectorstore(docs_dir: Path | str, rebuild: bool = False) -> Ch
 
     if rebuild and VECTORSTORE_DIR.exists():
         import shutil
+
         logger.info("Rebuilding vector store. Clearing %s", VECTORSTORE_DIR)
         shutil.rmtree(VECTORSTORE_DIR, ignore_errors=True)
 
@@ -58,11 +59,7 @@ def build_or_load_vectorstore(docs_dir: Path | str, rebuild: bool = False) -> Ch
     logger.info("Initializing Markdown document crawler on %s", docs_dir)
 
     # Base loader to just read text of all .md files
-    loader = DirectoryLoader(
-        str(docs_dir),
-        glob="techniques/**/*.md",
-        loader_cls=TextLoader
-    )
+    loader = DirectoryLoader(str(docs_dir), glob="techniques/**/*.md", loader_cls=TextLoader)
     raw_docs = loader.load()
     logger.info("Loaded %d markdown documents from techniques library", len(raw_docs))
 
@@ -85,20 +82,14 @@ def build_or_load_vectorstore(docs_dir: Path | str, rebuild: bool = False) -> Ch
 
     # Standard chunking inside those headers
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
-        length_function=len
+        chunk_size=1000, chunk_overlap=200, length_function=len
     )
 
     final_splits = text_splitter.split_documents(md_header_splits)
     logger.info("Created %d semantic chunks for RAG context", len(final_splits))
 
     logger.info("Embedding technique documentation into Chroma DB (this may take a minute...)")
-    db = Chroma.from_documents(
-        final_splits,
-        embed_model,
-        persist_directory=str(VECTORSTORE_DIR)
-    )
+    db = Chroma.from_documents(final_splits, embed_model, persist_directory=str(VECTORSTORE_DIR))
 
     logger.info("Vector database successfully initialized.")
     return db

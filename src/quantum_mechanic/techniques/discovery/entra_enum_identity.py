@@ -42,14 +42,19 @@ import httpx
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 from quantum_mechanic.providers.entra.foci import foci_expand
-from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore, decode_jwt_claims
+from quantum_mechanic.providers.entra.token_store import (
+    GRAPH,
+    OAUTH_REFRESH,
+    EntraTokenStore,
+    decode_jwt_claims,
+)
 
 logger = logging.getLogger(__name__)
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
-_ME            = f"{_GRAPH_BASE}/me"
-_ME_MEMBER_OF  = f"{_GRAPH_BASE}/me/memberOf?$top=100"
-_ME_DIR_ROLES  = (
+_ME = f"{_GRAPH_BASE}/me"
+_ME_MEMBER_OF = f"{_GRAPH_BASE}/me/memberOf?$top=100"
+_ME_DIR_ROLES = (
     f"{_GRAPH_BASE}/me/transitiveMemberOf/microsoft.graph.directoryRole"
     "?$select=id,displayName,roleTemplateId"
 )
@@ -58,6 +63,7 @@ _ME_DIR_ROLES  = (
 # ----------------------------------------------------------------
 # Formatter
 # ----------------------------------------------------------------
+
 
 def _format_entra_whoami(result: Any) -> None:
     from rich.panel import Panel
@@ -88,7 +94,11 @@ def _format_entra_whoami(result: Any) -> None:
     lines.append("")
     lines.append("[bold]Token Posture:[/bold]")
     mfa = posture.get("mfa")
-    mfa_str = "[green]verified[/green]" if mfa else ("[red]not in token[/red]" if mfa is False else "[dim]unknown[/dim]")
+    mfa_str = (
+        "[green]verified[/green]"
+        if mfa
+        else ("[red]not in token[/red]" if mfa is False else "[dim]unknown[/dim]")
+    )
     device = posture.get("device_claims")
     device_str = "[green]yes[/green]" if device else "[dim]no[/dim]"
     foci = posture.get("foci_token")
@@ -97,14 +107,23 @@ def _format_entra_whoami(result: Any) -> None:
     lines.append(f"  Device claims:  {device_str}")
     lines.append(f"  FOCI token:     {foci_str}")
 
-    console.print(Panel("\n".join(lines), title="[bold]Entra ID Identity[/bold]", border_style="green", expand=False))
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title="[bold]Entra ID Identity[/bold]",
+            border_style="green",
+            expand=False,
+        )
+    )
 
     # ── Directory Roles ──────────────────────────────────────────
     roles = data.get("directory_roles", [])
     if roles:
         console.print("\n  [bold red]⚠  Directory Roles[/bold red]")
         for r in roles:
-            console.print(f"    [bold]{r.get('displayName', '?')}[/bold]  [dim]({r.get('id', '')})[/dim]")
+            console.print(
+                f"    [bold]{r.get('displayName', '?')}[/bold]  [dim]({r.get('id', '')})[/dim]"
+            )
     else:
         console.print("\n  [dim]No directory roles assigned.[/dim]")
 
@@ -128,6 +147,7 @@ def _format_entra_whoami(result: Any) -> None:
 # ----------------------------------------------------------------
 # Technique
 # ----------------------------------------------------------------
+
 
 @technique(
     technique_id="discovery/entra_enum_identity",
@@ -154,7 +174,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     if token is None:
         return {"error": "No Graph token available. Import or acquire credentials first."}
 
-    if token.token_type == "refresh_token":
+    if token.token_type == OAUTH_REFRESH:
         token = foci_expand(store, GRAPH)
         if token is None:
             return {"error": "FOCI expansion for Graph failed — refresh token may be expired."}
@@ -185,11 +205,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
     claims = token.raw_claims or decode_jwt_claims(token.value)
 
-    tenant_id = (
-        me.get("tenantId")
-        or store.tenant_id
-        or claims.get("tid", "")
-    )
+    tenant_id = me.get("tenantId") or store.tenant_id or claims.get("tid", "")
     if tenant_id and not store.tenant_id:
         store.tenant_id = tenant_id
 
@@ -207,19 +223,25 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     # is genuinely useful given what we just learned.
     next_steps: list[dict[str, str]] = []
     if token.foci:
-        next_steps.append({
-            "command": "acquire entra arm",
-            "reason": "FOCI family refresh — pivot to Azure ARM without re-auth.",
-        })
-        next_steps.append({
-            "command": "acquire entra exchange",
-            "reason": "FOCI can also mint Exchange Online tokens for mailbox recon.",
-        })
+        next_steps.append(
+            {
+                "command": "acquire entra arm",
+                "reason": "FOCI family refresh — pivot to Azure ARM without re-auth.",
+            }
+        )
+        next_steps.append(
+            {
+                "command": "acquire entra exchange",
+                "reason": "FOCI can also mint Exchange Online tokens for mailbox recon.",
+            }
+        )
     if any("Global Reader" in r or "Global Administrator" in r for r in directory_roles):
-        next_steps.append({
-            "command": "run discovery/entra_enum_users",
-            "reason": "You hold a directory-wide read role — bulk user enum should succeed.",
-        })
+        next_steps.append(
+            {
+                "command": "run discovery/entra_enum_users",
+                "reason": "You hold a directory-wide read role — bulk user enum should succeed.",
+            }
+        )
 
     return {
         "status": "success",

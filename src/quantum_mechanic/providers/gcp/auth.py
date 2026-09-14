@@ -91,11 +91,36 @@ class GCPAuthProvider(AuthProvider):
             token = secret_data.get("access_token")
             if not token:
                 raise ValueError("GCP captured_token method requires 'access_token'")
-            
-            from datetime import UTC, datetime, timedelta
-            # Provide an arbitrary future expiry so Google SDK clients don't
-            # attempt to automatically refresh this static token.
-            future_expiry = datetime.now(UTC) + timedelta(hours=1)
+
+            from datetime import UTC, datetime
+
+            # The real ADC token expiry is captured and stored at import time
+            # (see _capture_gcp_token in shell/commands.py). Credentials
+            # imported before that field existed won't have it — refuse to
+            # fabricate a fake expiry for them, since that previously masked
+            # real expiration and caused offset-aware/offset-naive datetime
+            # comparison crashes deep inside google-auth.
+            expiry_str = secret_data.get("expiry")
+            if not expiry_str:
+                raise ValueError(
+                    "GCP captured_token credential has no stored expiry — this is a "
+                    "credential captured before expiry tracking was added. "
+                    "Re-import via `import gcp --default` to capture a fresh token."
+                )
+            try:
+                expiry = datetime.fromisoformat(expiry_str)
+            except ValueError as exc:
+                raise ValueError(
+                    f"GCP captured_token credential has a malformed expiry value: "
+                    f"{expiry_str!r}. Re-import via `import gcp --default`."
+                ) from exc
+            # google-auth's internal freshness checks (Credentials.expired/
+            # valid/token_state) compare expiry against a naive UTC datetime
+            # by convention (see google.auth._helpers.utcnow()) — expiry must
+            # stay naive or every freshness check raises TypeError.
+            if expiry.tzinfo is not None:
+                expiry = expiry.astimezone(UTC).replace(tzinfo=None)
+
             class StaticTokenCredentials(TokenCredentials):
                 def refresh(self, request):
                     raise ValueError(
@@ -103,8 +128,8 @@ class GCPAuthProvider(AuthProvider):
                         "and has expired. Please run `import gcp --default` again to capture "
                         "a fresh token."
                     )
-            
-            cred = StaticTokenCredentials(token, expiry=future_expiry)
+
+            cred = StaticTokenCredentials(token, expiry=expiry)
             if "project_id" in secret_data:
                 cred.project_id = secret_data["project_id"]
             return cred

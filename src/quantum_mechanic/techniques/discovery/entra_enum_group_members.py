@@ -43,11 +43,12 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------
 LOOT_ITEMS_KEY = "members"
 LOOT_SCHEMA = [
-    ("group_id",      "Group ID",      "dim"),
-    ("member_name",   "Member Name",   "bold cyan"),
-    ("member_type",   "Type",          "dim"),
-    ("member_id",     "Object ID",     "dim"),
+    ("group_id", "Group ID", "dim"),
+    ("member_name", "Member Name", "bold cyan"),
+    ("member_type", "Type", "dim"),
+    ("member_id", "Object ID", "dim"),
 ]
+
 
 def format_group_members_result(result: Any) -> None:
     """Formatter for Entra Group Member enumeration results."""
@@ -90,6 +91,7 @@ def format_group_members_result(result: Any) -> None:
 
     console.print(tbl)
 
+
 @technique(
     technique_id="discovery/entra_enum_group_members",
     tactic="discovery",
@@ -107,7 +109,7 @@ def format_group_members_result(result: Any) -> None:
             "The Object ID of the target group.",
             required=True,
             type=ParameterType.STRING,
-            example="00000000-0000-0000-0000-000000000000"
+            example="00000000-0000-0000-0000-000000000000",
         ),
         Parameter(
             "transitive",
@@ -134,10 +136,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 
     with httpx.Client(timeout=30) as http:
         # 1. Try to get the group name first for better reporting
-        group_name_url = (
-            f"https://graph.microsoft.com/v1.0/groups/{group_id}"
-            "?$select=displayName"
-        )
+        group_name_url = f"https://graph.microsoft.com/v1.0/groups/{group_id}?$select=displayName"
         try:
             resp = http.get(group_name_url, headers=headers)
             if resp.status_code == 200:
@@ -154,24 +153,29 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
             members = graph_list(http, url, headers)
         except GraphError as e:
             return graph_error_to_result(
-                e, group_id=group_id, group_name=group_name, members=[],
+                e,
+                group_id=group_id,
+                group_name=group_name,
+                members=[],
             )
 
         for m in members:
             mtype = m.get("@odata.type", "").split(".")[-1]
             name = m.get("userPrincipalName") or m.get("displayName") or m.get("id")
 
-            results.append({
-                "group_id": group_id,
-                "group_name": group_name,
-                "member_name": name,
-                "member_id": m.get("id"),
-                "member_type": mtype
-            })
+            results.append(
+                {
+                    "group_id": group_id,
+                    "group_name": group_name,
+                    "member_name": name,
+                    "member_id": m.get("id"),
+                    "member_type": mtype,
+                }
+            )
 
     return {
         "status": "success",
         "group_name": group_name,
         "members": results,
-        "tenant_id": store.tenant_id
+        "tenant_id": store.tenant_id,
     }

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 _BUNDLES: dict[str, list[str]] = {
     "basic-graph": [
         "User.Read",

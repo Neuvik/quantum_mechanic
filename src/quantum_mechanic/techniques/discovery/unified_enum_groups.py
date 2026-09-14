@@ -17,8 +17,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import httpx
-
 from quantum_mechanic.core.context import ExecutionContext
 from quantum_mechanic.core.technique import technique
 
@@ -27,18 +25,20 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------
 # Loot & Formatter
 # ----------------------------------------------------------------
-LOOT_ITEMS_KEY = 'groups'
+LOOT_ITEMS_KEY = "groups"
 LOOT_SCHEMA = [
-    ('name',        'Group Name',  'bold cyan'),
-    ('id',          'Group ID',    'white'),
-    ('members',     'Members',     'bold yellow'),
-    ('description', 'Description', 'dim'),
+    ("name", "Group Name", "bold cyan"),
+    ("id", "Group ID", "white"),
+    ("members", "Members", "bold yellow"),
+    ("description", "Description", "dim"),
 ]
+
 
 def format_unified_groups(result: Any) -> None:
     """Formatter for Unified Group discovery results."""
-    from rich.table import Table
     from rich import box
+    from rich.table import Table
+
     from quantum_mechanic.shell.formatters import console
 
     data = result.data
@@ -49,8 +49,10 @@ def format_unified_groups(result: Any) -> None:
         console.print(f"  [dim]No groups discovered for {provider} (or access denied).[/dim]")
         return
 
-    console.print(f"  [bold green]✓[/bold green] Discovered [bold cyan]{len(groups)}[/bold cyan] {provider} Group(s)")
-    
+    console.print(
+        f"  [bold green]✓[/bold green] Discovered [bold cyan]{len(groups)}[/bold cyan] {provider} Group(s)"
+    )
+
     tbl = Table(box=box.ROUNDED, border_style="dim")
     tbl.add_column("Group Name", style="bold cyan")
     tbl.add_column("Group ID", style="white")
@@ -62,14 +64,15 @@ def format_unified_groups(result: Any) -> None:
             g.get("name", "—"),
             g.get("id", "—"),
             str(g.get("members", 0)),
-            g.get("description", "—")
+            g.get("description", "—"),
         )
-            
+
     console.print(tbl)
+
 
 @technique(
     technique_id="discovery/unified_enum_groups",
-    tactic='discovery',
+    tactic="discovery",
     mitre_id="T1069.003",
     providers=["aws", "azure", "gcp", "oci", "entra"],
     severity="info",
@@ -88,16 +91,18 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         "oci": _enum_oci,
         "entra": _enum_entra,
     }
-    
+
     handler = dispatch.get(ctx.provider_name)
     if handler is None:
         return {"error": f"Provider {ctx.provider_name} not implemented.", "groups": []}
-        
+
     return handler(ctx)
+
 
 # ================================================================
 # AWS — IAM Group Discovery
 # ================================================================
+
 
 def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
     iam = ctx.session.client("iam")
@@ -105,29 +110,31 @@ def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
 
     try:
         ctx.info("Listing AWS IAM groups...")
-        paginator = iam.get_paginator('list_groups')
-        
+        paginator = iam.get_paginator("list_groups")
+
         for page in paginator.paginate():
-            for g in page.get('Groups', []):
-                gname = g['GroupName']
-                gid = g['GroupId']
-                
+            for g in page.get("Groups", []):
+                gname = g["GroupName"]
+                gid = g["GroupId"]
+
                 # Resolve members
                 member_count = 0
                 try:
                     # get_group returns the group and its users
                     group_resp = iam.get_group(GroupName=gname)
-                    member_count = len(group_resp.get('Users', []))
+                    member_count = len(group_resp.get("Users", []))
                 except Exception as e:
                     ctx.debug(f"Failed to get members for group {gname}: {e}")
 
-                groups_out.append({
-                    "name": gname,
-                    "id": gid,
-                    "members": member_count,
-                    "description": f"Path: {g['Path']}"
-                })
-        
+                groups_out.append(
+                    {
+                        "name": gname,
+                        "id": gid,
+                        "members": member_count,
+                        "description": f"Path: {g['Path']}",
+                    }
+                )
+
         ctx.success(f"Discovered {len(groups_out)} IAM groups.")
     except Exception as e:
         ctx.error(f"AWS IAM group scan failed: {e}")
@@ -135,14 +142,17 @@ def _enum_aws(ctx: ExecutionContext) -> dict[str, Any]:
 
     return {"status": "success", "groups": groups_out}
 
+
 # ================================================================
 # Azure / Entra — delegate to entra_enum_groups (authoritative)
 # ================================================================
 
 from quantum_mechanic.techniques.discovery import entra_enum_groups
 
+
 def _enum_azure(ctx: ExecutionContext) -> dict[str, Any]:
     return _enum_entra(ctx)
+
 
 def _enum_entra(ctx: ExecutionContext) -> dict[str, Any]:
     result = entra_enum_groups.execute(ctx)
@@ -151,9 +161,11 @@ def _enum_entra(ctx: ExecutionContext) -> dict[str, Any]:
         g.setdefault("members", 0)
     return result
 
+
 # ================================================================
 # GCP — Project IAM Policy Group Extraction
 # ================================================================
+
 
 def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
     try:
@@ -163,10 +175,10 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
 
     groups_out = []
     client = resourcemanager_v3.ProjectsClient(credentials=ctx.session)
-    
+
     whoami = ctx.whoami()
     project_id = whoami.account_id
-    
+
     if not project_id or project_id == "unknown":
         return {"error": "No GCP project identified.", "groups": []}
 
@@ -187,13 +199,15 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
                     group_map[email].append(binding.role)
 
         for email, roles in group_map.items():
-            groups_out.append({
-                "name": email,
-                "id": email,
-                "members": "Unknown", # Cannot resolve members via project IAM policy alone
-                "description": f"Roles: {', '.join(roles)}"
-            })
-            
+            groups_out.append(
+                {
+                    "name": email,
+                    "id": email,
+                    "members": "Unknown",  # Cannot resolve members via project IAM policy alone
+                    "description": f"Roles: {', '.join(roles)}",
+                }
+            )
+
         ctx.success(f"Identified {len(groups_out)} groups from project IAM policy.")
     except Exception as e:
         ctx.debug(f"GCP IAM group extraction failed: {e}")
@@ -201,9 +215,11 @@ def _enum_gcp(ctx: ExecutionContext) -> dict[str, Any]:
 
     return {"status": "success", "groups": groups_out}
 
+
 # ================================================================
 # OCI — Identity Group Discovery
 # ================================================================
+
 
 def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
     try:
@@ -215,34 +231,38 @@ def _enum_oci(ctx: ExecutionContext) -> dict[str, Any]:
     groups_out = []
     config = ctx.session["config"]
     signer = ctx.session.get("signer")
-    
-    identity = oci.identity.IdentityClient(config, signer=signer) if signer else oci.identity.IdentityClient(config)
+
+    identity = (
+        oci.identity.IdentityClient(config, signer=signer)
+        if signer
+        else oci.identity.IdentityClient(config)
+    )
     tenancy_id = config.get("tenancy")
 
     try:
         ctx.info("Listing OCI groups...")
         groups = list_call_get_all_results(identity.list_groups, tenancy_id).data
-        
+
         for g in groups:
             # Resolve members
             member_count = 0
             try:
                 memberships = list_call_get_all_results(
-                    identity.list_user_group_memberships, 
-                    tenancy_id, 
-                    group_id=g.id
+                    identity.list_user_group_memberships, tenancy_id, group_id=g.id
                 ).data
                 member_count = len(memberships)
             except Exception as e:
                 ctx.debug(f"Failed to list members for OCI group {g.name}: {e}")
 
-            groups_out.append({
-                "name": g.name,
-                "id": g.id,
-                "members": member_count,
-                "description": g.description or ""
-            })
-            
+            groups_out.append(
+                {
+                    "name": g.name,
+                    "id": g.id,
+                    "members": member_count,
+                    "description": g.description or "",
+                }
+            )
+
         ctx.success(f"Discovered {len(groups_out)} OCI groups.")
     except Exception as e:
         ctx.debug(f"OCI group scan failed: {e}")

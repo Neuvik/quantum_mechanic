@@ -152,14 +152,16 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                 role_id = a.get("roleDefinitionId")
                 role_name = id_to_role.get(role_id, "Unknown Role")
                 tier = eam.classify_role_name(role_name)
-                results.append({
-                    "tier": tier,
-                    "role_name": role_name,
-                    "role_id": role_id,
-                    "display_name": a.get("displayName", "—"),
-                    "members_count": len(a.get("members", [])),
-                    "assignment_id": a.get("id"),
-                })
+                results.append(
+                    {
+                        "tier": tier,
+                        "role_name": role_name,
+                        "role_id": role_id,
+                        "display_name": a.get("displayName", "—"),
+                        "members_count": len(a.get("members", [])),
+                        "assignment_id": a.get("id"),
+                    }
+                )
     except GraphError as e:
         logger.info("Intune roles enumeration returned %s: %s", type(e).__name__, e)
         return graph_error_to_result(e, assignments=[])

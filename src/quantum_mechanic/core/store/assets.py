@@ -60,11 +60,19 @@ class AssetStore:
         """Insert or update a compute instance record."""
         if self._use_orm:
             return self._upsert_compute_orm(
-                provider=provider, instance_id=instance_id, name=name,
-                state=state, instance_type=instance_type, private_ip=private_ip,
-                public_ip=public_ip, subnet_id=subnet_id, image_id=image_id,
-                identity_arn=identity_arn, identity_name=identity_name,
-                security_group_ids=security_group_ids, metadata=metadata,
+                provider=provider,
+                instance_id=instance_id,
+                name=name,
+                state=state,
+                instance_type=instance_type,
+                private_ip=private_ip,
+                public_ip=public_ip,
+                subnet_id=subnet_id,
+                image_id=image_id,
+                identity_arn=identity_arn,
+                identity_name=identity_name,
+                security_group_ids=security_group_ids,
+                metadata=metadata,
             )
         now = datetime.now(UTC).isoformat()
         self._db.execute(
@@ -90,10 +98,22 @@ class AssetStore:
                 last_seen       = excluded.last_seen
             """,
             (
-                self._workspace_id, provider, instance_id, name, state,
-                instance_type, private_ip, public_ip, subnet_id,
-                image_id, identity_arn, identity_name, security_group_ids,
-                metadata, now, now,
+                self._workspace_id,
+                provider,
+                instance_id,
+                name,
+                state,
+                instance_type,
+                private_ip,
+                public_ip,
+                subnet_id,
+                image_id,
+                identity_arn,
+                identity_name,
+                security_group_ids,
+                metadata,
+                now,
+                now,
             ),
         )
         self._db.commit()
@@ -205,8 +225,12 @@ class AssetStore:
         """Insert or update a network asset (subnet, SG, VPC, etc.)."""
         if self._use_orm:
             return self._upsert_network_orm(
-                provider=provider, asset_type=asset_type, asset_id=asset_id,
-                name=name, region=region, metadata=metadata,
+                provider=provider,
+                asset_type=asset_type,
+                asset_id=asset_id,
+                name=name,
+                region=region,
+                metadata=metadata,
             )
         now = datetime.now(UTC).isoformat()
         self._db.execute(
@@ -222,8 +246,15 @@ class AssetStore:
                 last_seen = excluded.last_seen
             """,
             (
-                self._workspace_id, provider, asset_type, asset_id, name,
-                region, metadata, now, now,
+                self._workspace_id,
+                provider,
+                asset_type,
+                asset_id,
+                name,
+                region,
+                metadata,
+                now,
+                now,
             ),
         )
         self._db.commit()

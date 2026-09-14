@@ -38,7 +38,7 @@ from quantum_mechanic.providers.entra.graph import (
     graph_error_to_result,
     graph_list,
 )
-from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
+from quantum_mechanic.providers.entra.token_store import GRAPH, OAUTH_REFRESH, EntraTokenStore
 
 _GROUPS_URL = (
     "https://graph.microsoft.com/v1.0/groups"
@@ -139,7 +139,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     if token is None:
         return {"error": "No Graph token available."}
 
-    if token.token_type == "refresh_token":
+    if token.token_type == OAUTH_REFRESH:
         token = foci_expand(store, GRAPH)
         if token is None:
             return {"error": "FOCI expansion for Graph failed."}
@@ -170,5 +170,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                 "command": "run collection/entra_export_bloodhound",
                 "reason": "Export collected groups into BloodHound OpenGraph.",
             },
-        ] if groups else [],
+        ]
+        if groups
+        else [],
     }

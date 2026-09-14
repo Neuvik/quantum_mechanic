@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+import tempfile
 from unittest.mock import MagicMock, patch
 
 from websocket._exceptions import WebSocketBadStatusException
 
 from quantum_mechanic.providers.entra.browser_cdp import (
     build_launch_plan,
+    default_browser_for_os,
     import_browser_session,
     launch_browser,
 )
+
+
+def test_default_browser_is_edge_on_windows_chrome_elsewhere():
+    """OUTCOME: the default browser is OS-aware — Edge only on Windows, Chrome on
+    macOS/Linux (where Edge is uncommon and its default path usually absent)."""
+    assert default_browser_for_os("windows") == "edge"
+    assert default_browser_for_os("macos") == "chrome"
+    assert default_browser_for_os("linux") == "chrome"
+    # normalization: case/whitespace-insensitive
+    assert default_browser_for_os("  Windows ") == "edge"
 
 
 def test_build_launch_plan_macos_edge_uses_app_bundle_binary():
@@ -22,7 +34,8 @@ def test_build_launch_plan_linux_chrome_uses_tmp_profile():
     """OUTCOME: Linux Chrome guidance uses a separate tmp profile dir."""
     plan = build_launch_plan(browser="chrome", os_name="linux")
     assert plan.command.startswith("google-chrome ")
-    assert "--user-data-dir=/tmp/qm-chrome-cdp" in plan.command
+    expected_profile = f"--user-data-dir={tempfile.gettempdir()}/qm-chrome-cdp"
+    assert expected_profile in plan.command
 
 
 def test_build_launch_plan_windows_edge_uses_powershell_style_command():

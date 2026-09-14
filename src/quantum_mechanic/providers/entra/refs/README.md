@@ -1,7 +1,5 @@
 # Entra ID Reference Data
 
-> **`🔓 PUBLIC`**
-
 This directory holds vendored reference data about Microsoft Entra ID
 first-party applications — the client IDs, FOCI-family membership,
 pre-consented Graph permissions, and display names that QM's detectors
@@ -51,7 +49,7 @@ time and their maintainers deserve visibility.
 ### Related upstream work worth pointing at
 
 - **[entrascopes.com](https://entrascopes.com/)** — Fabian Bader
-  ([@fabian_bader](https://github.com/fabian-bader)) and Dirk-jan Mollema
+  ([@fabian_bader](https://github.com/f-bader)) and Dirk-jan Mollema
   ([@dirkjanm](https://github.com/dirkjanm)) — polished web browser of
   first-party apps with filtering by FOCI status, CA bypass capability,
   and pre-consented scopes. Use this for exploratory research.

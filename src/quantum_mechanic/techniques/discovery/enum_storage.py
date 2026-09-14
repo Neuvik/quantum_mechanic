@@ -73,28 +73,32 @@ from quantum_mechanic.core.technique import Parameter, technique
 # ----------------------------------------------------------------
 # Loot schema — Declarative table mapping
 # ----------------------------------------------------------------
-LOOT_ITEMS_KEY = 'buckets'
+LOOT_ITEMS_KEY = "buckets"
 LOOT_SCHEMA = [
-    ('name',          'Bucket Name',   'bold cyan'),
-    ('creation_date', 'Created',       'dim'),
-    ('public',        'Public',        'yellow'),
+    ("name", "Bucket Name", "bold cyan"),
+    ("creation_date", "Created", "dim"),
+    ("public", "Public", "yellow"),
 ]
 
 
 @technique(
-    technique_id='discovery/enum_storage',
-    tactic='discovery',
-    mitre_id='T1580',
-    providers=['aws', 'azure', 'gcp', 'oci'],
-    severity='info',
+    technique_id="discovery/enum_storage",
+    tactic="discovery",
+    mitre_id="T1580",
+    providers=["aws", "azure", "gcp", "oci"],
+    severity="info",
     safe=True,
-    description='Enumerate cloud storage buckets and containers and highlight public exposure.',
+    description="Enumerate cloud storage buckets and containers and highlight public exposure.",
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,
     parameters=[
         Parameter("target", "A specific bucket or storage account name.", required=False),
-        Parameter("public_only", "Only return publicly exposed buckets and write workspace findings.", required=False),
-    ]
+        Parameter(
+            "public_only",
+            "Only return publicly exposed buckets and write workspace findings.",
+            required=False,
+        ),
+    ],
 )
 def execute(ctx: ExecutionContext) -> dict[str, Any]:
     """
@@ -103,13 +107,13 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     Generated from: enum_storage.yaml
     See: docs/architecture/attack_maps/ for full attack chain.
     """
-    if ctx.provider_name == 'aws':
+    if ctx.provider_name == "aws":
         return _aws(ctx)
-    if ctx.provider_name == 'azure':
+    if ctx.provider_name == "azure":
         return _azure(ctx)
-    if ctx.provider_name == 'gcp':
+    if ctx.provider_name == "gcp":
         return _gcp(ctx)
-    if ctx.provider_name == 'oci':
+    if ctx.provider_name == "oci":
         return _oci(ctx)
 
     return {}
@@ -139,8 +143,8 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
     # Implementation steps (from attack map):
     # -----------------------------------------------------------------
     # Requires s3:ListAllMyBuckets. Executes boto3 s3.list_buckets(). For each bucket discovered, it optionally calls s3:GetBucketPolicy and s3:GetBucketAcl to determine if the bucket allows public read/write access.
-    _ALL_USERS = "http://acs.amazonaws.com/groups/global/AllUsers"
-    _AUTH_USERS = "http://acs.amazonaws.com/groups/global/AuthenticatedUsers"
+    all_users_uri = "http://acs.amazonaws.com/groups/global/AllUsers"
+    auth_users_uri = "http://acs.amazonaws.com/groups/global/AuthenticatedUsers"
 
     def _check_public(s3_client, bucket_name: str) -> str:
         """Return a human-readable public-exposure label or empty string."""
@@ -152,9 +156,9 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
             for g in grants:
                 uri = g.get("Grantee", {}).get("URI", "")
                 perm = g.get("Permission", "")
-                if uri == _ALL_USERS:
+                if uri == all_users_uri:
                     perms.append(f"AllUsers:{perm}")
-                elif uri == _AUTH_USERS:
+                elif uri == auth_users_uri:
                     perms.append(f"AuthUsers:{perm}")
             if perms:
                 return " | ".join(perms)
@@ -177,13 +181,16 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
         resp = s3.list_buckets()
         for b in resp.get("Buckets", []):
             name = b.get("Name")
-            buckets.append({
-                "name": name,
-                "creation_date": str(b.get("CreationDate")),
-                "public": _check_public(s3, name),
-            })
+            buckets.append(
+                {
+                    "name": name,
+                    "creation_date": str(b.get("CreationDate")),
+                    "public": _check_public(s3, name),
+                }
+            )
 
         import json as _json
+
         public_only = bool(ctx.get_param("public_only"))
         if public_only:
             buckets = [b for b in buckets if b["public"]]
@@ -199,13 +206,11 @@ def _aws(ctx: ExecutionContext) -> dict[str, Any]:
                     mitre_id="T1530",
                 )
 
-        return {
-            "provider": "aws",
-            "buckets": buckets,
-            "total": len(buckets)
-        }
+        return {"provider": "aws", "buckets": buckets, "total": len(buckets)}
     except Exception as e:
         return {"provider": "aws", "error": str(e)}
+
+
 def _azure(ctx: ExecutionContext) -> dict[str, Any]:
     """
     Requires Microsoft.Storage/storageAccounts/read. Iterates through
@@ -224,7 +229,6 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
     Account Reader.
     """
     try:
-        from azure.core.exceptions import ClientAuthenticationError
         from azure.mgmt.storage import StorageManagementClient
         from azure.mgmt.subscription import SubscriptionClient
     except ImportError:
@@ -243,7 +247,10 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
                 sub_client = SubscriptionClient(cred)
                 subscriptions = [s.subscription_id for s in sub_client.subscriptions.list()]
             except Exception as e:
-                return {"error": f"Failed to list subscriptions while searching for target {target}: {e}", "buckets": []}
+                return {
+                    "error": f"Failed to list subscriptions while searching for target {target}: {e}",
+                    "buckets": [],
+                }
 
             for sub_id in subscriptions:
                 storage_client = StorageManagementClient(cred, sub_id)
@@ -251,13 +258,19 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
                     # Try to get the specific account if we can find it
                     for account in storage_client.storage_accounts.list():
                         if account.name == target:
-                            buckets.append({
-                                "name": account.name,
-                                "location": account.location,
-                                "subscription_id": sub_id,
-                                "public": "Enabled" if getattr(account, "allow_blob_public_access", False) else "Disabled",
-                                "creation_date": str(account.creation_time) if hasattr(account, "creation_time") else "Unknown"
-                            })
+                            buckets.append(
+                                {
+                                    "name": account.name,
+                                    "location": account.location,
+                                    "subscription_id": sub_id,
+                                    "public": "Enabled"
+                                    if getattr(account, "allow_blob_public_access", False)
+                                    else "Disabled",
+                                    "creation_date": str(account.creation_time)
+                                    if hasattr(account, "creation_time")
+                                    else "Unknown",
+                                }
+                            )
                             break
                 except Exception:
                     continue
@@ -272,13 +285,19 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
                 try:
                     storage_client = StorageManagementClient(cred, sub_id)
                     for account in storage_client.storage_accounts.list():
-                        buckets.append({
-                            "name": account.name,
-                            "location": account.location,
-                            "subscription_id": sub_id,
-                            "public": "Enabled" if getattr(account, "allow_blob_public_access", False) else "Disabled",
-                            "creation_date": str(account.creation_time) if hasattr(account, "creation_time") else "Unknown"
-                        })
+                        buckets.append(
+                            {
+                                "name": account.name,
+                                "location": account.location,
+                                "subscription_id": sub_id,
+                                "public": "Enabled"
+                                if getattr(account, "allow_blob_public_access", False)
+                                else "Disabled",
+                                "creation_date": str(account.creation_time)
+                                if hasattr(account, "creation_time")
+                                else "Unknown",
+                            }
+                        )
                 except Exception as e:
                     ctx.warn(f"Failed to list storage accounts in subscription {sub_id}: {e}")
 
@@ -286,13 +305,11 @@ def _azure(ctx: ExecutionContext) -> dict[str, Any]:
         if public_only:
             buckets = [b for b in buckets if b.get("public") == "Enabled"]
 
-        return {
-            "provider": "azure",
-            "buckets": buckets,
-            "total": len(buckets)
-        }
+        return {"provider": "azure", "buckets": buckets, "total": len(buckets)}
     except Exception as e:
         return {"provider": "azure", "error": str(e)}
+
+
 def _gcp(ctx: ExecutionContext) -> dict[str, Any]:
     """
     Requires storage.buckets.list. Computes buckets via
@@ -327,18 +344,13 @@ def _gcp(ctx: ExecutionContext) -> dict[str, Any]:
 
         buckets = []
         for bucket in result.get("items", []):
-            buckets.append({
-                "name": bucket.get("name"),
-                "location": bucket.get("location")
-            })
+            buckets.append({"name": bucket.get("name"), "location": bucket.get("location")})
 
-        return {
-            "provider": "gcp",
-            "buckets": buckets,
-            "total": len(buckets)
-        }
+        return {"provider": "gcp", "buckets": buckets, "total": len(buckets)}
     except Exception as e:
         return {"provider": "gcp", "error": str(e)}
+
+
 def _oci(ctx: ExecutionContext) -> dict[str, Any]:
     """
     Requires OBJECTSTORAGE_NAMESPACE_READ and BUCKET_INSPECT. Queries
@@ -384,20 +396,17 @@ def _oci(ctx: ExecutionContext) -> dict[str, Any]:
         for cid in compartment_ids:
             try:
                 for bucket in os_client.list_buckets(namespace, cid).data:
-                    buckets.append({
-                        "name": bucket.name,
-                        "compartment_id": bucket.compartment_id,
-                        "namespace": bucket.namespace
-                    })
+                    buckets.append(
+                        {
+                            "name": bucket.name,
+                            "compartment_id": bucket.compartment_id,
+                            "namespace": bucket.namespace,
+                        }
+                    )
             except Exception:
                 # Permission denied for compartment, safe to skip for enum tools
                 pass
 
-        return {
-            "provider": "oci",
-            "buckets": buckets,
-            "total": len(buckets)
-        }
+        return {"provider": "oci", "buckets": buckets, "total": len(buckets)}
     except Exception as e:
         return {"provider": "oci", "error": str(e)}
-

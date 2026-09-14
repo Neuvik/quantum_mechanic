@@ -114,6 +114,7 @@ class TechniqueLoader:
             Number of techniques loaded after the reload.
         """
         import sys
+
         # Reload any technique module that is already in sys.modules.
         for modname in list(sys.modules):
             if modname.startswith("quantum_mechanic.techniques."):

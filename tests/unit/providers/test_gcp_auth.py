@@ -3,6 +3,7 @@
 # ================================================================
 
 import json
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
@@ -18,14 +19,20 @@ def provider() -> GCPAuthProvider:
 class TestGCPAuthenticate:
     def test_authenticate_captured_token(self, provider: GCPAuthProvider) -> None:
         """Test authentication with captured_token method."""
+        future = (datetime.now(UTC) + timedelta(hours=1)).replace(tzinfo=None)
         creds = provider.authenticate({
             "method": "captured_token",
             "access_token": "ya29.fake-token",
             "captured_principal": "alice@example.iam.gserviceaccount.com",
             "project_id": "my-project",
+            "expiry": future.isoformat(),
         })
         # TokenCredentials stores the bearer token on .token
         assert getattr(creds, "token", None) == "ya29.fake-token"
+        # OUTCOME: freshness checks work — this is the regression guard for
+        # the offset-naive/offset-aware TypeError (see issue #1).
+        assert creds.valid
+        assert not creds.expired
 
     def test_authenticate_captured_token_missing_access_token(
         self, provider: GCPAuthProvider
@@ -33,6 +40,58 @@ class TestGCPAuthenticate:
         """captured_token requires access_token."""
         with pytest.raises(ValueError, match="captured_token method requires"):
             provider.authenticate({"method": "captured_token"})
+
+    def test_authenticate_captured_token_missing_expiry_raises(
+        self, provider: GCPAuthProvider
+    ) -> None:
+        """OUTCOME: a legacy captured_token with no stored expiry is refused,
+        not silently given a fabricated one — caller must re-import."""
+        with pytest.raises(ValueError, match="Re-import via `import gcp --default`"):
+            provider.authenticate({
+                "method": "captured_token",
+                "access_token": "ya29.fake-token",
+            })
+
+    def test_authenticate_captured_token_malformed_expiry_raises(
+        self, provider: GCPAuthProvider
+    ) -> None:
+        """OUTCOME: an unparseable stored expiry is refused with a clear error."""
+        with pytest.raises(ValueError, match="malformed expiry"):
+            provider.authenticate({
+                "method": "captured_token",
+                "access_token": "ya29.fake-token",
+                "expiry": "not-a-datetime",
+            })
+
+    def test_authenticate_captured_token_expired_reports_expired(
+        self, provider: GCPAuthProvider
+    ) -> None:
+        """OUTCOME: a token whose real captured expiry is in the past is
+        reported as expired (not silently treated as fresh for an hour)."""
+        past = (datetime.now(UTC) - timedelta(hours=2)).replace(tzinfo=None)
+        creds = provider.authenticate({
+            "method": "captured_token",
+            "access_token": "ya29.fake-token",
+            "expiry": past.isoformat(),
+        })
+        assert creds.expired
+        assert not creds.valid
+        with pytest.raises(ValueError, match="captured statically"):
+            creds.refresh(request=None)
+
+    def test_authenticate_captured_token_aware_expiry_normalized(
+        self, provider: GCPAuthProvider
+    ) -> None:
+        """OUTCOME: a timezone-aware stored expiry (defensive case) is
+        normalized to naive UTC before use, same as a naive one."""
+        future_aware = datetime.now(UTC) + timedelta(hours=1)
+        creds = provider.authenticate({
+            "method": "captured_token",
+            "access_token": "ya29.fake-token",
+            "expiry": future_aware.isoformat(),
+        })
+        assert creds.expiry.tzinfo is None
+        assert creds.valid
 
     @patch("quantum_mechanic.providers.gcp.auth.Path.exists")
     @patch("quantum_mechanic.providers.gcp.auth.service_account.Credentials.from_service_account_file")
@@ -122,10 +181,12 @@ class TestGCPAuthenticate:
 
 def test_imported_gcp_credential_not_substituted_by_local_adc():
     """CANARY: GCP credential imported for SA-A must not be replaced by local ADC SA-B."""
+    future = (datetime.now(UTC) + timedelta(hours=1)).replace(tzinfo=None)
     secret_data = {
         "method": "captured_token",
         "access_token": "ya29.fake-token-for-alice",
         "captured_principal": "alice@example.iam.gserviceaccount.com",
+        "expiry": future.isoformat(),
     }
 
     # local google.auth.default would return a different identity

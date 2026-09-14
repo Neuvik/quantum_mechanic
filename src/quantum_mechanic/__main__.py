@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 
 from quantum_mechanic import __version__
 
@@ -27,6 +28,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="qm",
         description="Quantum Mechanic — Cross-cloud offensive security framework",
+        epilog=(
+            "Interactive commands: workspace, import, acquire, creds, use, "
+            "techniques, run, info, report, and help. Launch `qm` without a "
+            "command to use the interactive shell."
+        ),
     )
     parser.add_argument(
         "--agent",
@@ -59,9 +65,28 @@ def parse_args() -> argparse.Namespace:
     return known
 
 
-def main() -> None:
-    """Main entry point for Quantum Mechanic."""
+def main() -> int | None:
+    """Main entry point for Quantum Mechanic.
+
+    Returns an int exit code for the `graph` subcommand (consumed by the
+    console-script wrapper); returns None (exit 0) for the interactive/agent
+    modes.
+    """
+    # Activate the in-binary call-edge tracer when QM_TRACE=1 (the dynamic
+    # `qm graph trace` run sets it for pexpect-spawned subprocesses). Guarded
+    # so a codegraph import/setup hiccup can never break normal `qm` startup;
+    # tracing is best-effort, so any failure here is silently ignored.
+    with contextlib.suppress(Exception):
+        from quantum_mechanic.codegraph.tracer import install_from_env
+
+        install_from_env()
+
     args = parse_args()
+
+    if args.command == "graph":
+        from quantum_mechanic.codegraph import cli
+
+        return cli.run(args.args)
 
     if args.agent:
         from quantum_mechanic.agent.mode import run_agent_mode
@@ -72,6 +97,8 @@ def main() -> None:
 
         run_shell(args)
 
+    return None
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

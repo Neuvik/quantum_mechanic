@@ -2,14 +2,17 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc2 |
-| **Issued** | 2026-08-04 |
-| **Last reviewed** | 2026-08-04 |
+| **Version** | v1.0.0 |
+| **Issued** | 2026-09-14 |
+| **Last reviewed** | 2026-09-14 |
 | **Status** | Active |
 
 A **workspace** is a self-contained SQLite engagement database. Every credential, discovered resource, finding, and API call is stored in the workspace. You can have many workspaces — one per engagement.
 
 **Location on disk:** `~/.quantum_mechanic/workspaces/<name>.db`
+
+Set `QM_WORKSPACE_DIR` before starting QM to use a different workspace root;
+set `QM_HOME` to relocate the broader local QM state directory.
 
 ---
 
@@ -55,4 +58,6 @@ qm> workspace list
 
 | Rev | Date | Change |
 |-----|------|--------|
+| v1.0.0 | 2026-09-14 | General availability release. |
+| v1.0-rc3 | 2026-08-07 | Documented configurable state and workspace locations. |
 | v1.0-rc2 | 2026-08-04 | Public workspace guide aligned to the shipped workspace-first operator flow |

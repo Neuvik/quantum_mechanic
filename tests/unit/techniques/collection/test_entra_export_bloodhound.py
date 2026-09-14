@@ -138,7 +138,7 @@ def test_role_node_carries_tier_property():
                         "role_name": "Global Administrator",
                         "tier": "ControlPlane",
                         "principal_id": "p1",
-                        "principal_name": "p1@x.com",
+                        "principal_name": "p1@x.example",
                         "principal_type": "user",
                     }
                 ]

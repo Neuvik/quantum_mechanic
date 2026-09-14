@@ -20,27 +20,30 @@ from typing import Any
 
 class TelemetryType(enum.StrEnum):
     """Canonical event types for the telemetry bus."""
+
     TASK_START = "task_start"
-    TASK_END   = "task_end"
-    LOG        = "log"
-    API_CALL   = "api_call"
-    DISCOVERY  = "discovery"
-    FINDING    = "finding"
-    ERROR      = "error"
+    TASK_END = "task_end"
+    LOG = "log"
+    API_CALL = "api_call"
+    DISCOVERY = "discovery"
+    FINDING = "finding"
+    ERROR = "error"
 
 
 class TelemetryLevel(enum.StrEnum):
     """Log levels for telemetry messages."""
-    DEBUG   = "debug"
-    INFO    = "info"
+
+    DEBUG = "debug"
+    INFO = "info"
     SUCCESS = "success"
     WARNING = "warning"
-    ERROR   = "error"
+    ERROR = "error"
 
 
 @dataclass(frozen=True)
 class TelemetryEvent:
     """A single structured event from the framework."""
+
     technique_id: str
     event_type: TelemetryType
     timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())

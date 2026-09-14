@@ -66,6 +66,7 @@ def _module_path(technique_id: str) -> str:
 # Public API
 # ================================================================
 
+
 class LootWriter:
     """Writes loot.csv and table.txt for a completed technique run."""
 
@@ -159,9 +160,7 @@ class LootWriter:
         except Exception as exc:
             logger.debug("Failed to write _status.txt: %s", exc)
 
-    def _load_schema(
-        self, technique_id: str
-    ) -> tuple[list[tuple] | None, str | None]:
+    def _load_schema(self, technique_id: str) -> tuple[list[tuple] | None, str | None]:
         """Import the technique module and read LOOT_SCHEMA / LOOT_ITEMS_KEY.
 
         Returns (schema, items_key) or (None, None) if the technique has no schema.
@@ -217,12 +216,14 @@ class LootWriter:
                 rows = []
                 for fn in raw:
                     for ev in fn.get("env_vars", []):
-                        rows.append({
-                            "name": fn.get("name", ""),
-                            "var_name": ev.get("name", ""),
-                            "var_value": ev.get("value", ""),
-                            "sensitivity": ev.get("sensitivity", ""),
-                        })
+                        rows.append(
+                            {
+                                "name": fn.get("name", ""),
+                                "var_name": ev.get("name", ""),
+                                "var_value": ev.get("value", ""),
+                                "sensitivity": ev.get("sensitivity", ""),
+                            }
+                        )
             else:
                 rows = [item for item in raw if isinstance(item, dict)]
 
@@ -247,8 +248,9 @@ class LootWriter:
             writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")
             writer.writeheader()
             for item in items:
-                row = {key: "" if item.get(key) is None else str(item.get(key, ""))
-                       for key in columns}
+                row = {
+                    key: "" if item.get(key) is None else str(item.get(key, "")) for key in columns
+                }
                 writer.writerow(row)
 
     def _write_table(
@@ -280,7 +282,9 @@ class LootWriter:
             tbl.add_row(*row_vals)
 
         buf = io.StringIO()
-        plain_console = Console(file=buf, force_terminal=False, highlight=False, markup=False, width=120)
+        plain_console = Console(
+            file=buf, force_terminal=False, highlight=False, markup=False, width=120
+        )
         plain_console.print(tbl)
         text = buf.getvalue()
 

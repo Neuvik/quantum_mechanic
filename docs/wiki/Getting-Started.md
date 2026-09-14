@@ -2,14 +2,14 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc2 |
-| **Issued** | 2026-08-04 |
-| **Last reviewed** | 2026-08-04 |
+| **Version** | v1.0.0 |
+| **Issued** | 2026-09-14 |
+| **Last reviewed** | 2026-09-14 |
 | **Status** | Active |
 
 ---
 
-## 1. Requirements
+## Requirements
 
 - Python 3.12+
 - [`uv`](https://docs.astral.sh/uv/) for dependency management
@@ -20,33 +20,37 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ---
 
-## 2. Installation
+## Install
 
 ```bash
-# From a checkout of the public repository:
 cd /path/to/quantum_mechanic
 uv sync
 ```
 
+QM stores local state under `~/.quantum_mechanic` by default. Override with environment variables if you need the state somewhere else:
+
+```bash
+export QM_HOME=/secure/qm-state
+export QM_WORKSPACE_DIR=/secure/qm-workspaces
+```
+
 ---
 
-## 3. Launch the Shell
+## Launch
 
 ```bash
 uv run qm
 ```
 
-You will see the QM prompt:
-
 ```
-qm> 
+qm>
 ```
 
 ---
 
-## 4. Create Your First Workspace
+## Create a Workspace
 
-A workspace is an SQLite engagement database that holds credentials, discovered resources, and findings. Everything is scoped to a workspace.
+Everything in QM is scoped to a workspace: an SQLite database that holds credentials, discovered resources, evidence, and findings for one engagement.
 
 ```
 qm> workspace create acme-assessment
@@ -56,11 +60,11 @@ qm[acme-assessment]>
 
 ---
 
-## 5. Import a Credential
+## Import a Credential
 
-Import a credential for the cloud environment you are assessing.
+Pick the provider you're assessing and bring a credential in.
 
-**AWS (CLI profile):**
+**AWS (named profile):**
 ```
 qm[acme-assessment]> import aws --profile default
 ✓ Credential #1 added: AWS profile 'default'
@@ -84,55 +88,54 @@ qm[acme-assessment]> import oci --default
 ✓ Credential #1 added: OCI config (DEFAULT profile)
 ```
 
-> **Note:** Credentials are stored encrypted in the workspace database. Secret material never appears in logs or the engagement report.
+Credentials are encrypted at rest in the workspace database. Secret material never appears in logs or the engagement report.
 
 ---
 
-## 6. Set the Active Credential
+## Activate and Confirm
+
+Set the credential you want to operate with, then confirm your identity in the target environment before you do anything else:
 
 ```
 qm[acme-assessment]> use 1
 ✓ Active credential: #1 (aws)
-qm[acme-assessment][aws:1]>
-```
-
----
-
-## 7. Run Your First Technique
-
-Identify who you are in the target environment:
-
-```
 qm[acme-assessment][aws:1]> run discovery/whoami
 ```
 
-List what techniques are available for your active provider:
+This is the "who am I, and what can I reach?" step. Always run it first.
+
+---
+
+## Run Techniques
+
+List what's available for your active provider:
 
 ```
 qm[acme-assessment][aws:1]> techniques
 ```
 
-Run a technique directly by ID (shortcut — no `run` prefix needed):
+Run by ID (either form works):
 
 ```
+qm[acme-assessment][aws:1]> run discovery/enum_iam
 qm[acme-assessment][aws:1]> discovery/enum_iam
 ```
 
 ---
 
-## 8. View the Engagement Report
+## Generate the Report
 
-After running techniques, review what was found:
+After running techniques, pull the engagement report:
 
 ```
 qm[acme-assessment][aws:1]> report
 ```
 
-This renders the credential chain, technique timeline, and findings table inline.
+Renders the credential chain, technique timeline, and findings inline.
 
 ---
 
-## 9. Exit
+## Exit
 
 ```
 qm> exit
@@ -144,8 +147,8 @@ qm> exit
 
 - [Shell Reference](./Shell-Reference.md) — every command and flag
 - [Workspaces](./Workspaces.md) — managing multiple engagements
-- [Credentials](./Credentials.md) — credential lifecycle and raw inspection
-- [Techniques](./Techniques.md) — browsing, running, and reading technique docs
+- [Credentials](./Credentials.md) — credential lifecycle, raw inspection, Entra token flows
+- [Techniques](./Techniques.md) — browsing, running, and reading inline technique docs
 
 ---
 
@@ -153,5 +156,7 @@ qm> exit
 
 | Rev | Date | Change |
 |-----|------|--------|
+| v1.0.0 | 2026-09-14 | General availability release. Tightened prose. |
+| v1.0-rc3 | 2026-08-07 | Documented state-location environment variables and updated release metadata. |
 | 0.1 | 2026-03-07 | Initial draft |
 | 0.2 | 2026-03-09 | Fixed entry point (`uv run qm`), Python 3.12+, added version table and change log |

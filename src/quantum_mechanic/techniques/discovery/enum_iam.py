@@ -53,10 +53,9 @@ from quantum_mechanic.core.technique import technique
 # ----------------------------------------------------------------
 # Loot schema — CloudFox-style output (loot.csv / table.txt)
 # ----------------------------------------------------------------
-LOOT_ITEMS_KEY = 'attached_policies'
+LOOT_ITEMS_KEY = "policies"
 LOOT_SCHEMA = [
-    ('PolicyName', 'PolicyName'),
-    ('PolicyArn', 'PolicyArn'),
+    ("PolicyName", "PolicyName"),
 ]
 
 try:
@@ -83,7 +82,9 @@ def format_iam_result(result: Any) -> None:
     principal = data.get("principal", "unknown")
     principal_type = data.get("principal_type", "unknown")
 
-    console.print(f"  [bold green]✓[/bold green] IAM Enumeration for {provider.upper()} {principal_type} [cyan]{principal}[/cyan]")
+    console.print(
+        f"  [bold green]✓[/bold green] IAM Enumeration for {provider.upper()} {principal_type} [cyan]{principal}[/cyan]"
+    )
 
     if provider == "aws":
         attached_policies = data.get("attached_policies", [])
@@ -94,7 +95,9 @@ def format_iam_result(result: Any) -> None:
             return
 
         if attached_policies:
-            table = Table(box=None, padding=(0, 2), title="Attached Managed Policies", title_style="bold cyan")
+            table = Table(
+                box=None, padding=(0, 2), title="Attached Managed Policies", title_style="bold cyan"
+            )
             table.add_column("Policy Name", style="white")
             table.add_column("Policy ARN", style="dim")
             for p in attached_policies:
@@ -102,7 +105,9 @@ def format_iam_result(result: Any) -> None:
             console.print(table)
 
         if inline_policies:
-            table = Table(box=None, padding=(0, 2), title="Inline Policies", title_style="bold yellow")
+            table = Table(
+                box=None, padding=(0, 2), title="Inline Policies", title_style="bold yellow"
+            )
             table.add_column("Policy Name", style="white")
             for p in inline_policies:
                 table.add_row(p.get("PolicyName", ""))
@@ -114,12 +119,16 @@ def format_iam_result(result: Any) -> None:
             console.print("  [dim]No Azure role assignments found.[/dim]")
             return
 
-        table = Table(box=None, padding=(0, 2), title="Azure Role Assignments", title_style="bold cyan")
+        table = Table(
+            box=None, padding=(0, 2), title="Azure Role Assignments", title_style="bold cyan"
+        )
         table.add_column("Role Name", style="bold white")
         table.add_column("Scope", style="dim")
         table.add_column("Definition ID", style="dim")
         for a in assignments:
-            table.add_row(a.get("roleName", "Unknown"), a.get("scope", ""), str(a.get("roleDefinitionId", "")))
+            table.add_row(
+                a.get("roleName", "Unknown"), a.get("scope", ""), str(a.get("roleDefinitionId", ""))
+            )
         console.print(table)
 
     elif provider == "gcp":
@@ -146,7 +155,9 @@ def format_iam_result(result: Any) -> None:
             return
 
         if groups:
-            table = Table(box=None, padding=(0, 2), title="OCI Group Memberships", title_style="bold cyan")
+            table = Table(
+                box=None, padding=(0, 2), title="OCI Group Memberships", title_style="bold cyan"
+            )
             table.add_column("Group Name", style="bold white")
             table.add_column("Group ID", style="dim")
             for g in groups:
@@ -154,7 +165,12 @@ def format_iam_result(result: Any) -> None:
             console.print(table)
 
         if policies:
-            table = Table(box=None, padding=(0, 2), title="OCI Policies (Across Compartments)", title_style="bold yellow")
+            table = Table(
+                box=None,
+                padding=(0, 2),
+                title="OCI Policies (Across Compartments)",
+                title_style="bold yellow",
+            )
             table.add_column("Policy Name", style="bold white")
             table.add_column("Compartment", style="dim")
             table.add_column("Statements", style="green")
@@ -166,7 +182,7 @@ def format_iam_result(result: Any) -> None:
 
 @technique(
     technique_id="discovery/enum_iam",
-    tactic='discovery',
+    tactic="discovery",
     mitre_id="T1087.004",
     providers=["aws", "azure", "gcp", "oci"],
     severity="info",
@@ -296,6 +312,8 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
         "attached_policies": attached_policies,
         "inline_policies": inline_policies,
         "policy_documents": policy_documents,
+        # Union for loot.csv serialization — covers both managed and inline
+        "policies": attached_policies + inline_policies,
     }
 
 
@@ -382,12 +400,66 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
     if whoami_res.principal_type == "service_account":
         member_str = f"serviceAccount:{principal_id}"
 
+    from google.api_core import exceptions as gapi_exceptions
+    from google.auth import exceptions as gauth_exceptions
+    from google.auth.transport.requests import Request
+
+    # Auth-layer failures (bad/expired/malformed credentials) must NOT be
+    # treated the same as a per-project permission denial. A permission
+    # denial on one project is expected during enumeration — the caller may
+    # legitimately lack access to some projects. A credential that can't
+    # authenticate at all must surface as status=error, not fall through
+    # to an empty-but-"successful" result.
+    auth_failure_types = (
+        gauth_exceptions.GoogleAuthError,
+        gapi_exceptions.Unauthenticated,
+    )
+
+    # Proactively validate/refresh the credential BEFORE constructing the
+    # gRPC client (resourcemanager_v3.ProjectsClient uses gRPC transport by
+    # default). gRPC's AuthMetadataPlugin swallows any exception raised
+    # during credential refresh and re-surfaces it to callers as a generic
+    # ServiceUnavailable("...Getting metadata from plugin failed...") — a
+    # 503 that's indistinguishable from a real GCP outage and isn't a
+    # subclass of any auth-specific exception, so it would otherwise slip
+    # past auth_failure_types and be silently swallowed below. Checking here
+    # means an expired/invalid credential raises with its real type first.
+    try:
+        if getattr(ctx.session, "expired", False):
+            ctx.session.refresh(Request())
+    except auth_failure_types as e:
+        return {
+            "status": "error",
+            "error": f"GCP authentication failed: {e}",
+            "principal": whoami_res.friendly_name,
+            "principal_type": whoami_res.principal_type,
+            "project_roles": [],
+        }
+    except ValueError as e:
+        # StaticTokenCredentials.refresh() raises ValueError with a clear
+        # re-import message when a captured token has genuinely expired.
+        return {
+            "status": "error",
+            "error": str(e),
+            "principal": whoami_res.friendly_name,
+            "principal_type": whoami_res.principal_type,
+            "project_roles": [],
+        }
+
     client = resourcemanager_v3.ProjectsClient(credentials=ctx.session)
     projects = []
 
     try:
         for p in client.search_projects():
             projects.append(p.project_id)
+    except auth_failure_types as e:
+        return {
+            "status": "error",
+            "error": f"GCP authentication failed while searching projects: {e}",
+            "principal": whoami_res.friendly_name,
+            "principal_type": whoami_res.principal_type,
+            "project_roles": [],
+        }
     except Exception as e:
         logger.warning(f"Failed to search projects: {e}")
         if whoami_res.account_id and whoami_res.account_id != "unknown":
@@ -403,6 +475,7 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         }
 
     roles_found = []
+    auth_failures = []
 
     for pid in set(projects):
         try:
@@ -421,8 +494,24 @@ def _enum_gcp(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
                             "condition": condition,
                         }
                     )
+        except auth_failure_types as e:
+            auth_failures.append(pid)
+            logger.warning(f"GCP authentication failed for project {pid}: {e}")
         except Exception as e:
             logger.warning(f"Could not get IAM policy for project {pid}: {e}")
+
+    if auth_failures and len(auth_failures) == len(set(projects)):
+        return {
+            "status": "error",
+            "error": (
+                f"GCP authentication failed for all {len(auth_failures)} project(s) "
+                "— credentials may be invalid or expired. Re-import via "
+                "`import gcp --default`."
+            ),
+            "principal": friendly_name,
+            "principal_type": whoami_res.principal_type,
+            "project_roles": [],
+        }
 
     return {
         "status": "success",
@@ -485,7 +574,9 @@ def _enum_oci(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
             tenancy_id, compartment_id_in_subtree=True, access_level="ACCESSIBLE"
         ).data
         compartment_ids.extend([c.id for c in child_compartments])
-        ctx.info(f"Discovered {len(compartment_ids)} accessible compartments for policy enumeration.")
+        ctx.info(
+            f"Discovered {len(compartment_ids)} accessible compartments for policy enumeration."
+        )
     except Exception as e:
         msg = getattr(e, "message", str(e))
         logger.warning(f"Failed to list child compartments: {msg}")
@@ -513,5 +604,6 @@ def _enum_oci(ctx: ExecutionContext, whoami_res: Any) -> dict[str, Any]:
         "groups": groups,
         "policies": policies,
     }
+
 
 # ================================================================

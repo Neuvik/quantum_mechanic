@@ -34,11 +34,13 @@ import httpx
 from quantum_mechanic.providers.entra.foci import (
     FOCI_CLIENT_IDS,
     FOCI_DEFAULT_CLIENT,
+    OAUTH2_ENDPOINT,
     RESOURCE_CLIENT_HINTS,
-    TOKEN_ENDPOINT,
 )
 from quantum_mechanic.providers.entra.token_store import (
     GRAPH,
+    OAUTH_ACCESS,
+    OAUTH_REFRESH,
     EntraToken,
     EntraTokenStore,
     token_from_jwt,
@@ -68,6 +70,7 @@ class ScopeExchangeResult:
         tried_clients:  Ordered list of (client_id, friendly_name) attempted.
         last_error:     Human-readable last error, useful for diagnostics.
     """
+
     status: str
     token: EntraToken | None = None
     tried_clients: list[tuple[str, str]] = field(default_factory=list)
@@ -130,7 +133,7 @@ def try_acquire_scope(
         )
 
     tenant = store.tenant_id or refresh.tenant_id or "common"
-    url = TOKEN_ENDPOINT.format(tenant=tenant)
+    url = OAUTH2_ENDPOINT.format(tenant=tenant)
 
     hint = RESOURCE_CLIENT_HINTS.get(resource.rstrip("/"), FOCI_DEFAULT_CLIENT)
     fallbacks = [c for c in FOCI_CLIENT_IDS if c != hint]
@@ -193,7 +196,7 @@ def try_acquire_scope(
 
             token = token_from_jwt(
                 access_jwt,
-                token_type="access_token",
+                token_type=OAUTH_ACCESS,
                 resource=resource,
                 client_id=client_id,
             )
@@ -203,7 +206,7 @@ def try_acquire_scope(
             if "refresh_token" in data:
                 new_rt = token_from_jwt(
                     data["refresh_token"],
-                    token_type="refresh_token",
+                    token_type=OAUTH_REFRESH,
                     resource=resource,
                     client_id=client_id,
                 )

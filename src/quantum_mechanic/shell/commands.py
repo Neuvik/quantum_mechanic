@@ -19,6 +19,7 @@ import logging
 import os
 import queue
 from contextlib import nullcontext
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -126,7 +127,7 @@ class ShellState:
         parts = ["qm"]
 
         if self._transport is not None:
-            op   = getattr(self._transport, "operator", None)
+            op = getattr(self._transport, "operator", None)
             host = getattr(self._transport, "host", None)
             if op and host:
                 parts.append(f"[remote:{op}@{host}]")
@@ -227,7 +228,9 @@ def cmd_workspace(state: ShellState, args: list[str]) -> None:
 def cmd_import(state: ShellState, args: list[str]) -> None:
     """Import credentials: import <provider> [options]."""
     if state.transport is None:
-        console.print("  [red]✗[/red] No active workspace/connection. Run 'workspace create <name>' first.")
+        console.print(
+            "  [red]✗[/red] No active workspace/connection. Run 'workspace create <name>' first."
+        )
         return
 
     # Subcommand validation — print suggestion if unknown
@@ -244,15 +247,21 @@ def cmd_import(state: ShellState, args: list[str]) -> None:
         console.print(
             "    import azure --client-id <id> --client-secret <secret> --tenant-id <tid>"
         )
-        console.print(
-            "    import azure --access-token <jwt> [--expires-on <unix-epoch>]"
-        )
+        console.print("    import azure --access-token <jwt> [--expires-on <unix-epoch>]")
         console.print("    import gcp --default")
         console.print("    import gcp --key-file /path/to/sa.json")
         console.print("    import oci --default")
         console.print("    import oci --profile <profile_name>")
-        console.print("    import oci --user <id> --tenancy <id> --fingerprint <hash> --key-file <path> --region <reg>")
+        console.print(
+            "    import oci --user <id> --tenancy <id> --fingerprint <hash> --key-file <path> --region <reg>"
+        )
         console.print("    import entra browserdump /path/to/dump.json")
+        console.print(
+            "    import entra browser_cdp [--browser edge|chrome] [--launch]   (phase 1: launch)"
+        )
+        console.print(
+            "    import entra browser_cdp --attach [--port <n>]                (phase 2: import)"
+        )
         console.print("    import entra roadtools /path/to/.roadtools_auth")
         console.print("    import entra access_token <jwt> [--tenant <tid>]")
         console.print("    import entra refresh_token <token> --tenant <tid> --client <id>")
@@ -275,7 +284,9 @@ def cmd_import(state: ShellState, args: list[str]) -> None:
     elif provider == "entra":
         import_entra(state, args[1:])
     else:
-        console.print(f"  [red]✗[/red] Unsupported provider: {provider}. Use: aws, azure, gcp, oci, entra")
+        console.print(
+            f"  [red]✗[/red] Unsupported provider: {provider}. Use: aws, azure, gcp, oci, entra"
+        )
 
 
 def _validate_and_import(
@@ -370,6 +381,7 @@ def _check_subcommand(command_name: str, args: list[str]) -> str | None:
         return None
 
     import difflib
+
     matches = difflib.get_close_matches(first, known, n=2, cutoff=0.4)
     suggestion = matches[0] if matches else known[0]
     available = ", ".join(known)
@@ -452,10 +464,7 @@ def _import_azure(state: ShellState, opts: dict[str, str]) -> None:
             return
 
         principal = (
-            claims.get("appid")
-            or claims.get("upn")
-            or claims.get("oid")
-            or "azure-access-token"
+            claims.get("appid") or claims.get("upn") or claims.get("oid") or "azure-access-token"
         )
         secret: dict[str, Any] = {
             "method": "captured_token",
@@ -543,7 +552,7 @@ def _import_oci(state: ShellState, opts: dict[str, str]) -> None:
             "tenancy": opts["tenancy"],
             "fingerprint": opts["fingerprint"],
             "key_content": key_content,
-            "region": opts["region"]
+            "region": opts["region"],
         }
         friendly = f"OCI User:{opts['user'][:8]}..."
     else:
@@ -579,11 +588,13 @@ def _cmd_creds_detail(state: ShellState, cred_id: int) -> None:
 
     if provider == "entra" and ctype == "token_store":
         import json as _json
-        from quantum_mechanic.providers.entra.token_store import EntraTokenStore as _ETS
+
+        from quantum_mechanic.providers.entra.token_store import EntraTokenStore as _Ets
+
         try:
             raw = state.workspace.get_credential_secret(cred_id)
             data = _json.loads(raw) if raw else {}
-            store = _ETS.from_dict(data.get("token_store", data))
+            store = _Ets.from_dict(data.get("token_store", data))
             details = store.token_details()
         except Exception as e:
             console.print(f"  [red]✗[/red] Failed to load token store: {e}")
@@ -601,16 +612,16 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
         console.print("  [red]✗[/red] No active workspace.")
         return
 
-    # Subcommand validation — print suggestion if unknown
-    err = _check_subcommand("creds", args)
-    if err:
-        console.print(err)
-        return
-
     # `creds <id>` — bare int arg → detail view for one credential.
     if args and args[0].isdigit():
         cred_id = int(args[0])
         _cmd_creds_detail(state, cred_id)
+        return
+
+    # Subcommand validation — print suggestion if unknown
+    err = _check_subcommand("creds", args)
+    if err:
+        console.print(err)
         return
 
     # Handle subcommands
@@ -647,8 +658,10 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
     # Enrich Entra token_store entries with token summary and recovered identity.
     if state.workspace:
         import json as _json
+
+        from quantum_mechanic.providers.entra.token_store import EntraTokenStore as _Ets
         from quantum_mechanic.shell.commands_entra import _entra_friendly_name
-        from quantum_mechanic.providers.entra.token_store import EntraTokenStore as _ETS
+
         for cred in creds:
             if cred.get("provider") == "entra" and cred.get("credential_type") == "token_store":
                 try:
@@ -656,13 +669,14 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
                     if not raw:
                         continue
                     data = _json.loads(raw)
-                    store = _ETS.from_dict(data.get("token_store", data))
+                    store = _Ets.from_dict(data.get("token_store", data))
                     # Compact summary + soonest-expiring AT so the operator
                     # knows at a glance how much time is left on the active
                     # working token. Full breakdown via `creds <id>`.
                     summary = store.token_summary()
                     ats = [
-                        d for d in store.token_details()
+                        d
+                        for d in store.token_details()
                         if d.get("token_type") == "access_token"
                         and not d.get("is_expired")
                         and d.get("minutes_remaining") is not None
@@ -675,6 +689,7 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
                     # Recover identity from token claims if stored name is generic.
                     current_name = cred.get("friendly_name", "")
                     import re as _re
+
                     stale = (
                         not current_name
                         or current_name == "entra:common"
@@ -693,14 +708,44 @@ def cmd_creds(state: ShellState, args: list[str]) -> None:
                                 friendly_name=recovered,
                             )
                 except Exception:
-                    pass
+                    logger.debug("Failed to recover Entra credential friendly name for cred %s", cred.get("id"))
 
     formatters.format_credentials(creds)
+
+
+def _check_entra_recovery_needed(state: ShellState, cred_id: int) -> None:
+    """Warn if the Entra store's Graph AT is expired but a refresh token exists."""
+    if state.workspace is None:
+        return
+    try:
+        import json as _json
+
+        from quantum_mechanic.providers.entra.token_store import (
+            GRAPH,
+            OAUTH_ACCESS,
+            EntraTokenStore,
+        )
+
+        raw = state.workspace.get_credential_secret(cred_id)
+        if not raw:
+            return
+        data = _json.loads(raw)
+        store = EntraTokenStore.from_dict(data.get("token_store", data))
+        best = store.best_token(GRAPH)
+        has_live_at = best is not None and best.token_type == OAUTH_ACCESS
+        if not has_live_at and store.refresh_token() is not None:
+            console.print(
+                "  [yellow]⚠[/yellow]  Graph token expired. "
+                "Run [bold]acquire entra refresh[/bold] to restore."
+            )
+    except Exception:
+        logger.debug("Failed to check Entra recovery state for cred %s", cred_id)
 
 
 def _try_restore_arm_pivot(state: ShellState) -> None:
     """If the active Entra credential has ARM/FOCI capability, unlock Azure techniques."""
     import logging as _logging
+
     _log = _logging.getLogger("qm.shell")
 
     if state.workspace is None or state.active_credential_id is None:
@@ -711,7 +756,7 @@ def _try_restore_arm_pivot(state: ShellState) -> None:
     # resilient to import / ORM issues.
     try:
         import json as _json
-        from datetime import datetime as _dt, timezone as _tz
+        from datetime import datetime as _dt
 
         raw = state.workspace.get_credential_secret(state.active_credential_id)
         if not raw:
@@ -730,8 +775,8 @@ def _try_restore_arm_pivot(state: ShellState) -> None:
                 if exp_str:
                     exp_dt = _dt.fromisoformat(exp_str)
                     if exp_dt.tzinfo is None:
-                        exp_dt = exp_dt.replace(tzinfo=_tz.utc)
-                    if _dt.now(_tz.utc) >= exp_dt:
+                        exp_dt = exp_dt.replace(tzinfo=UTC)
+                    if _dt.now(UTC) >= exp_dt:
                         continue  # expired, skip
                 state._extra_providers = ["azure"]
                 console.print("  [dim]↳ ARM token found — Azure techniques unlocked.[/dim]")
@@ -792,16 +837,15 @@ def cmd_use(state: ShellState, args: list[str]) -> None:
     state.active_credential_id = cred_id
     state._extra_providers = []
 
-    provider = cred.get('provider', 'unknown')
+    provider = cred.get("provider", "unknown")
     identity = cred.get("friendly_name") or cred.get("credential_type", "unknown")
     # Use friendly_name directly — it already encodes the provider context.
     state.active_credential_label = identity
 
-    console.print(
-        f"  [green]✓[/green] Active: {provider.upper()} {identity} (#{cred_id})"
-    )
+    console.print(f"  [green]✓[/green] Active: {provider.upper()} {identity} (#{cred_id})")
 
     if provider == "entra":
+        _check_entra_recovery_needed(state, cred_id)
         _try_restore_arm_pivot(state)
 
 
@@ -817,7 +861,7 @@ _LOOT_PICKERS: dict[tuple[str, str], dict] = {
     },
     ("lateral_movement/vm_ssh_push", "target"): {
         "loot_technique": "discovery/enum_compute",
-        "value_col": "instance_id",   # GCP uses VM name; OCI requires manual OCID
+        "value_col": "instance_id",  # GCP uses VM name; OCI requires manual OCID
         "display_cols": ["instance_id", "state", "os_type", "private_ip", "public_ip", "region"],
         "state_col": "state",
     },
@@ -854,7 +898,11 @@ def _file_pick(directory: str, extension: str, label: str) -> str | None:
     tbl.add_column("Entries", style="dim")
     for i, f in enumerate(files, 1):
         try:
-            count = sum(1 for line in f.read_text().splitlines() if line.strip() and not line.startswith("#"))
+            count = sum(
+                1
+                for line in f.read_text().splitlines()
+                if line.strip() and not line.startswith("#")
+            )
         except Exception:
             count = 0
         tbl.add_row(str(i), f.stem, f"{count} names")
@@ -891,7 +939,7 @@ _STATE_COLORS = {
 
 
 def _loot_pick(
-    state: "ShellState",
+    state: ShellState,
     loot_technique: str,
     value_col: str,
     display_cols: list[str],
@@ -910,7 +958,9 @@ def _loot_pick(
     ws_db = Path(state.workspace.db_path)
     csv_path = ws_db.parent / ws_db.stem / "loot" / loot_technique / "loot.csv"
     if not csv_path.exists():
-        console.print(f"  [dim]No loot for {loot_technique} — run it first to populate targets.[/dim]")
+        console.print(
+            f"  [dim]No loot for {loot_technique} — run it first to populate targets.[/dim]"
+        )
         return None
 
     try:
@@ -968,7 +1018,9 @@ def _loot_pick(
             if state_col:
                 pwr = selected.get(state_col, "").lower()
                 if pwr and pwr not in ("running", "started", "unknown", "n/a", ""):
-                    console.print(f"  [yellow]⚠ VM state is '{pwr}' — command will likely fail.[/yellow]")
+                    console.print(
+                        f"  [yellow]⚠ VM state is '{pwr}' — command will likely fail.[/yellow]"
+                    )
             return selected.get(value_col)
     except ValueError:
         pass
@@ -988,7 +1040,7 @@ def _prompt_param(name: str, example: str | None = None) -> str | None:
         return None
 
 
-def _maybe_offer_scope_retry(state: "ShellState", result, technique_id: str, params: dict):
+def _maybe_offer_scope_retry(state: ShellState, result, technique_id: str, params: dict):
     """If `result` is a scope-denied Entra technique with a FOCI RT available,
     prompt the operator to attempt FOCI scope expansion and re-run once.
 
@@ -1020,7 +1072,12 @@ def _maybe_offer_scope_retry(state: "ShellState", result, technique_id: str, par
     try:
         from quantum_mechanic.providers.entra.scope_exchange import try_acquire_scope
         from quantum_mechanic.providers.entra.token_store import EntraTokenStore
-        raw = state.workspace.get_credential_secret(state.active_credential_id) if state.workspace else None
+
+        raw = (
+            state.workspace.get_credential_secret(state.active_credential_id)
+            if state.workspace
+            else None
+        )
         if not raw:
             return None
         data = json.loads(raw)
@@ -1033,6 +1090,7 @@ def _maybe_offer_scope_retry(state: "ShellState", result, technique_id: str, par
     # Prompt the operator. Rich's Confirm.ask blocks on stdin — safe now that
     # the Live spinner is torn down.
     from rich.prompt import Confirm
+
     try:
         answered_yes = Confirm.ask(
             f"  [yellow]?[/yellow] Try FOCI scope expansion for "
@@ -1094,13 +1152,13 @@ def _maybe_offer_scope_retry(state: "ShellState", result, technique_id: str, par
 
 
 def cmd_run(state: ShellState, args: list[str]) -> None:
-    """Run a technique: run <technique_id> [--param key=value ...]"""
+    """Run a technique: run <technique_id> [--safe] [--param key=value ...]."""
     if state.transport is None:
         console.print("  [red]✗[/red] No active workspace.")
         return
 
     if not args:
-        console.print("  Usage: run <technique_id> [--param key=value]", style="yellow")
+        console.print("  Usage: run <technique_id> [--safe] [--param key=value]", style="yellow")
         return
 
     technique_id = args[0]
@@ -1116,18 +1174,27 @@ def cmd_run(state: ShellState, args: list[str]) -> None:
     # OPSEC-sensitive engagements can disable the semi-automatic FOCI
     # scope expansion by passing --no-auto-scope.
     auto_scope = True
+    safe_mode = False
     i = 1
     while i < len(args):
         arg = args[i]
-        if arg == "--param" and i + 1 < len(args):
+        if arg == "--param":
+            if i + 1 >= len(args) or "=" not in args[i + 1]:
+                console.print("  [yellow]--param requires key=value[/yellow] — see `help run`")
+                return
             kv = args[i + 1]
-            if "=" in kv:
-                k, v = kv.split("=", 1)
-                params[k.strip()] = v.strip()
+            k, v = kv.split("=", 1)
+            params[k.strip()] = v.strip()
             i += 2
-        elif arg == "--note" and i + 1 < len(args):
+        elif arg == "--note":
+            if i + 1 >= len(args):
+                console.print("  [yellow]--note requires a value[/yellow] — see `help run`")
+                return
             note = args[i + 1]
             i += 2
+        elif arg == "--safe":
+            safe_mode = True
+            i += 1
         elif arg == "--no-auto-scope":
             auto_scope = False
             i += 1
@@ -1135,58 +1202,64 @@ def cmd_run(state: ShellState, args: list[str]) -> None:
             k, v = arg.split("=", 1)
             params[k.strip()] = v.strip()
             i += 1
+        elif arg.startswith("--"):
+            console.print(f"  [yellow]Unknown flag: {arg}[/yellow] — see `help run`")
+            return
         else:
-            i += 1
+            console.print(f"  [yellow]Unexpected argument: {arg}[/yellow] — see `help run`")
+            return
 
     if note:
         params["_run_note"] = note
 
-    # ── Parameter hint / interactive picker for missing required params ─────
-    if state.loader:
-        registered = state.loader.get(technique_id)
-        if registered and registered.metadata.parameters:
-            missing = [
-                p for p in registered.metadata.parameters
-                if p.required and p.name not in params
-            ]
-            for p in list(missing):
-                picker_cfg = _LOOT_PICKERS.get((technique_id, p.name))
-                file_cfg = _FILE_PICKERS.get((technique_id, p.name))
-                if picker_cfg:
-                    value = _loot_pick(
-                        state,
-                        picker_cfg["loot_technique"],
-                        picker_cfg["value_col"],
-                        picker_cfg["display_cols"],
-                        picker_cfg.get("state_col"),
-                    )
-                    if value:
-                        params[p.name] = value
-                        missing.remove(p)
-                elif file_cfg:
-                    value = _file_pick(
-                        file_cfg["directory"],
-                        file_cfg["extension"],
-                        file_cfg["label"],
-                    )
-                    if value:
-                        params[p.name] = value
-                        missing.remove(p)
-                else:
-                    # Plain inline prompt for other missing params
-                    value = _prompt_param(p.name, p.example)
-                    if value:
-                        params[p.name] = value
-                        missing.remove(p)
+    # ── Validate check-only availability before the technique can run ───────
+    registered = state.loader.get(technique_id) if state.loader else None
+    if safe_mode and (registered is None or not registered.metadata.safe_mode_available):
+        console.print(
+            f"  [yellow]{technique_id} does not support --safe[/yellow] "
+            "— run it without the flag or choose a technique that advertises check-only mode."
+        )
+        return
 
-            if missing:
-                names = ", ".join(f"[bold yellow]{p.name}[/bold yellow]" for p in missing)
-                console.print(f"  [yellow]⚠[/yellow]  Required parameter(s) not provided: {names}")
-                parts = " ".join(
-                    f"{p.name}={p.example or '<value>'}" for p in missing
+    # ── Parameter hint / interactive picker for missing required params ─────
+    if registered and registered.metadata.parameters:
+        missing = [p for p in registered.metadata.parameters if p.required and p.name not in params]
+        for p in list(missing):
+            picker_cfg = _LOOT_PICKERS.get((technique_id, p.name))
+            file_cfg = _FILE_PICKERS.get((technique_id, p.name))
+            if picker_cfg:
+                value = _loot_pick(
+                    state,
+                    picker_cfg["loot_technique"],
+                    picker_cfg["value_col"],
+                    picker_cfg["display_cols"],
+                    picker_cfg.get("state_col"),
                 )
-                console.print(f"  [dim]Usage: run {technique_id} {parts}[/dim]")
-                return
+                if value:
+                    params[p.name] = value
+                    missing.remove(p)
+            elif file_cfg:
+                value = _file_pick(
+                    file_cfg["directory"],
+                    file_cfg["extension"],
+                    file_cfg["label"],
+                )
+                if value:
+                    params[p.name] = value
+                    missing.remove(p)
+            else:
+                # Plain inline prompt for other missing params
+                value = _prompt_param(p.name, p.example)
+                if value:
+                    params[p.name] = value
+                    missing.remove(p)
+
+        if missing:
+            names = ", ".join(f"[bold yellow]{p.name}[/bold yellow]" for p in missing)
+            console.print(f"  [yellow]⚠[/yellow]  Required parameter(s) not provided: {names}")
+            parts = " ".join(f"{p.name}={p.example or '<value>'}" for p in missing)
+            console.print(f"  [dim]Usage: run {technique_id} {parts}[/dim]")
+            return
 
     # ── Auto-pivot entra → azure when technique requires it ─────────────────
     # If the active credential is entra and the technique supports azure (but
@@ -1194,12 +1267,18 @@ def cmd_run(state: ShellState, args: list[str]) -> None:
     # doesn't need to manually `acquire entra arm` on every session start.
     if state.loader and state.active_credential_id is not None:
         _active_creds = state.transport.list_credentials() if state.transport else []
-        _cred_info = next((c for c in _active_creds if c.get("id") == state.active_credential_id), None)
+        _cred_info = next(
+            (c for c in _active_creds if c.get("id") == state.active_credential_id), None
+        )
         if _cred_info and _cred_info.get("provider") == "entra":
             _registered = state.loader.get(technique_id)
             if _registered:
                 _allowed = set(_registered.metadata.providers)
-                if "azure" in _allowed and "entra" not in _allowed and "azure" not in state._extra_providers:
+                if (
+                    "azure" in _allowed
+                    and "entra" not in _allowed
+                    and "azure" not in state._extra_providers
+                ):
                     _try_restore_arm_pivot(state)
 
     # ── Run with a live spinner so operators see elapsed time tick ──────────
@@ -1223,6 +1302,7 @@ def cmd_run(state: ShellState, args: list[str]) -> None:
         try:
             _result[0] = state.transport.run_technique(
                 technique_id,
+                safe_mode=safe_mode,
                 params=params if params else None,
                 credential_id=state.active_credential_id,
                 on_event=lambda e: event_queue.put(e),
@@ -1243,16 +1323,23 @@ def cmd_run(state: ShellState, args: list[str]) -> None:
                     # We print to the live console so it doesn't break the spinner
                     if event.event_type == TelemetryType.LOG:
                         color = "white"
-                        if event.level == TelemetryLevel.SUCCESS: color = "green"
-                        elif event.level == TelemetryLevel.WARNING: color = "yellow"
-                        elif event.level == TelemetryLevel.ERROR: color = "red"
+                        if event.level == TelemetryLevel.SUCCESS:
+                            color = "green"
+                        elif event.level == TelemetryLevel.WARNING:
+                            color = "yellow"
+                        elif event.level == TelemetryLevel.ERROR:
+                            color = "red"
 
                         prefix = "    "
                         live.console.print(f"{prefix}[{color}]{event.message}[/{color}]")
                     elif event.event_type == TelemetryType.DISCOVERY:
-                        live.console.print(f"    [bold green]✓[/bold green] Discovered: [dim]{event.message}[/dim]")
+                        live.console.print(
+                            f"    [bold green]✓[/bold green] Discovered: [dim]{event.message}[/dim]"
+                        )
                     elif event.event_type == TelemetryType.FINDING:
-                        live.console.print(f"    [bold red]![/bold red] Finding: [bold]{event.message}[/bold]")
+                        live.console.print(
+                            f"    [bold red]![/bold red] Finding: [bold]{event.message}[/bold]"
+                        )
                 except queue.Empty:
                     break
 
@@ -1276,14 +1363,11 @@ def cmd_run(state: ShellState, args: list[str]) -> None:
     # inside the runner's worker thread) so the Live spinner is fully torn
     # down before we block on operator input.
     if auto_scope:
-        retried = _maybe_offer_scope_retry(
-            state, _result[0], technique_id, params
-        )
+        retried = _maybe_offer_scope_retry(state, _result[0], technique_id, params)
         if retried is not None:
             _result[0] = retried
 
     formatters.format_technique_result(_result[0])
-
 
 
 def cmd_techniques(state: ShellState, args: list[str]) -> None:
@@ -1365,19 +1449,19 @@ def cmd_techniques(state: ShellState, args: list[str]) -> None:
     filtered = [m for m in all_techniques if keep(m)]
 
     from quantum_mechanic.core.loader import RegisteredTechnique
+
     wrapped = [
-        RegisteredTechnique(metadata=m, function=lambda _: None, module_path="")
-        for m in filtered
+        RegisteredTechnique(metadata=m, function=lambda _: None, module_path="") for m in filtered
     ]
     formatters.format_techniques_list(wrapped)
 
 
 def cmd_loot(state: ShellState, args: list[str]) -> None:
     """Display saved loot from previous technique runs: loot [technique_id]"""
-    import csv
     from pathlib import Path
-    from rich.table import Table
+
     from rich import box
+    from rich.table import Table
 
     if state.workspace is None:
         console.print("  [red]✗[/red] No active workspace.")
@@ -1397,12 +1481,14 @@ def cmd_loot(state: ShellState, args: list[str]) -> None:
         if not loot_dir.exists():
             console.print(f"  [red]✗[/red] No loot for '{target_id}'.")
             return
-        
+
         if target_id == "discovery/entra_enum_conditional_access_policies":
             _interactive_ca_policies_viewer(loot_dir, state.workspace)
             return
 
-        pager_ctx = console.pager(styles=True) if os.environ.get("TERM") != "dumb" else nullcontext()
+        pager_ctx = (
+            console.pager(styles=True) if os.environ.get("TERM") != "dumb" else nullcontext()
+        )
         with pager_ctx:
             _render_loot_dir(loot_dir, target_id)
         return
@@ -1423,9 +1509,10 @@ def cmd_loot(state: ShellState, args: list[str]) -> None:
         tech_id = str(rel)
         try:
             with csv_path.open(newline="", encoding="utf-8") as fh:
-                row_count = sum(1 for _ in fh) - 1 # skip header
+                row_count = sum(1 for _ in fh) - 1  # skip header
             mtime = Path(csv_path).stat().st_mtime
             from datetime import datetime
+
             dt = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
             summary.add_row(tech_id, str(max(0, row_count)), dt)
         except Exception:
@@ -1440,12 +1527,15 @@ def _render_loot_dir(loot_dir, tech_id: str) -> None:
     import csv
     import importlib
     from pathlib import Path
-    from rich.table import Table
+
     from rich import box
+    from rich.table import Table
 
     csv_path = Path(loot_dir) / "loot.csv"
     if not csv_path.exists():
-        console.print(f"  [yellow]⚠[/yellow] Loot directory exists but 'loot.csv' is missing for {tech_id}")
+        console.print(
+            f"  [yellow]⚠[/yellow] Loot directory exists but 'loot.csv' is missing for {tech_id}"
+        )
         return
 
     try:
@@ -1468,7 +1558,7 @@ def _render_loot_dir(loot_dir, tech_id: str) -> None:
                 if key not in fieldnames:
                     fieldnames.append(key)
     except Exception:
-        pass
+        logger.debug("Failed to parse loot CSV fieldnames")
 
     if fieldnames:
         key_col = fieldnames[0]
@@ -1497,11 +1587,15 @@ def _interactive_ca_policies_viewer(loot_dir, workspace: Workspace | Path | None
     """Render an interactive menu to inspect Conditional Access policies from loot."""
     import csv
     from pathlib import Path
-    from rich.table import Table
-    from rich.panel import Panel
-    from rich.console import Group
+
     from rich import box
-    from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import load_loot_mappings
+    from rich.console import Group
+    from rich.panel import Panel
+    from rich.table import Table
+
+    from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import (
+        load_loot_mappings,
+    )
 
     csv_path = Path(loot_dir) / "loot.csv"
     if not csv_path.exists():
@@ -1522,38 +1616,46 @@ def _interactive_ca_policies_viewer(loot_dir, workspace: Workspace | Path | None
     # Load mapping for on-the-fly GUID resolution
     mapping = load_loot_mappings(workspace) if workspace else {}
 
-    console.print(f"  [bold cyan]discovery/entra_enum_conditional_access_policies[/bold cyan] [dim]({len(rows)} policies)[/dim]\n")
-    
+    console.print(
+        f"  [bold cyan]discovery/entra_enum_conditional_access_policies[/bold cyan] [dim]({len(rows)} policies)[/dim]\n"
+    )
+
     def render_summary_table():
         summary = Table(box=box.ROUNDED, border_style="dim")
         summary.add_column("#", style="bold cyan", width=4)
         summary.add_column("Policy Name", style="bold white")
         summary.add_column("State", style="bold")
         summary.add_column("Access Controls", style="yellow")
-        
+
         for i, row in enumerate(rows, 1):
             state = row.get("state", "unknown")
-            state_style = "green" if state == "enabled" else ("yellow" if "report" in state.lower() else "dim")
+            state_style = (
+                "green"
+                if state == "enabled"
+                else ("yellow" if "report" in state.lower() else "dim")
+            )
             summary.add_row(
                 str(i),
                 row.get("display_name", "—"),
                 f"[{state_style}]{state}[/{state_style}]",
-                row.get("grant_controls", "—")
+                row.get("grant_controls", "—"),
             )
         console.print(summary)
 
     render_summary_table()
-    
+
     while True:
         try:
-            choice = input("\n  Select a policy number to view detailed rules & bypass guidance (or type 'list' to show table, press Enter to exit) > ").strip()
+            choice = input(
+                "\n  Select a policy number to view detailed rules & bypass guidance (or type 'list' to show table, press Enter to exit) > "
+            ).strip()
         except (EOFError, KeyboardInterrupt):
             console.print()
             break
-            
+
         if not choice:
             break
-            
+
         if choice.lower() in ["list", "l", "table", "show", "help", "?", "h"]:
             render_summary_table()
             continue
@@ -1562,7 +1664,7 @@ def _interactive_ca_policies_viewer(loot_dir, workspace: Workspace | Path | None
             idx = int(choice) - 1
             if 0 <= idx < len(rows):
                 p = rows[idx]
-                
+
                 # Helper to clean and resolve GUIDs in a value
                 def clean_val(val_str):
                     if not val_str or val_str == "None":
@@ -1597,7 +1699,7 @@ def _interactive_ca_policies_viewer(loot_dir, workspace: Workspace | Path | None
                     incls.append(f"[bold]Locations:[/bold] {inc_locations}")
                 if client_apps_str != "None" and client_apps_str != "All":
                     incls.append(f"[bold]Client Apps:[/bold] {client_apps_str}")
-                
+
                 excls = []
                 exc_users = clean_val(p.get("excluded_users"))
                 exc_groups = clean_val(p.get("excluded_groups"))
@@ -1618,49 +1720,100 @@ def _interactive_ca_policies_viewer(loot_dir, workspace: Workspace | Path | None
                     excls.append(f"[bold]Platforms:[/bold] {exc_platforms}")
                 if exc_locations != "None":
                     excls.append(f"[bold]Locations:[/bold] {exc_locations}")
-                
+
                 # Analyze policy for bypass opportunities
                 bypass_tips = []
                 state_val = p.get("state", "")
                 controls = p.get("grant_controls", "")
-                
-                if state_val == "disabled":
-                    bypass_tips.append(f"[bold yellow]• Policy is disabled.[/bold yellow] The configured controls ({controls}) are not active.")
-                elif "report" in state_val.lower():
-                    bypass_tips.append(f"[bold yellow]• Policy is in Report-Only mode.[/bold yellow] Its controls ({controls}) are not enforced.")
-                
-                # Specific exclusions (resolving names at display time)
-                for u in [x.strip() for x in p.get("excluded_users", "").split(",") if x.strip() and x.strip() != "None"]:
-                    u_res = mapping.get(u.lower(), mapping.get(u, u))
-                    bypass_tips.append(f"[bold red]• Excluded User:[/bold red] User '{u_res}' is excluded. Authenticating as this user bypasses controls ({controls}).")
-                for g in [x.strip() for x in p.get("excluded_groups", "").split(",") if x.strip() and x.strip() != "None"]:
-                    g_res = mapping.get(g.lower(), mapping.get(g, g))
-                    bypass_tips.append(f"[bold red]• Excluded Group:[/bold red] Group '{g_res}' is excluded. Members bypass controls ({controls}). Target group members or add compromised users to this group.")
-                for r in [x.strip() for x in p.get("excluded_roles", "").split(",") if x.strip() and x.strip() != "None"]:
-                    r_res = mapping.get(r.lower(), mapping.get(r, r))
-                    bypass_tips.append(f"[bold red]• Excluded Role:[/bold red] Role '{r_res}' is excluded. Principals with this role bypass controls ({controls}).")
-                for a in [x.strip() for x in p.get("excluded_apps", "").split(",") if x.strip() and x.strip() != "None"]:
-                    a_res = mapping.get(a.lower(), mapping.get(a, a))
-                    bypass_tips.append(f"[bold red]• Excluded App:[/bold red] App '{a_res}' is excluded. Access via this app bypasses controls ({controls}).")
-                for pl in [x.strip() for x in p.get("exclude_platforms", "").split(",") if x.strip() and x.strip() != "None"]:
-                    pl_res = mapping.get(pl.lower(), mapping.get(pl, pl))
-                    bypass_tips.append(f"[bold red]• Excluded Platform:[/bold red] Platform '{pl_res}' is excluded. Spoofing User-Agent to this platform bypasses controls ({controls}).")
-                for loc in [x.strip() for x in p.get("excluded_locations", "").split(",") if x.strip() and x.strip() != "None"]:
-                    loc_res = mapping.get(loc.lower(), mapping.get(loc, loc))
-                    bypass_tips.append(f"[bold red]• Excluded Location:[/bold red] Location '{loc_res}' is excluded. Access from this network bypasses controls ({controls}).")
 
-                client_apps = [x.strip().lower() for x in p.get("client_app_types", "").split(",") if x.strip()]
+                if state_val == "disabled":
+                    bypass_tips.append(
+                        f"[bold yellow]• Policy is disabled.[/bold yellow] The configured controls ({controls}) are not active."
+                    )
+                elif "report" in state_val.lower():
+                    bypass_tips.append(
+                        f"[bold yellow]• Policy is in Report-Only mode.[/bold yellow] Its controls ({controls}) are not enforced."
+                    )
+
+                # Specific exclusions (resolving names at display time)
+                for u in [
+                    x.strip()
+                    for x in p.get("excluded_users", "").split(",")
+                    if x.strip() and x.strip() != "None"
+                ]:
+                    u_res = mapping.get(u.lower(), mapping.get(u, u))
+                    bypass_tips.append(
+                        f"[bold red]• Excluded User:[/bold red] User '{u_res}' is excluded. Authenticating as this user bypasses controls ({controls})."
+                    )
+                for g in [
+                    x.strip()
+                    for x in p.get("excluded_groups", "").split(",")
+                    if x.strip() and x.strip() != "None"
+                ]:
+                    g_res = mapping.get(g.lower(), mapping.get(g, g))
+                    bypass_tips.append(
+                        f"[bold red]• Excluded Group:[/bold red] Group '{g_res}' is excluded. Members bypass controls ({controls}). Target group members or add compromised users to this group."
+                    )
+                for r in [
+                    x.strip()
+                    for x in p.get("excluded_roles", "").split(",")
+                    if x.strip() and x.strip() != "None"
+                ]:
+                    r_res = mapping.get(r.lower(), mapping.get(r, r))
+                    bypass_tips.append(
+                        f"[bold red]• Excluded Role:[/bold red] Role '{r_res}' is excluded. Principals with this role bypass controls ({controls})."
+                    )
+                for a in [
+                    x.strip()
+                    for x in p.get("excluded_apps", "").split(",")
+                    if x.strip() and x.strip() != "None"
+                ]:
+                    a_res = mapping.get(a.lower(), mapping.get(a, a))
+                    bypass_tips.append(
+                        f"[bold red]• Excluded App:[/bold red] App '{a_res}' is excluded. Access via this app bypasses controls ({controls})."
+                    )
+                for pl in [
+                    x.strip()
+                    for x in p.get("exclude_platforms", "").split(",")
+                    if x.strip() and x.strip() != "None"
+                ]:
+                    pl_res = mapping.get(pl.lower(), mapping.get(pl, pl))
+                    bypass_tips.append(
+                        f"[bold red]• Excluded Platform:[/bold red] Platform '{pl_res}' is excluded. Spoofing User-Agent to this platform bypasses controls ({controls})."
+                    )
+                for loc in [
+                    x.strip()
+                    for x in p.get("excluded_locations", "").split(",")
+                    if x.strip() and x.strip() != "None"
+                ]:
+                    loc_res = mapping.get(loc.lower(), mapping.get(loc, loc))
+                    bypass_tips.append(
+                        f"[bold red]• Excluded Location:[/bold red] Location '{loc_res}' is excluded. Access from this network bypasses controls ({controls})."
+                    )
+
+                client_apps = [
+                    x.strip().lower() for x in p.get("client_app_types", "").split(",") if x.strip()
+                ]
                 if "exchangeactivesync" in client_apps or "other" in client_apps:
                     legacy = [c for c in client_apps if c in ["exchangeactivesync", "other"]]
-                    bypass_tips.append(f"[bold yellow]• Legacy Auth Allowed:[/bold yellow] Legacy client type ({', '.join(legacy)}) allowed. Bypasses modern MFA.")
-                
+                    bypass_tips.append(
+                        f"[bold yellow]• Legacy Auth Allowed:[/bold yellow] Legacy client type ({', '.join(legacy)}) allowed. Bypasses modern MFA."
+                    )
+
                 guidance_tips = list(bypass_tips)
-                from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import explain_controls
+                from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import (
+                    explain_controls,
+                )
+
                 for exp in explain_controls(controls):
                     guidance_tips.append(f"[bold cyan]• Control Explanation:[/bold cyan] {exp}")
-                
-                guidance_str = "\n".join(guidance_tips) if guidance_tips else "No direct exclusion bypasses identified."
-                
+
+                guidance_str = (
+                    "\n".join(guidance_tips)
+                    if guidance_tips
+                    else "No direct exclusion bypasses identified."
+                )
+
                 detail_group = Group(
                     f"[bold white]State:[/bold white] {p.get('state', 'unknown')}",
                     f"[bold white]Access Controls:[/bold white] {controls}",
@@ -1672,15 +1825,17 @@ def _interactive_ca_policies_viewer(loot_dir, workspace: Workspace | Path | None
                     *([f"  {line}" for line in excls] if excls else ["  None"]),
                     "",
                     "[bold yellow]Bypass & Penetration Testing Guidance:[/bold yellow]",
-                    guidance_str
+                    guidance_str,
                 )
-                
-                console.print(Panel(
-                    detail_group,
-                    title=f"[bold white]Policy: {p.get('display_name', '—')}[/bold white]",
-                    border_style="cyan",
-                    box=box.DOUBLE
-                ))
+
+                console.print(
+                    Panel(
+                        detail_group,
+                        title=f"[bold white]Policy: {p.get('display_name', '—')}[/bold white]",
+                        border_style="cyan",
+                        box=box.DOUBLE,
+                    )
+                )
             else:
                 console.print(f"  [red]✗[/red] Invalid policy number (must be 1-{len(rows)}).")
         except ValueError:
@@ -1692,9 +1847,10 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
     import csv
     import json
     from pathlib import Path
-    from rich.table import Table
-    from rich.panel import Panel
+
     from rich import box
+    from rich.panel import Panel
+    from rich.table import Table
 
     if state.workspace is None:
         console.print("  [red]✗[/red] No active workspace.")
@@ -1711,7 +1867,7 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
             if ev.get("technique_id") == "discovery/entra_enum_conditional_access_policies":
                 ca_evidence = ev
                 break
-        
+
         if ca_evidence and ca_evidence.get("output_json"):
             payload = json.loads(ca_evidence["output_json"])
             policies = payload.get("policies", [])
@@ -1721,9 +1877,15 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
     # 2. Fall back to loot.csv if DB evidence was empty/unavailable
     if not policies:
         ws_db = Path(state.workspace.db_path)
-        loot_dir = ws_db.parent / ws_db.stem / "loot" / "discovery" / "entra_enum_conditional_access_policies"
+        loot_dir = (
+            ws_db.parent
+            / ws_db.stem
+            / "loot"
+            / "discovery"
+            / "entra_enum_conditional_access_policies"
+        )
         csv_path = loot_dir / "loot.csv"
-        
+
         if csv_path.exists():
             try:
                 with csv_path.open(newline="", encoding="utf-8") as fh:
@@ -1734,11 +1896,16 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
 
     if not policies:
         console.print("  [red]✗[/red] No Conditional Access policy data found in database or loot.")
-        console.print("    Please run the discovery technique first: [cyan]run discovery/entra_enum_conditional_access_policies[/cyan]")
+        console.print(
+            "    Please run the discovery technique first: [cyan]run discovery/entra_enum_conditional_access_policies[/cyan]"
+        )
         return
 
     # Load mapping for on-the-fly GUID resolution
-    from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import load_loot_mappings
+    from quantum_mechanic.techniques.discovery.entra_enum_conditional_access_policies import (
+        load_loot_mappings,
+    )
+
     mapping = load_loot_mappings(state.workspace) if state.workspace else {}
 
     # Helper to coerce list or comma-separated string
@@ -1765,7 +1932,7 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
         controls = p.get("grant_controls") or p.get("grantControls") or "None"
         if isinstance(controls, list):
             controls = ", ".join(controls)
-        
+
         # Inactive policies
         if p_state == "disabled" or "report" in str(p_state).lower():
             disabled_policies.append((name, str(p_state), controls))
@@ -1798,19 +1965,31 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
             location_exclusions.setdefault(loc_res, []).append((name, controls))
 
         # Aggregation 5: Legacy Authentication Allowed
-        client_apps = [x.lower() for x in get_list(p.get("client_app_types") or p.get("clientAppTypes"))]
+        client_apps = [
+            x.lower() for x in get_list(p.get("client_app_types") or p.get("clientAppTypes"))
+        ]
         if "exchangeactivesync" in client_apps or "other" in client_apps:
             legacy = [c for c in client_apps if c in ["exchangeactivesync", "other"]]
             legacy_auth_policies.append((name, legacy, controls))
 
     # Display results!
-    console.print("\n[bold yellow]================================================================[/bold yellow]")
-    console.print("[bold yellow]       CONDITIONAL ACCESS AGGREGATED BYPASS OPPORTUNITIES       [/bold yellow]")
-    console.print("[bold yellow]================================================================[/bold yellow]")
+    console.print(
+        "\n[bold yellow]================================================================[/bold yellow]"
+    )
+    console.print(
+        "[bold yellow]       CONDITIONAL ACCESS AGGREGATED BYPASS OPPORTUNITIES       [/bold yellow]"
+    )
+    console.print(
+        "[bold yellow]================================================================[/bold yellow]"
+    )
 
     # 1. Identity Exclusions
     if excluded_identities:
-        tbl = Table(title="Exclusions by Identity (Users / Groups / Roles)", box=box.ROUNDED, border_style="red")
+        tbl = Table(
+            title="Exclusions by Identity (Users / Groups / Roles)",
+            box=box.ROUNDED,
+            border_style="red",
+        )
         tbl.add_column("Excluded Identity", style="bold white")
         tbl.add_column("Bypassed Policies & Controls", style="cyan")
         for ident, bypasses in sorted(excluded_identities.items()):
@@ -1822,7 +2001,9 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
 
     # 2. Location Exclusions
     if location_exclusions:
-        tbl = Table(title="Exclusions by Named Location / IP Range", box=box.ROUNDED, border_style="yellow")
+        tbl = Table(
+            title="Exclusions by Named Location / IP Range", box=box.ROUNDED, border_style="yellow"
+        )
         tbl.add_column("Excluded Location", style="bold white")
         tbl.add_column("Bypassed Policies & Controls", style="cyan")
         for loc, bypasses in sorted(location_exclusions.items()):
@@ -1852,7 +2033,9 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
 
     # 5. Legacy Auth Allowed
     if legacy_auth_policies:
-        tbl = Table(title="Legacy Authentication Protocol Gaps", box=box.ROUNDED, border_style="red")
+        tbl = Table(
+            title="Legacy Authentication Protocol Gaps", box=box.ROUNDED, border_style="red"
+        )
         tbl.add_column("Policy Name", style="bold white")
         tbl.add_column("Allowed Legacy Protocols", style="bold yellow")
         tbl.add_column("Grant Controls", style="cyan")
@@ -1862,24 +2045,38 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
 
     # 5.1 Rule-Based Bypass Detectors
     from quantum_mechanic.shell.ca_bypass_detectors import run_all_detectors
-    
+
     detector_findings = run_all_detectors(policies)
 
     if detector_findings:
-        tbl = Table(title="Known Bypass Pattern Detection", box=box.ROUNDED, border_style="magenta bold")
+        tbl = Table(
+            title="Known Bypass Pattern Detection", box=box.ROUNDED, border_style="magenta bold"
+        )
         tbl.add_column("Severity", style="bold white")
         tbl.add_column("Vulnerability Type", style="bold red")
         tbl.add_column("Affected Policies", style="cyan")
         tbl.add_column("Description", style="yellow")
 
         for f in detector_findings:
-            sev_color = "red" if f.severity in ("CRITICAL", "HIGH") else "yellow" if f.severity == "MEDIUM" else "dim"
-            tbl.add_row(f"[{sev_color}]{f.severity}[/{sev_color}]", f.title, ", ".join(f.affected_policies), f.description)
+            sev_color = (
+                "red"
+                if f.severity in ("CRITICAL", "HIGH")
+                else "yellow"
+                if f.severity == "MEDIUM"
+                else "dim"
+            )
+            tbl.add_row(
+                f"[{sev_color}]{f.severity}[/{sev_color}]",
+                f.title,
+                ", ".join(f.affected_policies),
+                f.description,
+            )
         console.print(tbl)
 
         # Attribution footer — credit the community researchers whose data
         # backs these detectors. Shown once per check-ca-bypasses run.
         from quantum_mechanic.providers.entra.refs import ATTRIBUTION_LINE, refs_status
+
         _status = refs_status()
         _foci_n = _status["graph_preconsent"]["foci_count"]
         _apps_n = _status["microsoft_apps"]["app_count"]
@@ -1896,8 +2093,16 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
     def build_domain(key_inc: str, key_exc: str, default_val: str) -> list[str]:
         items = set()
         for p_dict in policies:
-            raw_inc = p_dict.get(key_inc) or p_dict.get(key_inc.replace("included", "include")) or p_dict.get(key_inc.replace("_", ""))
-            raw_exc = p_dict.get(key_exc) or p_dict.get(key_exc.replace("excluded", "exclude")) or p_dict.get(key_exc.replace("_", ""))
+            raw_inc = (
+                p_dict.get(key_inc)
+                or p_dict.get(key_inc.replace("included", "include"))
+                or p_dict.get(key_inc.replace("_", ""))
+            )
+            raw_exc = (
+                p_dict.get(key_exc)
+                or p_dict.get(key_exc.replace("excluded", "exclude"))
+                or p_dict.get(key_exc.replace("_", ""))
+            )
             for x in get_list(raw_inc):
                 if x not in ["All", "None", "AllTrusted", "all"]:
                     items.add(x)
@@ -1912,14 +2117,14 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
     domain_users = build_domain("included_users", "excluded_users", "generic_user@tenant.com")
     if "guest_user" not in domain_users:
         domain_users.append("guest_user")
-        
+
     domain_groups = build_domain("included_groups", "excluded_groups", "None")
     domain_roles = build_domain("included_roles", "excluded_roles", "None")
     domain_apps = build_domain("included_apps", "excluded_apps", "generic_app")
     domain_platforms = ["windows", "macos", "ios", "android", "linux", "unknown"]
     domain_locations = build_domain("included_locations", "excluded_locations", "untrusted_ip")
     domain_clients = ["browser", "mobileAppsAndDesktopClients", "exchangeActiveSync", "other"]
-    
+
     # New domains
     domain_sign_in_risk = ["none", "low", "medium", "high"]
     domain_user_risk = ["none", "low", "medium", "high"]
@@ -1930,9 +2135,7 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
             return False
         if not includes or "None" in includes:
             return False
-        if "All" in includes or val in includes:
-            return True
-        return False
+        return bool("All" in includes or val in includes)
 
     def matches_loc(val: str, includes: list[str], excludes: list[str]) -> bool:
         if "All" in excludes or val in excludes:
@@ -1944,12 +2147,21 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
             return False
         if "All" in includes:
             return True
-        for incl in includes:
-            if incl.split(" (")[0] in val:
-                return True
-        return False
+        return any(incl.split(" (")[0] in val for incl in includes)
 
-    def matches_policy(p_dict: dict, u: str, g: str, r: str, app: str, platform: str, loc: str, client: str, sign_in_risk: str, user_risk: str, auth_flow: str) -> bool:
+    def matches_policy(
+        p_dict: dict,
+        u: str,
+        g: str,
+        r: str,
+        app: str,
+        platform: str,
+        loc: str,
+        client: str,
+        sign_in_risk: str,
+        user_risk: str,
+        auth_flow: str,
+    ) -> bool:
         # Resolve fields flexibly
         inc_u = get_list(p_dict.get("included_users") or p_dict.get("includeUsers"))
         exc_u = get_list(p_dict.get("excluded_users") or p_dict.get("excludeUsers"))
@@ -1965,7 +2177,7 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
         user_matched = False
         if "All" in inc_u or u in inc_u or g in inc_g or r in inc_r:
             user_matched = True
-            
+
         # Handle guest users
         if u == "guest_user":
             inc_guests = p_dict.get("include_guest_types", "")
@@ -1978,70 +2190,121 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
         if not user_matched:
             return False
 
-        inc_a = get_list(p_dict.get("included_apps") or p_dict.get("includeApplications") or p_dict.get("includedApplications"))
-        exc_a = get_list(p_dict.get("excluded_apps") or p_dict.get("excludeApplications") or p_dict.get("excludedApplications"))
-        
+        inc_a = get_list(
+            p_dict.get("included_apps")
+            or p_dict.get("includeApplications")
+            or p_dict.get("includedApplications")
+        )
+        exc_a = get_list(
+            p_dict.get("excluded_apps")
+            or p_dict.get("excludeApplications")
+            or p_dict.get("excludedApplications")
+        )
+
         # Expand Office365 to individual apps if targeted
         # Exchange Online, SharePoint Online, Teams, etc.
         o365_apps = ["00000002-0000-0ff1-ce00-000000000000", "00000003-0000-0ff1-ce00-000000000000"]
         if "Office365" in inc_a and app in o365_apps:
             inc_a.append(app)
-            
+
         if not matches_val(app, inc_a, exc_a):
             return False
 
-        inc_p = [x.lower() for x in get_list(p_dict.get("included_platforms") or p_dict.get("includePlatforms") or p_dict.get("includedPlatforms"))]
+        inc_p = [
+            x.lower()
+            for x in get_list(
+                p_dict.get("included_platforms")
+                or p_dict.get("includePlatforms")
+                or p_dict.get("includedPlatforms")
+            )
+        ]
         if not inc_p:
             inc_p = ["all"]
-        exc_p = [x.lower() for x in get_list(p_dict.get("exclude_platforms") or p_dict.get("excludePlatforms") or p_dict.get("excludedPlatforms"))]
+        exc_p = [
+            x.lower()
+            for x in get_list(
+                p_dict.get("exclude_platforms")
+                or p_dict.get("excludePlatforms")
+                or p_dict.get("excludedPlatforms")
+            )
+        ]
         if not matches_val(platform.lower(), inc_p, exc_p):
             return False
 
-        inc_l = get_list(p_dict.get("included_locations") or p_dict.get("includeLocations") or p_dict.get("includedLocations"))
+        inc_l = get_list(
+            p_dict.get("included_locations")
+            or p_dict.get("includeLocations")
+            or p_dict.get("includedLocations")
+        )
         if not inc_l:
             inc_l = ["All"]
-        exc_l = get_list(p_dict.get("excluded_locations") or p_dict.get("excludeLocations") or p_dict.get("excludedLocations"))
+        exc_l = get_list(
+            p_dict.get("excluded_locations")
+            or p_dict.get("excludeLocations")
+            or p_dict.get("excludedLocations")
+        )
         if not matches_loc(loc, inc_l, exc_l):
             return False
 
-        inc_c = [x.lower() for x in get_list(p_dict.get("client_app_types") or p_dict.get("clientAppTypes"))]
+        inc_c = [
+            x.lower()
+            for x in get_list(p_dict.get("client_app_types") or p_dict.get("clientAppTypes"))
+        ]
         if not inc_c:
             inc_c = ["all"]
         if "all" not in inc_c and client.lower() not in inc_c:
             return False
-            
+
         # Risk levels
         p_sign_in_risk = [x.lower() for x in get_list(p_dict.get("sign_in_risk_levels"))]
-        if p_sign_in_risk and p_sign_in_risk != ["none"]:
-            if sign_in_risk not in p_sign_in_risk:
-                return False
-                
+        if p_sign_in_risk and p_sign_in_risk != ["none"] and sign_in_risk not in p_sign_in_risk:
+            return False
+
         p_user_risk = [x.lower() for x in get_list(p_dict.get("user_risk_levels"))]
-        if p_user_risk and p_user_risk != ["none"]:
-            if user_risk not in p_user_risk:
-                return False
+        if p_user_risk and p_user_risk != ["none"] and user_risk not in p_user_risk:
+            return False
 
         # Auth flows
         p_auth_flow = p_dict.get("auth_flows", "").lower()
-        if p_auth_flow:
-            if auth_flow not in p_auth_flow:
-                return False
-
-        return True
+        return not (p_auth_flow and auth_flow not in p_auth_flow)
 
     sweep_gaps = []
-    MAX_SWEEP = 500_000
+    max_sweep = 500_000
     space_size = 1
-    for d in [domain_users, domain_groups, domain_roles, domain_apps, domain_platforms, domain_locations, domain_clients, domain_sign_in_risk, domain_user_risk, domain_auth_flow]:
+    for d in [
+        domain_users,
+        domain_groups,
+        domain_roles,
+        domain_apps,
+        domain_platforms,
+        domain_locations,
+        domain_clients,
+        domain_sign_in_risk,
+        domain_user_risk,
+        domain_auth_flow,
+    ]:
         space_size *= len(d)
 
-    capped = space_size > MAX_SWEEP
+    capped = space_size > max_sweep
     if capped:
-        console.print(f"  [yellow]⚠[/yellow] Cartesian space is {space_size:,} combinations — capping sweep at {MAX_SWEEP:,} for performance.")
+        console.print(
+            f"  [yellow]⚠[/yellow] Cartesian space is {space_size:,} combinations — capping sweep at {max_sweep:,} for performance."
+        )
 
     evaluated = 0
-    for combo in itertools.product(domain_users, domain_groups, domain_roles, domain_apps, domain_platforms, domain_locations, domain_clients, domain_sign_in_risk, domain_user_risk, domain_auth_flow):
-        if evaluated >= MAX_SWEEP:
+    for combo in itertools.product(
+        domain_users,
+        domain_groups,
+        domain_roles,
+        domain_apps,
+        domain_platforms,
+        domain_locations,
+        domain_clients,
+        domain_sign_in_risk,
+        domain_user_risk,
+        domain_auth_flow,
+    ):
+        if evaluated >= max_sweep:
             break
         evaluated += 1
         u, g, r, app, platform, loc, client, sign_in_risk, user_risk, auth_flow = combo
@@ -2054,7 +2317,9 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
             if p_state != "enabled":
                 continue
 
-            if matches_policy(p_dict, u, g, r, app, platform, loc, client, sign_in_risk, user_risk, auth_flow):
+            if matches_policy(
+                p_dict, u, g, r, app, platform, loc, client, sign_in_risk, user_risk, auth_flow
+            ):
                 p_name = p_dict.get("display_name") or p_dict.get("displayName") or "Untitled"
                 matching_policies.append(p_name)
                 controls = p_dict.get("grant_controls") or p_dict.get("grantControls") or "None"
@@ -2071,26 +2336,38 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
         if not is_blocked:
             mfa_enforced = False
             for grant_op, controls_list in active_grants:
-                mfa_in_policy = any("mfa" in c.lower() or "authstrength" in c.lower() for c in controls_list)
+                mfa_in_policy = any(
+                    "mfa" in c.lower() or "authstrength" in c.lower() for c in controls_list
+                )
                 if grant_op == "OR":
                     if mfa_in_policy and len(controls_list) == 1:
                         mfa_enforced = True
                         break
-                elif grant_op == "AND":
-                    if mfa_in_policy:
-                        mfa_enforced = True
-                        break
-            
+                elif grant_op == "AND" and mfa_in_policy:
+                    mfa_enforced = True
+                    break
+
             if not mfa_enforced:
-                sweep_gaps.append({
-                    "user": u, "group": g, "role": r,
-                    "app": app, "platform": platform, "location": loc, "client": client,
-                    "sign_in_risk": sign_in_risk, "user_risk": user_risk, "auth_flow": auth_flow,
-                    "matching_policies": matching_policies
-                })
+                sweep_gaps.append(
+                    {
+                        "user": u,
+                        "group": g,
+                        "role": r,
+                        "app": app,
+                        "platform": platform,
+                        "location": loc,
+                        "client": client,
+                        "sign_in_risk": sign_in_risk,
+                        "user_risk": user_risk,
+                        "auth_flow": auth_flow,
+                        "matching_policies": matching_policies,
+                    }
+                )
 
     if sweep_gaps:
-        tbl = Table(title="MFA-Bypass Attack Paths (Matrix Sweep)", box=box.ROUNDED, border_style="red bold")
+        tbl = Table(
+            title="MFA-Bypass Attack Paths (Matrix Sweep)", box=box.ROUNDED, border_style="red bold"
+        )
         tbl.add_column("Target Identity (User/Group/Role)", style="bold white")
         tbl.add_column("Access Context (App / OS / Loc / Client)", style="yellow")
         tbl.add_column("Matching Policies (No MFA Enforced)", style="cyan")
@@ -2120,9 +2397,13 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
                     break
 
         console.print(tbl)
-        console.print(f"  [red]⚠️[/red] Discovered [bold red]{len(sweep_gaps)}[/bold red] total path combinations allowed without MFA (evaluated {evaluated:,} of {space_size:,}).\n")
+        console.print(
+            f"  [red]⚠️[/red] Discovered [bold red]{len(sweep_gaps)}[/bold red] total path combinations allowed without MFA (evaluated {evaluated:,} of {space_size:,}).\n"
+        )
     else:
-        console.print(f"\n  [green]✓[/green] No MFA-bypass paths identified via Cartesian sweep ({evaluated:,} combinations evaluated).\n")
+        console.print(
+            f"\n  [green]✓[/green] No MFA-bypass paths identified via Cartesian sweep ({evaluated:,} combinations evaluated).\n"
+        )
 
     # 6. Disabled or Report-Only Policies
     if disabled_policies:
@@ -2135,7 +2416,6 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
         console.print(tbl)
 
     # ── Executive Summary ────────────────────────────────────────────────────
-    from rich.panel import Panel
     n_critical = sum(1 for f in detector_findings if f.severity == "CRITICAL")
     n_high = sum(1 for f in detector_findings if f.severity == "HIGH")
     n_medium = sum(1 for f in detector_findings if f.severity == "MEDIUM")
@@ -2152,16 +2432,22 @@ def cmd_check_ca_bypasses(state: ShellState, args: list[str]) -> None:
 
     if n_critical > 0 or n_high > 0:
         summary_lines.append("")
-        summary_lines.append("[bold red]⚠ ACTION REQUIRED:[/bold red] Critical or High findings detected. Run [cyan]info check-ca-bypasses[/cyan] for remediation workflow.")
+        summary_lines.append(
+            "[bold red]⚠ ACTION REQUIRED:[/bold red] Critical or High findings detected. Run [cyan]info check-ca-bypasses[/cyan] for remediation workflow."
+        )
 
-    console.print(Panel(
-        "\n".join(summary_lines),
-        title="[bold white]CA Gap Analysis — Executive Summary[/bold white]",
-        border_style="bold green",
-        padding=(1, 2),
-    ))
+    console.print(
+        Panel(
+            "\n".join(summary_lines),
+            title="[bold white]CA Gap Analysis — Executive Summary[/bold white]",
+            border_style="bold green",
+            padding=(1, 2),
+        )
+    )
 
-    console.print("\n[bold green]✓[/bold green] Analysis complete. Target these exclusions during credential mapping and lateral movement.")
+    console.print(
+        "\n[bold green]✓[/bold green] Analysis complete. Target these exclusions during credential mapping and lateral movement."
+    )
 
 
 def cmd_raw(state: ShellState, args: list[str]) -> None:
@@ -2207,6 +2493,7 @@ def cmd_ask(state: ShellState, args: list[str]) -> None:
 
     try:
         from rich.markdown import Markdown
+
         from quantum_mechanic.agent.orchestrator import AgentOrchestrator
     except ImportError:
         console.print("\n[red]✗ Agent Dependencies Missing[/red]")
@@ -2222,7 +2509,9 @@ def cmd_ask(state: ShellState, args: list[str]) -> None:
         except Exception as e:
             if "api key" in str(e).lower() or "anthropic" in str(e).lower():
                 console.print("\n[red]✗ Anthropic API Key Missing[/red]")
-                console.print("  Please set the [bold cyan]ANTHROPIC_API_KEY[/bold cyan] environment variable.")
+                console.print(
+                    "  Please set the [bold cyan]ANTHROPIC_API_KEY[/bold cyan] environment variable."
+                )
                 return
             console.print(f"\n[red]✗ Agent Error:[/red] {e}")
             return
@@ -2241,69 +2530,59 @@ def cmd_activity(state: ShellState, args: list[str]) -> None:
     opts = _parse_opts(args)
     limit = int(opts.get("limit", 50))
     level = opts.get("level")
-    
+
     # Filter by tech ID if provided (first positional arg)
     tech_id = None
     if args and not args[0].startswith("--"):
         tech_id = args[0]
 
-    logs = state.workspace.list_activity_log(
-        technique_id=tech_id,
-        level=level,
-        limit=limit
-    )
+    logs = state.workspace.list_activity_log(technique_id=tech_id, level=level, limit=limit)
 
     if not logs:
         console.print("  [dim]No activity log entries found.[/dim]")
         return
 
-    from rich.table import Table
     from rich import box
+    from rich.table import Table
 
     pager_ctx = console.pager(styles=True) if os.environ.get("TERM") != "dumb" else nullcontext()
     with pager_ctx:
         tbl = Table(
-            title=f"Activity Log - {state.workspace.name}",
-            box=box.SIMPLE,
-            header_style="bold cyan"
+            title=f"Activity Log - {state.workspace.name}", box=box.SIMPLE, header_style="bold cyan"
         )
         tbl.add_column("Timestamp", style="dim")
         tbl.add_column("Technique", style="cyan")
         tbl.add_column("Level")
         tbl.add_column("Message")
 
-        _LEVEL_STYLES = {
-            "DEBUG":   "dim",
-            "INFO":    "white",
+        level_styles = {
+            "DEBUG": "dim",
+            "INFO": "white",
             "SUCCESS": "bold green",
             "WARNING": "bold yellow",
-            "ERROR":   "bold red",
+            "ERROR": "bold red",
         }
 
         # Reverse to show chronological order in the pager
         for log in reversed(logs):
             lvl = log["level"].upper()
-            style = _LEVEL_STYLES.get(lvl, "white")
-            ts = log["timestamp"][11:19] # Show HH:MM:SS
-            
-            tbl.add_row(
-                ts,
-                log["technique_id"],
-                f"[{style}]{lvl}[/{style}]",
-                log["message"]
-            )
-        
+            style = level_styles.get(lvl, "white")
+            ts = log["timestamp"][11:19]  # Show HH:MM:SS
+
+            tbl.add_row(ts, log["technique_id"], f"[{style}]{lvl}[/{style}]", log["message"])
+
         console.print(tbl)
 
 
 def _show_check_ca_bypasses_help() -> None:
     """Display comprehensive help for the check-ca-bypasses command."""
     from rich import box
-    from rich.panel import Panel
     from rich.table import Table
 
     console.print("\n[bold white]COMMAND: check-ca-bypasses[/bold white]")
-    console.print("  [dim]Analyze Conditional Access policy database for bypass opportunities.[/dim]\n")
+    console.print(
+        "  [dim]Analyze Conditional Access policy database for bypass opportunities.[/dim]\n"
+    )
 
     intel = [
         "[bold cyan]Category:[/bold cyan]   Post-Exploitation Analysis",
@@ -2338,13 +2617,33 @@ def _show_check_ca_bypasses_help() -> None:
     det_tbl.add_column("What It Catches")
 
     detectors = [
-        ("CRITICAL", "Legacy Auth Allowed", "Policies allowing ExchangeActiveSync/Other without blocking"),
-        ("HIGH", "Device Code Flow Not Blocked", "No policy blocks deviceCodeFlow — phishing via device code"),
+        (
+            "CRITICAL",
+            "Legacy Auth Allowed",
+            "Policies allowing ExchangeActiveSync/Other without blocking",
+        ),
+        (
+            "HIGH",
+            "Device Code Flow Not Blocked",
+            "No policy blocks deviceCodeFlow — phishing via device code",
+        ),
         ("HIGH", "FOCI App Exclusion", "Excluded apps share token families with protected apps"),
         ("HIGH", "Break-Glass Over-Exclusion", "Accounts excluded from ALL enabled policies"),
-        ("HIGH", "Vulnerable 'OR' Grant", "MFA + weaker control with OR operator — attacker picks the weak path"),
-        ("MEDIUM", "Weak MFA Strength", "Generic MFA instead of phishing-resistant Authentication Strength"),
-        ("MEDIUM", "Platform Gaps", "Policies targeting specific platforms — bypass via User-Agent spoofing"),
+        (
+            "HIGH",
+            "Vulnerable 'OR' Grant",
+            "MFA + weaker control with OR operator — attacker picks the weak path",
+        ),
+        (
+            "MEDIUM",
+            "Weak MFA Strength",
+            "Generic MFA instead of phishing-resistant Authentication Strength",
+        ),
+        (
+            "MEDIUM",
+            "Platform Gaps",
+            "Policies targeting specific platforms — bypass via User-Agent spoofing",
+        ),
         ("MEDIUM", "No Workload Identity CA", "No CA policies protect Service Principals"),
         ("MEDIUM", "Guest Coverage Gap", "All Users policy excludes guests without fallback"),
         ("MEDIUM", "Session Hijack Risk", "Persistent Browser: always without Token Protection"),
@@ -2386,6 +2685,7 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
     # No args → list commands from registry.
     if not args:
         from quantum_mechanic.shell import formatters
+
         formatters.format_help_menu(COMMANDS, command_help_registry=COMMAND_HELP)
         return
 
@@ -2412,7 +2712,9 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
 
     # --- Existing technique-rendering code preserved verbatim below ---
     m = registered.metadata
-    safe_label = "[green]Safe (Read-Only)[/green]" if m.safe else "[red]Impact (Modifies State)[/red]"
+    safe_label = (
+        "[green]Safe (Read-Only)[/green]" if m.safe else "[red]Impact (Modifies State)[/red]"
+    )
 
     console.print(f"\n[bold white]MODULE: {m.id}[/bold white]")
     console.print(f"  [dim]{m.description}[/dim]\n")
@@ -2422,7 +2724,7 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
         f"[bold cyan]MITRE ID:[/bold cyan]  {m.mitre_id or '—'}",
         f"[bold cyan]Providers:[/bold cyan] {', '.join(m.providers) if m.providers else 'unauthenticated'}",
         f"[bold cyan]Severity:[/bold cyan]  {m.severity.upper()}",
-        f"[bold cyan]Risk Profile:[/bold cyan] {safe_label}"
+        f"[bold cyan]Risk Profile:[/bold cyan] {safe_label}",
     ]
     for line in intel:
         console.print(f"  {line}")
@@ -2431,6 +2733,7 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
 
     if m.parameters:
         from rich.table import Table
+
         param_table = Table(box=None, padding=(0, 2), show_header=True)
         param_table.add_column("Option", style="bold yellow")
         param_table.add_column("Format", style="dim")
@@ -2461,7 +2764,7 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
             if idx == -1:
                 return []
             end = src.find("\n#\n", idx)
-            block = src[idx:end if end != -1 else idx + 800]
+            block = src[idx : end if end != -1 else idx + 800]
             lines = []
             for ln in block.splitlines():
                 stripped = ln.lstrip("# ").rstrip()
@@ -2483,7 +2786,7 @@ def cmd_help(state: ShellState, args: list[str]) -> None:
                     console.print(f"  [dim]{ln}[/dim]")
             console.print()
     except Exception:
-        pass
+        logger.debug("Failed to render technique usage examples")
 
 
 def _render_command_help(h: CommandHelp) -> None:
@@ -2526,6 +2829,7 @@ def _render_command_help(h: CommandHelp) -> None:
 def cmd_report(state: ShellState, args: list[str]) -> None:
     """Render the engagement narrative inline in the terminal using Rich tables."""
     import json
+
     from rich.panel import Panel
     from rich.table import Table
     from rich.tree import Tree
@@ -2541,15 +2845,20 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
         ws_name = info.get("name", "Unknown Workspace")
 
         from datetime import UTC, datetime
+
         now_str = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
         creds_all = transport.list_credentials()
-        providers = ", ".join(sorted({c.get("provider", "unknown").upper() for c in creds_all})) or "none"
-        
-        console.print(Panel(
-            f"[bold white]Attack Path — {ws_name}[/bold white]\n"
-            f"[dim]Updated: {now_str}   Providers: {providers}[/dim]",
-            style="blue",
-        ))
+        providers = (
+            ", ".join(sorted({c.get("provider", "unknown").upper() for c in creds_all})) or "none"
+        )
+
+        console.print(
+            Panel(
+                f"[bold white]Attack Path — {ws_name}[/bold white]\n"
+                f"[dim]Updated: {now_str}   Providers: {providers}[/dim]",
+                style="blue",
+            )
+        )
 
         console.print("\n[bold cyan]Credential Chain[/bold cyan]")
         console.print("[dim]How each identity was obtained:[/dim]\n")
@@ -2566,8 +2875,10 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
                     obtained_via = c.get("obtained_via")
                     obtained = f" ← {obtained_via}" if obtained_via else ""
                     status = c.get("status", "unknown")
-                    status_style = "red" if status == "expired" else (
-                        "yellow" if status == "expiring" else "green"
+                    status_style = (
+                        "red"
+                        if status == "expired"
+                        else ("yellow" if status == "expiring" else "green")
                     )
                     label = (
                         f"[bold]#{c.get('id')}[/bold] [{status_style}]{c.get('provider', 'unknown').upper()}[/{status_style}] "
@@ -2606,7 +2917,7 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
                 try:
                     data = json.loads(row.get("output_json", "{}"))
                     provider = (data.get("provider") or "?").upper()
-                    
+
                     # --------------------------------------------------------
                     # Extract principal identity from evidence output JSON,
                     # defaulting to credential metadata if not present.
@@ -2621,12 +2932,9 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
                         if c:
                             raw_principal = c.get("friendly_name") or c.get("principal_id")
 
-                    if raw_principal:
-                        principal = str(raw_principal).split("/")[-1]
-                    else:
-                        principal = "?"
+                    principal = str(raw_principal).split("/")[-1] if raw_principal else "?"
                 except Exception:
-                    pass
+                    logger.debug("Failed to resolve principal for report row %d", i)
                 tbl.add_row(str(i), ts, tech, provider, principal)
 
             console.print(tbl)
@@ -2636,12 +2944,12 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
         if not findings:
             console.print("  [dim]No findings recorded yet.[/dim]")
         else:
-            _SEV_STYLE = {
+            sev_style = {
                 "critical": ("🔴", "bold red"),
-                "high":     ("🟠", "bold yellow"),
-                "medium":   ("🟡", "yellow"),
-                "low":      ("🔵", "cyan"),
-                "info":     ("⚪", "dim"),
+                "high": ("🟠", "bold yellow"),
+                "medium": ("🟡", "yellow"),
+                "low": ("🔵", "cyan"),
+                "info": ("⚪", "dim"),
             }
             ftbl = Table(show_header=True, header_style="bold", box=None, padding=(0, 1))
             ftbl.add_column("ID", width=5)
@@ -2650,13 +2958,15 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
             ftbl.add_column("Provider", width=8)
             ftbl.add_column("Technique")
 
-            for f in sorted(findings, key=lambda x: (
-                {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(
-                    x.get("severity", "info").lower(), 99)
-            )):
+            for f in sorted(
+                findings,
+                key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}.get(
+                    x.get("severity", "info").lower(), 99
+                ),
+            ):
                 fid = f.get("id", "?")
                 sev = f.get("severity", "info").lower()
-                emoji, style = _SEV_STYLE.get(sev, ("⚪", "dim"))
+                emoji, style = sev_style.get(sev, ("⚪", "dim"))
                 ftbl.add_row(
                     f"F{fid:03d}" if isinstance(fid, int) else str(fid),
                     f"[{style}]{emoji} {sev.upper()}[/{style}]",
@@ -2667,8 +2977,6 @@ def cmd_report(state: ShellState, args: list[str]) -> None:
             console.print(ftbl)
 
         console.print()
-
-
 
 
 def cmd_reload(state: ShellState, args: list[str]) -> None:
@@ -2687,6 +2995,7 @@ def cmd_playbook(state: ShellState, args: list[str]) -> None:
             return
 
         from rich.table import Table
+
         tbl = Table(title="Available Playbooks", box=None)
         tbl.add_column("Name", style="bold cyan")
         tbl.add_column("Description", style="dim")
@@ -2694,6 +3003,7 @@ def cmd_playbook(state: ShellState, args: list[str]) -> None:
         for p in sorted(playbook_dir.glob("*.yaml")):
             try:
                 import yaml
+
                 with p.open("r") as f:
                     data = yaml.safe_load(f)
                     tbl.add_row(p.stem, data.get("description", "No description"))
@@ -2739,8 +3049,8 @@ def cmd_playbook(state: ShellState, args: list[str]) -> None:
         # Build runner with telemetry callback
         tech_runner = state.runner
         if not tech_runner:
-             console.print("  [red]✗[/red] Could not initialize technique runner.")
-             return
+            console.print("  [red]✗[/red] Could not initialize technique runner.")
+            return
 
         pb_runner = PlaybookRunner(tech_runner, on_event=lambda e: event_queue.put(e))
 
@@ -2763,20 +3073,29 @@ def cmd_playbook(state: ShellState, args: list[str]) -> None:
                         event = event_queue.get_nowait()
                         if event.event_type == TelemetryType.LOG:
                             color = "white"
-                            if event.level == TelemetryLevel.SUCCESS: color = "green"
-                            elif event.level == TelemetryLevel.WARNING: color = "yellow"
-                            elif event.level == TelemetryLevel.ERROR: color = "red"
+                            if event.level == TelemetryLevel.SUCCESS:
+                                color = "green"
+                            elif event.level == TelemetryLevel.WARNING:
+                                color = "yellow"
+                            elif event.level == TelemetryLevel.ERROR:
+                                color = "red"
 
                             prefix = "    "
                             # If the message looks like a technique starting, add extra spacing
                             if "Starting technique" in (event.message or ""):
-                                live.console.print(f"\n  [bold white]─[/bold white] [cyan]{event.message}[/cyan]")
+                                live.console.print(
+                                    f"\n  [bold white]─[/bold white] [cyan]{event.message}[/cyan]"
+                                )
                             else:
                                 live.console.print(f"{prefix}[{color}]{event.message}[/{color}]")
                         elif event.event_type == TelemetryType.DISCOVERY:
-                            live.console.print(f"    [bold green]✓[/bold green] Discovered: [dim]{event.message}[/dim]")
+                            live.console.print(
+                                f"    [bold green]✓[/bold green] Discovered: [dim]{event.message}[/dim]"
+                            )
                         elif event.event_type == TelemetryType.FINDING:
-                            live.console.print(f"    [bold red]![/bold red] Finding: [bold]{event.message}[/bold]")
+                            live.console.print(
+                                f"    [bold red]![/bold red] Finding: [bold]{event.message}[/bold]"
+                            )
                     except queue.Empty:
                         break
 
@@ -2793,7 +3112,9 @@ def cmd_playbook(state: ShellState, args: list[str]) -> None:
         if _exc[0] is not None:
             raise _exc[0]
 
-        console.print(f"  [bold green]✓[/bold green] Playbook '[bold]{name}[/bold]' finished. {len(_results)} techniques executed.")
+        console.print(
+            f"  [bold green]✓[/bold green] Playbook '[bold]{name}[/bold]' finished. {len(_results)} techniques executed."
+        )
         return
 
     console.print("  Usage: playbook [list|run <name>]", style="yellow")
@@ -2809,10 +3130,25 @@ def cmd_acquire(state: ShellState, args: list[str]) -> None:
 
     if not args:
         console.print("  Usage: acquire <provider> <method> [options]", style="yellow")
-        console.print("    acquire entra device_code [--tenant <tid>] [--client <id>] [--resource <url>]")
-        console.print("    acquire entra ropc --username <upn> --password <pw> [--tenant <tid>]")
+        console.print(
+            "    acquire entra device_code [--tenant <tid>] [--client <id>]"
+            " [--scope <perm> | --bundle <name>]"
+        )
+        console.print(
+            "    acquire entra interactive [--tenant <tid>] [--client <id>]"
+            " [--scope <perm> | --bundle <name>]"
+        )
+        console.print(
+            "    acquire entra ropc --username <upn> --password <pw>"
+            " [--tenant <tid>]"
+        )
         console.print("    acquire entra refresh [--tenant <tid>] [--resource <url>]")
-        console.print("    acquire entra arm                                  Pivot to Azure ARM via FOCI")
+        console.print(
+            "    acquire entra arm"
+            "                                  Pivot to Azure ARM via FOCI"
+        )
+        console.print()
+        console.print("  Bundles: basic-graph, ca-read, pim-read, entra-admin-read")
         return
 
     provider = args[0].lower()
@@ -2893,20 +3229,20 @@ def _capture_gcp_token() -> dict[str, Any]:
     import google.auth
     from google.auth.transport.requests import Request
 
-    live, project = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
+    live, project = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
     live.refresh(Request())
     captured_principal = (
-        getattr(live, "service_account_email", None)
-        or getattr(live, "_account", None)
-        or "unknown"
+        getattr(live, "service_account_email", None) or getattr(live, "_account", None) or "unknown"
     )
     return {
         "method": "captured_token",
         "access_token": live.token,
         "captured_principal": captured_principal,
         "project_id": project or "",
+        # The real token expiry, captured at import time — GCPAuthProvider
+        # uses this instead of fabricating an arbitrary one, so the stored
+        # credential's freshness actually reflects the live token's lifetime.
+        "expiry": live.expiry.isoformat() if live.expiry else None,
     }
 
 
@@ -2932,7 +3268,7 @@ COMMANDS: dict[str, Any] = {
     "acquire": cmd_acquire,
     "export": cmd_export,
     "help": cmd_help,
-    "info": cmd_help,        # alias: `info escalation/assume_role_chain`
+    "info": cmd_help,  # alias: `info escalation/assume_role_chain`
 }
 
 
@@ -2977,7 +3313,6 @@ COMMAND_HELP: dict[str, CommandHelp] = {
             "workspace load test",
         ],
     ),
-
     # --- credentials ---
     "import": CommandHelp(
         name="import",
@@ -3031,7 +3366,10 @@ COMMAND_HELP: dict[str, CommandHelp] = {
         name="creds",
         category="credentials",
         synopsis="List or manage workspace credentials",
-        description="Shows imported credentials and lets you delete them by ID.",
+        description=(
+            "Shows imported credentials, renders per-credential detail with "
+            "`creds <id>`, and lets you delete them by ID."
+        ),
         subcommands=[
             SubcommandHelp(
                 name="delete",
@@ -3044,7 +3382,7 @@ COMMAND_HELP: dict[str, CommandHelp] = {
             FlagHelp(name="--provider", value="<name>", synopsis="Filter by provider"),
             FlagHelp(name="--active", synopsis="Show only active credentials"),
         ],
-        examples=["creds", "creds --provider aws", "creds delete 2"],
+        examples=["creds", "creds 2", "creds --provider aws", "creds delete 2"],
     ),
     "use": CommandHelp(
         name="use",
@@ -3066,20 +3404,27 @@ COMMAND_HELP: dict[str, CommandHelp] = {
         synopsis="Acquire a new Entra credential interactively",
         description=(
             "Drives device-code or browser flows to obtain Entra tokens. "
-            "--client accepts a short alias instead of a raw client GUID."
+            "--client accepts a short alias instead of a raw client GUID. "
+            "--bundle requests a named scope set (pim-read, ca-read, etc.)."
         ),
         subcommands=[
             SubcommandHelp(
                 name="entra device_code",
                 synopsis="Interactive device-code login",
-                args="[--client <id>] [--resource <url>] [--tenant <id>]",
-                example="acquire entra device_code --client graph-cli",
+                args=(
+                    "[--client <id>] [--tenant <id>] "
+                    "[--scope <perm> | --bundle <name>]"
+                ),
+                example="acquire entra device_code --bundle pim-read",
             ),
             SubcommandHelp(
                 name="entra interactive",
                 synopsis="Browser-based OAuth login (auth code + PKCE)",
-                args="[--tenant <id>] [--client <id>] [--resource <url>] [--timeout <secs>]",
-                example="acquire entra interactive --tenant contoso.onmicrosoft.com",
+                args=(
+                    "[--tenant <id>] [--client <id>] "
+                    "[--scope <perm> | --bundle <name>]"
+                ),
+                example="acquire entra interactive --bundle pim-read",
             ),
             SubcommandHelp(
                 name="entra arm",
@@ -3091,8 +3436,7 @@ COMMAND_HELP: dict[str, CommandHelp] = {
                 name="--client",
                 value="<id>",
                 synopsis=(
-                    "Client GUID, or a short alias: office | vs-legacy | "
-                    "az-cli | az-ps | graph-cli"
+                    "Client GUID, or a short alias: office | vs-legacy | az-cli | az-ps | graph-cli"
                 ),
             ),
         ],
@@ -3116,7 +3460,6 @@ COMMAND_HELP: dict[str, CommandHelp] = {
             'azurehound list -j "$(cat token.txt)" -t <tenant-id> az-ad -o azurehound-ad.json',
         ],
     ),
-
     # --- techniques ---
     "techniques": CommandHelp(
         name="techniques",
@@ -3156,8 +3499,8 @@ COMMAND_HELP: dict[str, CommandHelp] = {
         description="Runs the named technique against the active credential.",
         flags=[
             FlagHelp(
-                name="--dry-run",
-                synopsis="Simulate without making changes (where supported)",
+                name="--safe",
+                synopsis="Validate without state changes (where supported)",
             ),
             FlagHelp(
                 name="--param",
@@ -3180,7 +3523,6 @@ COMMAND_HELP: dict[str, CommandHelp] = {
         ),
         examples=["reload"],
     ),
-
     # --- playbooks ---
     "playbook": CommandHelp(
         name="playbook",
@@ -3203,7 +3545,6 @@ COMMAND_HELP: dict[str, CommandHelp] = {
         ],
         examples=["playbook list", "playbook run aws_quick_recon"],
     ),
-
     # --- evidence / reporting ---
     "loot": CommandHelp(
         name="loot",
@@ -3249,7 +3590,6 @@ COMMAND_HELP: dict[str, CommandHelp] = {
         synopsis="Render an engagement narrative",
         description="Prints the credential chain, technique timeline, and findings inline.",
     ),
-
     # --- advanced ---
     "ask": CommandHelp(
         name="ask",
@@ -3277,15 +3617,13 @@ COMMAND_HELP: dict[str, CommandHelp] = {
         ),
         examples=["check-ca-bypasses"],
     ),
-
     # --- shell / meta ---
     "help": CommandHelp(
         name="help",
         category="shell",
         synopsis="Show command help or technique documentation",
         description=(
-            "With no args, lists all commands. With a name, "
-            "shows that command's full help."
+            "With no args, lists all commands. With a name, shows that command's full help."
         ),
         examples=["help", "help creds", "help discovery/whoami"],
     ),

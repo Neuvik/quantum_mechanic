@@ -15,9 +15,8 @@ license notice, attribution, and redistribution requirements.
 
 ## 🚀 Quick Start: Start from a Nearby Technique
 
-The public repository does not ship the private scaffolding helpers. Start by
-copying a nearby technique that matches your provider and tactic, then rename
-it and adjust the metadata:
+Start by copying a nearby technique that matches your provider and tactic, then
+rename it and adjust the metadata:
 
 - `src/quantum_mechanic/techniques/<tactic>/<name>.py`
 - `tests/unit/techniques/<tactic>/test_<name>.py`
@@ -73,10 +72,75 @@ This is where your attack logic lives. You use the `ctx` object to interact with
 Before opening a Pull Request, ensure your module passes these checks:
 
 1. **Unit Tests**: Place tests in `tests/unit/techniques/`. Mock all cloud responses.
-2. **Public validation**: Run `uv run pytest tests/unit/ -q` or `make test`
-3. **Safety**: If your module changes state (creates/deletes resources), it **must** be marked `safe=False`.
-4. **Coverage**: Add focused tests for the code you changed. The repository's
+2. **Public validation**: Run `uv run pytest tests/unit/ -q` or `make test`.
+3. **Lint**: Run `uv run ruff check src/ tests/`.
+4. **Safety**: If your module changes state (creates/deletes resources), it **must** be marked `safe=False`.
+5. **Coverage**: Add focused tests for the code you changed. The repository's
    broader coverage gate is maintained separately from this quick-start path.
+
+## Pull Requests
+
+Open a focused pull request with a clear description of the operator impact,
+tests run, and any safety considerations. Keep unrelated formatting or
+refactoring changes separate. Maintainers review changes for correctness,
+operator safety, documentation, and public-release boundary compatibility.
+
+---
+
+## 🕸 Code Graph (`qm graph`)
+
+QM ships a static **code graph** of every module, class, function, and method,
+plus their call/dispatch edges. Two views are committed at the repo root and are
+the source of truth for "does this already exist?" and "what's dead?":
+
+- **`graph.json`** — the machine-readable graph (nodes + edges), deterministic
+  and diffable.
+- **`FUNCTION_INDEX.md`** — the human-readable index rendered from that graph
+  (consult it before writing new helpers, to avoid duplication).
+
+### After you change code
+
+Run:
+
+```bash
+qm graph build      # or: python tools/gen_function_index.py (retired shim → same thing)
+```
+
+This re-emits **both** `graph.json` and `FUNCTION_INDEX.md` from a static AST
+pass. It is deterministic — commit the refreshed artifacts alongside your code.
+(The old `tools/gen_function_index.py` scraper has been retired; it now just
+forwards to `qm graph build`.)
+
+### Refreshing reachability (optional, local only)
+
+```bash
+qm graph trace      # SLOW — runs tests/unit + tests/integration under coverage + the in-binary tracer
+```
+
+`qm graph trace` produces **`trace.json`**, a dynamic overlay (coverage-derived
+"covered" nodes + observed call edges from the traced test scope). It is **slow**
+(it runs the suite twice), **non-deterministic**, and therefore **git-ignored** —
+never commit it. Query subcommands (`qm graph unused|callers|callees|path|
+undocumented`) automatically merge `trace.json` when it is present beside
+`graph.json`.
+
+### ⚠️ Honest caveat on `qm graph unused`
+
+`qm graph unused` lists nodes that are **statically unreachable from any
+entrypoint AND not covered by the traced scope**. Read it as **strong candidates
+for review, NOT an authoritative dead-code list**:
+
+- **Untested-live code** appears as "unused": a function only reached through a
+  path the (mocked, scope-limited) test suite never exercises still shows up.
+  `chaos_e2e` is excluded from the trace scope, so anything only reached there
+  looks unused.
+- **Resolver gaps** appear as "unused": a call the static builder can't resolve
+  (dynamic dispatch, reflection, string-keyed registries) leaves its target
+  looking unreachable unless the tracer happened to observe it.
+
+So: triage the list, don't bulk-delete it. A node is a confident deletion
+candidate only when it is unused **and** you've confirmed by hand that nothing
+reaches it dynamically.
 
 ---
 
@@ -84,4 +148,6 @@ Before opening a Pull Request, ensure your module passes these checks:
 
 QM aims for four-cloud coverage. If you implement a technique for one cloud (e.g., AWS), consider if an analogous service exists on Azure, GCP, or OCI. We prefer modules that follow universal cloud patterns over provider-specific quirks.
 
-**Questions?** Check the internal `docs/` directory or join our development discussions.
+**Questions?** Open a GitHub issue with the relevant provider, command or
+technique, and a sanitized reproduction. Do not include credentials, customer
+names, tenant identifiers, or other engagement data.

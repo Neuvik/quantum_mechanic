@@ -16,10 +16,11 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,19 @@ CAP_ERRORS: dict[str, str] = {
 }
 
 
+# ----------------------------------------------------------------
+# EntraToken.token_type values — OAuth2/Entra spec vocabulary, not
+# secrets. Named here so comparisons don't repeat the literal string
+# at every call site (and so a variable/constant named "token_*"
+# assigned a plain string doesn't read as a hardcoded credential).
+# ----------------------------------------------------------------
+OAUTH_ACCESS = "access_token"
+OAUTH_REFRESH = "refresh_token"
+PRT_WITH_KEY = "prt_with_key"
+PRT_COOKIE = "prt_cookie"
+ESTS_COOKIE = "ests_cookie"
+
+
 @dataclass
 class EntraToken:
     """A single token artifact — access token, refresh token, cookie, or raw PRT."""
@@ -70,12 +84,12 @@ class EntraToken:
     # "access_token" | "refresh_token" | "prt_cookie" | "ests_cookie"
     # | "prt_with_key" | "device_cert"
     value: str
-    resource: str           # target resource URI; empty for PRT material
+    resource: str  # target resource URI; empty for PRT material
     tenant_id: str | None = None
     client_id: str | None = None
     expires_at: datetime | None = None
     device_claims: bool = False  # True if token carries deviceid / join_type claims
-    foci: bool = False           # True if this refresh token is a FOCI family member
+    foci: bool = False  # True if this refresh token is a FOCI family member
     scopes: list[str] = field(default_factory=list)
     raw_claims: dict[str, Any] = field(default_factory=dict)
 
@@ -87,13 +101,13 @@ class EntraToken:
     def is_expired(self) -> bool:
         if self.expires_at is None:
             return False
-        return datetime.now(timezone.utc) >= self.expires_at
+        return datetime.now(UTC) >= self.expires_at
 
     @property
     def minutes_remaining(self) -> float | None:
         if self.expires_at is None:
             return None
-        delta = self.expires_at - datetime.now(timezone.utc)
+        delta = self.expires_at - datetime.now(UTC)
         return delta.total_seconds() / 60
 
 
@@ -103,10 +117,10 @@ class EntraDeviceState:
 
     device_id: str
     device_cert_pem: str
-    transport_key_pem: str   # RSA private key used to sign PRT requests
+    transport_key_pem: str  # RSA private key used to sign PRT requests
     tenant_id: str
     enrolled_at: datetime
-    join_type: str           # "azureADJoined" | "hybridAzureADJoined"
+    join_type: str  # "azureADJoined" | "hybridAzureADJoined"
 
 
 @dataclass
@@ -147,7 +161,7 @@ class EntraTokenStore:
     def _valid_access_token(self, resource: str) -> EntraToken | None:
         for tok in self.tokens:
             if (
-                tok.token_type == "access_token"
+                tok.token_type == OAUTH_ACCESS
                 and not tok.is_expired
                 and _resource_matches(tok.resource, resource)
             ):
@@ -157,29 +171,32 @@ class EntraTokenStore:
     def foci_refresh_token(self) -> EntraToken | None:
         """Return the first valid FOCI refresh token."""
         for tok in self.tokens:
-            if tok.token_type == "refresh_token" and tok.foci and not tok.is_expired:
+            if tok.token_type == OAUTH_REFRESH and tok.foci and not tok.is_expired:
                 return tok
         return None
 
     def refresh_token(self, resource: str | None = None) -> EntraToken | None:
         """Return the best refresh token, optionally scoped to a resource."""
         for tok in self.tokens:
-            if tok.token_type == "refresh_token" and not tok.is_expired:
-                if resource is None or _resource_matches(tok.resource, resource):
-                    return tok
+            if (
+                tok.token_type == OAUTH_REFRESH
+                and not tok.is_expired
+                and (resource is None or _resource_matches(tok.resource, resource))
+            ):
+                return tok
         return None
 
     def prt_material(self) -> EntraToken | None:
         """Return stored raw PRT + session key material if present."""
         for tok in self.tokens:
-            if tok.token_type == "prt_with_key":
+            if tok.token_type == PRT_WITH_KEY:
                 return tok
         return None
 
     def prt_cookie(self) -> EntraToken | None:
         """Return the most recent PRT cookie (x-ms-RefreshTokenCredential)."""
         for tok in self.tokens:
-            if tok.token_type == "prt_cookie" and not tok.is_expired:
+            if tok.token_type == PRT_COOKIE and not tok.is_expired:
                 return tok
         return None
 
@@ -201,15 +218,15 @@ class EntraTokenStore:
         for tok in self.tokens:
             if tok.is_expired:
                 continue
-            if tok.token_type == "prt_with_key":
+            if tok.token_type == PRT_WITH_KEY:
                 labels.append("PRT")
-            elif tok.token_type == "prt_cookie":
+            elif tok.token_type == PRT_COOKIE:
                 labels.append("PRTcookie")
-            elif tok.token_type == "refresh_token" and tok.foci:
+            elif tok.token_type == OAUTH_REFRESH and tok.foci:
                 labels.append("FOCI")
-            elif tok.token_type == "refresh_token":
+            elif tok.token_type == OAUTH_REFRESH:
                 labels.append("RT")
-            elif tok.token_type == "access_token":
+            elif tok.token_type == OAUTH_ACCESS:
                 if "management.azure.com" in tok.resource:
                     labels.append("ARM")
                 elif "graph.microsoft.com" in tok.resource:
@@ -219,9 +236,9 @@ class EntraTokenStore:
                 else:
                     labels.append("AT")
         seen: list[str] = []
-        for l in labels:
-            if l not in seen:
-                seen.append(l)
+        for label in labels:
+            if label not in seen:
+                seen.append(label)
         return " ".join(seen) if seen else "no valid tokens"
 
     def token_details(self) -> list[dict[str, Any]]:
@@ -234,7 +251,7 @@ class EntraTokenStore:
         """
         out: list[dict[str, Any]] = []
         for tok in self.tokens:
-            claims = decode_jwt_claims(tok.value) if tok.token_type == "access_token" else {}
+            claims = decode_jwt_claims(tok.value) if tok.token_type == OAUTH_ACCESS else {}
             # scp = delegated (space-separated), roles = application (list)
             scp = claims.get("scp") or ""
             scopes = scp.split() if isinstance(scp, str) else []
@@ -242,13 +259,13 @@ class EntraTokenStore:
             if isinstance(roles, str):
                 roles = [roles]
 
-            if tok.token_type == "prt_with_key":
+            if tok.token_type == PRT_WITH_KEY:
                 kind = "PRT"
-            elif tok.token_type == "prt_cookie":
+            elif tok.token_type == PRT_COOKIE:
                 kind = "PRTcookie"
-            elif tok.token_type == "refresh_token":
+            elif tok.token_type == OAUTH_REFRESH:
                 kind = "FOCI RT" if tok.foci else "RT"
-            elif tok.token_type == "access_token":
+            elif tok.token_type == OAUTH_ACCESS:
                 if "management.azure.com" in (tok.resource or ""):
                     kind = "ARM AT"
                 elif "graph.microsoft.com" in (tok.resource or ""):
@@ -260,18 +277,20 @@ class EntraTokenStore:
             else:
                 kind = tok.token_type
 
-            out.append({
-                "kind": kind,
-                "resource": tok.resource or "",
-                "token_type": tok.token_type,
-                "foci": bool(tok.foci),
-                "client_id": tok.client_id or "",
-                "expires_at": tok.expires_at.isoformat() if tok.expires_at else None,
-                "minutes_remaining": tok.minutes_remaining,
-                "is_expired": tok.is_expired,
-                "scopes": scopes,
-                "roles": list(roles),
-            })
+            out.append(
+                {
+                    "kind": kind,
+                    "resource": tok.resource or "",
+                    "token_type": tok.token_type,
+                    "foci": bool(tok.foci),
+                    "client_id": tok.client_id or "",
+                    "expires_at": tok.expires_at.isoformat() if tok.expires_at else None,
+                    "minutes_remaining": tok.minutes_remaining,
+                    "is_expired": tok.is_expired,
+                    "scopes": scopes,
+                    "roles": list(roles),
+                }
+            )
         return out
 
     def add_token(self, token: EntraToken) -> None:
@@ -282,15 +301,16 @@ class EntraTokenStore:
         by including cookie_name in the deduplication key.
         """
         cookie_name = None
-        if token.token_type == "ests_cookie":
+        if token.token_type == ESTS_COOKIE:
             cookie_name = token.raw_claims.get("cookie_name")
         self.tokens = [
-            t for t in self.tokens
+            t
+            for t in self.tokens
             if not (
                 t.token_type == token.token_type
                 and t.resource == token.resource
                 and (
-                    token.token_type != "ests_cookie"
+                    token.token_type != ESTS_COOKIE
                     or t.raw_claims.get("cookie_name") == cookie_name
                 )
             )
@@ -378,6 +398,7 @@ class EntraTokenStore:
 # JWT utilities
 # ----------------------------------------------------------------
 
+
 def decode_jwt_claims(token: str) -> dict[str, Any]:
     """Decode JWT payload without signature verification."""
     try:
@@ -392,11 +413,10 @@ def decode_jwt_claims(token: str) -> dict[str, Any]:
             return json.loads(decoded)
         except json.JSONDecodeError as je:
             logger.debug("Failed to decode JWT payload JSON: %s (Body: %s)", je, decoded[:100])
-            raise ValueError(f"Invalid JWT payload JSON: {je}")
+            raise ValueError(f"Invalid JWT payload JSON: {je}") from je
     except Exception as e:
         logger.debug("JWT decode failed: %s", e)
         return {}
-
 
 
 def token_from_jwt(
@@ -410,10 +430,8 @@ def token_from_jwt(
 
     expires_at = None
     if "exp" in claims:
-        try:
-            expires_at = datetime.fromtimestamp(claims["exp"], tz=timezone.utc)
-        except (ValueError, OSError):
-            pass
+        with contextlib.suppress(ValueError, OSError):
+            expires_at = datetime.fromtimestamp(claims["exp"], tz=UTC)
 
     scopes: list[str] = []
     if "scp" in claims:
@@ -425,6 +443,7 @@ def token_from_jwt(
 
     # FOCI detection: token is from a known FOCI client
     from quantum_mechanic.providers.entra.foci import FOCI_CLIENT_IDS
+
     detected_client = client_id or claims.get("appid") or claims.get("azp")
     is_foci = detected_client in FOCI_CLIENT_IDS if detected_client else False
 
@@ -446,6 +465,7 @@ def token_from_jwt(
 # Resource matching (handle trailing slashes and scope suffixes)
 # ----------------------------------------------------------------
 
+
 def _resource_matches(stored: str, requested: str) -> bool:
     return stored.rstrip("/") == requested.rstrip("/")
 
@@ -453,6 +473,7 @@ def _resource_matches(stored: str, requested: str) -> bool:
 # ----------------------------------------------------------------
 # Serialization helpers
 # ----------------------------------------------------------------
+
 
 def _token_to_dict(tok: EntraToken) -> dict[str, Any]:
     return {

@@ -13,6 +13,7 @@ that EAM classification uses, e.g. `RoleManagement.ReadWrite.Directory`).
 The resolver caches the per-resource lookup in memory for the session so
 each Graph SP is fetched at most once per technique run.
 """
+
 from __future__ import annotations
 
 import logging

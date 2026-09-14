@@ -57,14 +57,24 @@ class FindingStore:
         """
         if self._use_orm:
             return self._add_orm(
-                technique_id=technique_id, tactic=tactic, title=title,
-                severity=severity, provider=provider, description=description,
-                evidence=evidence, mitre_id=mitre_id,
+                technique_id=technique_id,
+                tactic=tactic,
+                title=title,
+                severity=severity,
+                provider=provider,
+                description=description,
+                evidence=evidence,
+                mitre_id=mitre_id,
             )
         return self._add_sqlite(
-            technique_id=technique_id, tactic=tactic, title=title,
-            severity=severity, provider=provider, description=description,
-            evidence=evidence, mitre_id=mitre_id,
+            technique_id=technique_id,
+            tactic=tactic,
+            title=title,
+            severity=severity,
+            provider=provider,
+            description=description,
+            evidence=evidence,
+            mitre_id=mitre_id,
         )
 
     def _add_sqlite(self, **kwargs) -> int:
@@ -155,10 +165,7 @@ class FindingStore:
         from quantum_mechanic.core.orm.tables import FindingRow
 
         with self._SessionLocal() as session:
-            stmt = (
-                select(FindingRow)
-                .where(FindingRow.workspace_id == self._workspace_id)
-            )
+            stmt = select(FindingRow).where(FindingRow.workspace_id == self._workspace_id)
             rows = session.scalars(stmt).all()
 
         # Replicate the SQL CASE severity ORDER BY in Python.

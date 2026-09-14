@@ -117,8 +117,7 @@ def format_defender_roles(result: Any) -> None:
     severity="high",
     safe=True,
     description=(
-        "Enumerate Microsoft Defender XDR Unified RBAC assignments "
-        "with EAM tier classification."
+        "Enumerate Microsoft Defender XDR Unified RBAC assignments with EAM tier classification."
     ),
     formatter=format_defender_roles,
     loot_schema=LOOT_SCHEMA,
@@ -198,15 +197,17 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
                     or principal.get("id")
                 )
 
-                results.append({
-                    "tier": tier,
-                    "role_name": role_name,
-                    "role_id": role_def.get("id"),
-                    "principal_name": p_name,
-                    "principal_id": principal.get("id"),
-                    "principal_type": p_type,
-                    "assignment_id": a.get("id"),
-                })
+                results.append(
+                    {
+                        "tier": tier,
+                        "role_name": role_name,
+                        "role_id": role_def.get("id"),
+                        "principal_name": p_name,
+                        "principal_id": principal.get("id"),
+                        "principal_type": p_type,
+                        "assignment_id": a.get("id"),
+                    }
+                )
     except GraphError as e:
         logger.info("Defender roles enumeration returned %s: %s", type(e).__name__, e)
         return graph_error_to_result(e, assignments=[])

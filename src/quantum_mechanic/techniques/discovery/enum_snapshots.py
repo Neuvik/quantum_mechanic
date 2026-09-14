@@ -65,15 +65,15 @@ logger = logging.getLogger(__name__)
 
 LOOT_ITEMS_KEY = "snapshots"
 LOOT_SCHEMA = [
-    ("resource_id",   "Resource ID",   "bold cyan"),
-    ("type",          "Type",          "dim"),
-    ("description",   "Description",   "dim"),
-    ("state",         "State",         "dim"),
-    ("size_gb",       "Size (GB)",     "dim"),
-    ("encrypted",     "Encrypted",     "dim"),
-    ("public",        "Public",        "bold red"),
-    ("region",        "Region",        "dim"),
-    ("start_time",    "Created",       "dim"),
+    ("resource_id", "Resource ID", "bold cyan"),
+    ("type", "Type", "dim"),
+    ("description", "Description", "dim"),
+    ("state", "State", "dim"),
+    ("size_gb", "Size (GB)", "dim"),
+    ("encrypted", "Encrypted", "dim"),
+    ("public", "Public", "bold red"),
+    ("region", "Region", "dim"),
+    ("start_time", "Created", "dim"),
 ]
 
 
@@ -254,9 +254,13 @@ def _exec_authenticated(ctx: ExecutionContext) -> dict[str, Any]:
         return regions
 
     if is_external_recon:
-        ctx.info(f"Authenticated external scan — {len(regions)} region(s) for public snapshots in target account...")
+        ctx.info(
+            f"Authenticated external scan — {len(regions)} region(s) for public snapshots in target account..."
+        )
     else:
-        ctx.info(f"Authenticated internal scan — {len(regions)} region(s) for owned snapshots and AMIs...")
+        ctx.info(
+            f"Authenticated internal scan — {len(regions)} region(s) for owned snapshots and AMIs..."
+        )
 
     snapshots: list[dict[str, Any]] = []
     for region in regions:
@@ -289,9 +293,16 @@ def _exec_authenticated(ctx: ExecutionContext) -> dict[str, Any]:
 
 # Regions used when no credential is available to call DescribeRegions.
 _COMMON_REGIONS = [
-    "us-east-1", "us-east-2", "us-west-1", "us-west-2",
-    "eu-west-1", "eu-west-2", "eu-central-1",
-    "ap-southeast-1", "ap-southeast-2", "ap-northeast-1",
+    "us-east-1",
+    "us-east-2",
+    "us-west-1",
+    "us-west-2",
+    "eu-west-1",
+    "eu-west-2",
+    "eu-central-1",
+    "ap-southeast-1",
+    "ap-southeast-2",
+    "ap-northeast-1",
 ]
 
 
@@ -328,6 +339,7 @@ def _resolve_regions(ctx: ExecutionContext, session=None) -> list[str] | dict:
 # EBS snapshot enumeration
 # ----------------------------------------------------------------
 
+
 def _enum_snapshots(ec2, region: str) -> list[dict[str, Any]]:
     results = []
     try:
@@ -336,19 +348,21 @@ def _enum_snapshots(ec2, region: str) -> list[dict[str, Any]]:
             for snap in page.get("Snapshots", []):
                 snap_id = snap.get("SnapshotId", "")
                 is_public = _snapshot_is_public(ec2, snap_id)
-                results.append({
-                    "resource_id": snap_id,
-                    "type": "snapshot",
-                    "description": snap.get("Description", ""),
-                    "state": snap.get("State", ""),
-                    "size_gb": snap.get("VolumeSize"),
-                    "encrypted": snap.get("Encrypted", False),
-                    "public": is_public,
-                    "region": region,
-                    "start_time": str(snap.get("StartTime", "")),
-                    "volume_id": snap.get("VolumeId", ""),
-                    "owner_id": snap.get("OwnerId", ""),
-                })
+                results.append(
+                    {
+                        "resource_id": snap_id,
+                        "type": "snapshot",
+                        "description": snap.get("Description", ""),
+                        "state": snap.get("State", ""),
+                        "size_gb": snap.get("VolumeSize"),
+                        "encrypted": snap.get("Encrypted", False),
+                        "public": is_public,
+                        "region": region,
+                        "start_time": str(snap.get("StartTime", "")),
+                        "volume_id": snap.get("VolumeId", ""),
+                        "owner_id": snap.get("OwnerId", ""),
+                    }
+                )
     except Exception as e:
         logger.debug("describe_snapshots failed in %s: %s", region, e)
     return results
@@ -373,31 +387,35 @@ def _snapshot_is_public(ec2, snapshot_id: str) -> bool:
 # AMI enumeration
 # ----------------------------------------------------------------
 
+
 def _enum_amis(ec2, region: str) -> list[dict[str, Any]]:
     results = []
     try:
         resp = ec2.describe_images(Owners=["self"])
         for image in resp.get("Images", []):
-            results.append({
-                "resource_id": image.get("ImageId", ""),
-                "type": "ami",
-                "description": image.get("Description") or image.get("Name", ""),
-                "state": image.get("State", ""),
-                "size_gb": sum(
-                    (m.get("Ebs", {}).get("VolumeSize") or 0)
-                    for m in image.get("BlockDeviceMappings", [])
-                ) or None,
-                "encrypted": all(
-                    m.get("Ebs", {}).get("Encrypted", False)
-                    for m in image.get("BlockDeviceMappings", [])
-                    if m.get("Ebs")
-                ),
-                "public": image.get("Public", False),
-                "region": region,
-                "start_time": image.get("CreationDate", ""),
-                "owner_id": image.get("OwnerId", ""),
-                "architecture": image.get("Architecture", ""),
-            })
+            results.append(
+                {
+                    "resource_id": image.get("ImageId", ""),
+                    "type": "ami",
+                    "description": image.get("Description") or image.get("Name", ""),
+                    "state": image.get("State", ""),
+                    "size_gb": sum(
+                        (m.get("Ebs", {}).get("VolumeSize") or 0)
+                        for m in image.get("BlockDeviceMappings", [])
+                    )
+                    or None,
+                    "encrypted": all(
+                        m.get("Ebs", {}).get("Encrypted", False)
+                        for m in image.get("BlockDeviceMappings", [])
+                        if m.get("Ebs")
+                    ),
+                    "public": image.get("Public", False),
+                    "region": region,
+                    "start_time": image.get("CreationDate", ""),
+                    "owner_id": image.get("OwnerId", ""),
+                    "architecture": image.get("Architecture", ""),
+                }
+            )
     except Exception as e:
         logger.debug("describe_images failed in %s: %s", region, e)
     return results
@@ -406,6 +424,7 @@ def _enum_amis(ec2, region: str) -> list[dict[str, Any]]:
 # ----------------------------------------------------------------
 # External recon (public) enumeration
 # ----------------------------------------------------------------
+
 
 def _enum_snapshots_public(ec2, region: str, account_id: str, search: str) -> list[dict[str, Any]]:
     """Find publicly restorable snapshots using authenticated API calls."""
@@ -420,18 +439,20 @@ def _enum_snapshots_public(ec2, region: str, account_id: str, search: str) -> li
         paginator = ec2.get_paginator("describe_snapshots")
         for page in paginator.paginate(**kwargs):
             for snap in page.get("Snapshots", []):
-                results.append({
-                    "resource_id": snap.get("SnapshotId", ""),
-                    "type": "snapshot",
-                    "description": snap.get("Description", ""),
-                    "state": snap.get("State", ""),
-                    "size_gb": snap.get("VolumeSize"),
-                    "encrypted": snap.get("Encrypted", False),
-                    "public": True,
-                    "region": region,
-                    "start_time": str(snap.get("StartTime", "")),
-                    "owner_id": snap.get("OwnerId", ""),
-                })
+                results.append(
+                    {
+                        "resource_id": snap.get("SnapshotId", ""),
+                        "type": "snapshot",
+                        "description": snap.get("Description", ""),
+                        "state": snap.get("State", ""),
+                        "size_gb": snap.get("VolumeSize"),
+                        "encrypted": snap.get("Encrypted", False),
+                        "public": True,
+                        "region": region,
+                        "start_time": str(snap.get("StartTime", "")),
+                        "owner_id": snap.get("OwnerId", ""),
+                    }
+                )
     except Exception as e:
         logger.debug("public describe_snapshots failed in %s: %s", region, e)
     return results
@@ -452,28 +473,29 @@ def _enum_amis_public(ec2, region: str, account_id: str, search: str) -> list[di
 
         resp = ec2.describe_images(**kwargs)
         for image in resp.get("Images", []):
-            results.append({
-                "resource_id": image.get("ImageId", ""),
-                "type": "ami",
-                "description": image.get("Description") or image.get("Name", ""),
-                "state": image.get("State", ""),
-                "size_gb": sum(
-                    (m.get("Ebs", {}).get("VolumeSize") or 0)
-                    for m in image.get("BlockDeviceMappings", [])
-                ) or None,
-                "encrypted": all(
-                    m.get("Ebs", {}).get("Encrypted", False)
-                    for m in image.get("BlockDeviceMappings", [])
-                    if m.get("Ebs")
-                ),
-                "public": True,
-                "region": region,
-                "start_time": image.get("CreationDate", ""),
-                "owner_id": image.get("OwnerId", ""),
-                "architecture": image.get("Architecture", ""),
-            })
+            results.append(
+                {
+                    "resource_id": image.get("ImageId", ""),
+                    "type": "ami",
+                    "description": image.get("Description") or image.get("Name", ""),
+                    "state": image.get("State", ""),
+                    "size_gb": sum(
+                        (m.get("Ebs", {}).get("VolumeSize") or 0)
+                        for m in image.get("BlockDeviceMappings", [])
+                    )
+                    or None,
+                    "encrypted": all(
+                        m.get("Ebs", {}).get("Encrypted", False)
+                        for m in image.get("BlockDeviceMappings", [])
+                        if m.get("Ebs")
+                    ),
+                    "public": True,
+                    "region": region,
+                    "start_time": image.get("CreationDate", ""),
+                    "owner_id": image.get("OwnerId", ""),
+                    "architecture": image.get("Architecture", ""),
+                }
+            )
     except Exception as e:
         logger.debug("public describe_images failed in %s: %s", region, e)
     return results
-
-

@@ -24,19 +24,16 @@ from quantum_mechanic.core.store.assets import AssetStore
 from quantum_mechanic.core.store.credentials import CredentialStore
 from quantum_mechanic.core.store.evidence import EvidenceStore
 from quantum_mechanic.core.store.findings import FindingStore
-from quantum_mechanic.core.store.principals import PrincipalStore
-
-logger = logging.getLogger(__name__)
-
-
-from quantum_mechanic.core.store.models import (  # noqa: F401 — re-exported for callers
+from quantum_mechanic.core.store.models import (
     Account,
     Agent,
-    ApiLogEntry,
     Credential,
     Principal,
     Task,
 )
+from quantum_mechanic.core.store.principals import PrincipalStore
+
+logger = logging.getLogger(__name__)
 
 
 class CredentialMismatchError(RuntimeError):
@@ -44,6 +41,7 @@ class CredentialMismatchError(RuntimeError):
 
     Defense-in-depth check for credential-isolation regressions.
     """
+
     pass
 
 
@@ -71,14 +69,14 @@ class Workspace:
         # Workspace delegates every domain method here, keeping
         # the ORM migration (AR-3) domain-by-domain.
         # --------------------------------------------------------
-        self._accounts    = AccountStore(db, self.id)
-        self._activity    = ActivityStore(db, self.id)
-        self._agents      = AgentStore(db, self.id)
-        self._assets      = AssetStore(db, self.id)
+        self._accounts = AccountStore(db, self.id)
+        self._activity = ActivityStore(db, self.id)
+        self._agents = AgentStore(db, self.id)
+        self._assets = AssetStore(db, self.id)
         self._credentials = CredentialStore(db, self.id)
-        self._evidence    = EvidenceStore(db, self.id)
-        self._findings    = FindingStore(db, self.id)
-        self._principals  = PrincipalStore(db, self.id)
+        self._evidence = EvidenceStore(db, self.id)
+        self._findings = FindingStore(db, self.id)
+        self._principals = PrincipalStore(db, self.id)
 
     def on_agent_update(self, cb) -> None:
         """Register a callback for agent updates (used by SSE)."""
@@ -99,7 +97,6 @@ class Workspace:
     ) -> list[dict]:
         """Return activity log entries."""
         return self._activity.list(technique_id=technique_id, level=level, limit=limit)
-
 
     @classmethod
     def create(cls, name: str, workspace_dir: Path | None = None) -> Workspace:
@@ -185,10 +182,26 @@ class Workspace:
         except _json.JSONDecodeError:
             secret_data = {}
 
+        session = None
         try:
             session = provider.authenticate(secret_data)
             result = provider.whoami(session)
         except Exception as e:
+            if cred.provider == "entra" and session is not None:
+                from quantum_mechanic.providers.entra.token_store import EntraTokenStore
+
+                if isinstance(session, EntraTokenStore) and session.refresh_token() is not None:
+                    # Recovery mode: identity check is skipped. The operator
+                    # must run 'acquire entra refresh' to get a valid Graph AT,
+                    # which will re-establish identity on the next whoami.
+                    logger.warning(
+                        "Entra credential %d: whoami failed (%s) but a refresh "
+                        "token is available. Activating in recovery mode — run "
+                        "'acquire entra refresh' to restore Graph access.",
+                        cred_id,
+                        e,
+                    )
+                    return
             raise CredentialMismatchError(
                 f"Credential id={cred_id} ({cred.provider}, "
                 f"{cred.friendly_name!r}) could not be loaded for verification: {e}"
@@ -222,9 +235,11 @@ class Workspace:
             except Exception as e:
                 # Non-fatal — verification just stays best-effort next time.
                 import logging as _logging
+
                 _logging.getLogger(__name__).debug(
                     "Could not persist recovered principal_id for cred %d: %s",
-                    cred_id, e,
+                    cred_id,
+                    e,
                 )
             return
 
@@ -273,7 +288,6 @@ class Workspace:
         """Update a task with its final result from the agent."""
         return self._agents.process_task_response(task_id, success, output, error)
 
-
     # ================================================================
     # Account operations — delegates to AccountStore
     # ================================================================
@@ -283,16 +297,25 @@ class Workspace:
         return self._accounts.add(account)
 
     def upsert_account(
-        self, id: str, provider: str, name: str | None = None,
-        account_type: str = "account", parent_id: str | None = None,
-        metadata: str = "{}"
+        self,
+        account_id: str,
+        provider: str,
+        name: str | None = None,
+        account_type: str = "account",
+        parent_id: str | None = None,
+        metadata: str = "{}",
     ) -> None:
         """Convenience method to add or update a cloud account."""
-        return self._accounts.add(Account(
-            id=id, provider=provider, name=name or id,
-            account_type=account_type, parent_id=parent_id,
-            metadata=metadata
-        ))
+        return self._accounts.add(
+            Account(
+                id=account_id,
+                provider=provider,
+                name=name or account_id,
+                account_type=account_type,
+                parent_id=parent_id,
+                metadata=metadata,
+            )
+        )
 
     def get_account(self, account_id: str) -> Account | None:
         """Retrieve an account by ID."""
@@ -330,11 +353,16 @@ class Workspace:
     ) -> int:
         """Store a new credential. Delegates to CredentialStore."""
         return self._credentials.add(
-            provider=provider, credential_type=credential_type,
-            secret_data=secret_data, friendly_name=friendly_name,
-            principal_id=principal_id, account_id=account_id,
-            derived_from_id=derived_from_id, expires_at=expires_at,
-            auto_refresh=auto_refresh, obtained_via=obtained_via,
+            provider=provider,
+            credential_type=credential_type,
+            secret_data=secret_data,
+            friendly_name=friendly_name,
+            principal_id=principal_id,
+            account_id=account_id,
+            derived_from_id=derived_from_id,
+            expires_at=expires_at,
+            auto_refresh=auto_refresh,
+            obtained_via=obtained_via,
             raw_data=raw_data,
         )
 
@@ -375,8 +403,6 @@ class Workspace:
         """Link a credential to a discovered principal."""
         return self._credentials.update_principal(cred_id, principal_id, friendly_name)
 
-
-
     # ================================================================
     # API log — delegates to EvidenceStore
     # ================================================================
@@ -395,10 +421,15 @@ class Workspace:
     ) -> int:
         """Append an API call to the audit log."""
         return self._evidence.log_api_call(
-            provider=provider, action=action, credential_id=credential_id,
-            service=service, request_params=request_params,
-            response_status=response_status, response_summary=response_summary,
-            technique_id=technique_id, duration_ms=duration_ms,
+            provider=provider,
+            action=action,
+            credential_id=credential_id,
+            service=service,
+            request_params=request_params,
+            response_status=response_status,
+            response_summary=response_summary,
+            technique_id=technique_id,
+            duration_ms=duration_ms,
         )
 
     # ================================================================
@@ -440,9 +471,14 @@ class Workspace:
     ) -> int:
         """Persist a security finding. Delegates to FindingStore."""
         return self._findings.add(
-            technique_id=technique_id, tactic=tactic, title=title,
-            severity=severity, provider=provider, description=description,
-            evidence=evidence, mitre_id=mitre_id,
+            technique_id=technique_id,
+            tactic=tactic,
+            title=title,
+            severity=severity,
+            provider=provider,
+            description=description,
+            evidence=evidence,
+            mitre_id=mitre_id,
         )
 
     def clear_findings(self, technique_id: str) -> None:
@@ -482,8 +518,10 @@ class Workspace:
 
     @property
     def workspace_dir(self) -> Path:
-        """Parent directory of the workspace database."""
-        return self.db.db_path.parent
+        """Per-workspace artifact directory alongside the workspace database."""
+        artifact_dir = self.db.db_path.parent / self.name
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        return artifact_dir
 
     def list_agent_ids(self) -> list[str]:
         """Return all agent IDs (used by transport/server for listing)."""

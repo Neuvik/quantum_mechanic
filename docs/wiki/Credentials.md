@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc2 |
-| **Issued** | 2026-08-04 |
-| **Last reviewed** | 2026-08-04 |
+| **Version** | v1.0.0 |
+| **Issued** | 2026-09-14 |
+| **Last reviewed** | 2026-09-14 |
 | **Status** | Active |
 
 ---
@@ -22,7 +22,7 @@ qm[ws]> import aws --profile prod-readonly
 
 ```
 qm[ws]> import azure --default                               # Azure CLI session
-qm[ws]> import azure --client-id <id> --client-secret <s> --tenant <t>
+qm[ws]> import azure --client-id <id> --client-secret <s> --tenant-id <tenant-id>
 ```
 
 ### GCP
@@ -101,4 +101,6 @@ qm[ws]> raw 1
 
 | Rev | Date | Change |
 |-----|------|--------|
+| v1.0.0 | 2026-09-14 | General availability release. |
+| v1.0-rc3 | 2026-08-07 | Corrected the Azure service-principal tenant flag. |
 | v1.0-rc2 | 2026-08-04 | Public credential guide aligned to the shipped AWS, Azure, Entra, GCP, and OCI command set |

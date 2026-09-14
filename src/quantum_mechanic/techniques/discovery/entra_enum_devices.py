@@ -40,7 +40,7 @@ from quantum_mechanic.providers.entra.graph import (
     graph_error_to_result,
     graph_list,
 )
-from quantum_mechanic.providers.entra.token_store import GRAPH, EntraTokenStore
+from quantum_mechanic.providers.entra.token_store import GRAPH, OAUTH_REFRESH, EntraTokenStore
 
 _DEVICES_URL = (
     "https://graph.microsoft.com/v1.0/devices"
@@ -108,7 +108,8 @@ def _format_entra_enum_devices(result: Any) -> None:
     for d in devices[:100]:
         compliant = d.get("isCompliant")
         compliant_str = (
-            "[green]✓[/green]" if compliant
+            "[green]✓[/green]"
+            if compliant
             else ("[red]✗[/red]" if compliant is False else "[dim]?[/dim]")
         )
         managed = d.get("isManaged")
@@ -129,9 +130,7 @@ def _format_entra_enum_devices(result: Any) -> None:
     providers=["entra"],
     severity="info",
     safe=True,
-    description=(
-        "Enumerate Entra ID registered and joined devices, including compliance status."
-    ),
+    description=("Enumerate Entra ID registered and joined devices, including compliance status."),
     formatter=_format_entra_enum_devices,
     loot_schema=LOOT_SCHEMA,
     loot_items_key=LOOT_ITEMS_KEY,
@@ -143,7 +142,7 @@ def execute(ctx: ExecutionContext) -> dict[str, Any]:
     if token is None:
         return {"error": "No Graph token available."}
 
-    if token.token_type == "refresh_token":
+    if token.token_type == OAUTH_REFRESH:
         token = foci_expand(store, GRAPH)
         if token is None:
             return {"error": "FOCI expansion for Graph failed."}

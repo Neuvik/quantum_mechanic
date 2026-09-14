@@ -177,7 +177,7 @@ class TestTechniqueDecorator:
     def test_exploit_pack_flag_propagates(self):
         """exploit_pack=True is stored in metadata."""
         @technique(
-            technique_id="initial_access/lois",
+            technique_id="initial_access/example_exploit",
             tactic="initial-access",
             providers=["any"],
             exploit_pack=True,

@@ -36,9 +36,13 @@ class PrincipalStore:
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                principal.id, principal.provider, principal.account_id,
-                principal.principal_type, principal.friendly_name,
-                int(principal.is_admin_equivalent), principal.raw_data,
+                principal.id,
+                principal.provider,
+                principal.account_id,
+                principal.principal_type,
+                principal.friendly_name,
+                int(principal.is_admin_equivalent),
+                principal.raw_data,
             ),
         )
         self._db.commit()
@@ -52,8 +56,10 @@ class PrincipalStore:
         if row is None:
             return None
         return Principal(
-            id=row["id"], provider=row["provider"],
-            account_id=row["account_id"], principal_type=row["principal_type"],
+            id=row["id"],
+            provider=row["provider"],
+            account_id=row["account_id"],
+            principal_type=row["principal_type"],
             friendly_name=row["friendly_name"],
             is_admin_equivalent=bool(row["is_admin_equivalent"]),
             raw_data=row["raw_data"],
@@ -70,8 +76,10 @@ class PrincipalStore:
             rows = self._db.fetchall("SELECT * FROM principals ORDER BY friendly_name")
         return [
             Principal(
-                id=r["id"], provider=r["provider"],
-                account_id=r["account_id"], principal_type=r["principal_type"],
+                id=r["id"],
+                provider=r["provider"],
+                account_id=r["account_id"],
+                principal_type=r["principal_type"],
                 friendly_name=r["friendly_name"],
                 is_admin_equivalent=bool(r["is_admin_equivalent"]),
                 raw_data=r["raw_data"],

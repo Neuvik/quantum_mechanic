@@ -46,7 +46,7 @@ def _make_jwt(claims: dict) -> str:
 
 
 def _store_with_foci_rt() -> EntraTokenStore:
-    store = EntraTokenStore(tenant_id="tenant-1", user_upn="alice@x.com")
+    store = EntraTokenStore(tenant_id="tenant-1", user_upn="alice@x.example")
     store.add_token(EntraToken(
         token_type="refresh_token",
         value="rt-value",
@@ -85,7 +85,7 @@ def test_v2_scope_composes_permission_correctly():
 
 def test_no_foci_rt_returns_no_rt_status():
     """OUTCOME: A store with no FOCI RT → status='no_rt', no HTTP calls."""
-    empty = EntraTokenStore(tenant_id="t", user_upn="x@y.com")
+    empty = EntraTokenStore(tenant_id="t", user_upn="x@y.example")
     result = try_acquire_scope(empty, "User.Read.All")
     assert result.status == "no_rt"
     assert result.token is None
