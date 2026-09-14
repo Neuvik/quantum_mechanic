@@ -1,6 +1,6 @@
 [project]
 name = "quantum-mechanic"
-version = "1.0rc3"
+version = "1.0.0"
 description = "Offensive security assessment framework"
 keywords = ["cloud-security", "offensive-security", "aws", "azure", "entra", "gcp", "oci"]
 authors = [

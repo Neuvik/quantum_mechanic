@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc3 |
-| **Issued** | 2026-08-07 |
-| **Last reviewed** | 2026-08-07 |
+| **Version** | v1.0.0 |
+| **Issued** | 2026-09-14 |
+| **Last reviewed** | 2026-09-14 |
 | **Status** | Active |
 
 The `report` command renders the full engagement narrative inline in the terminal.
@@ -61,5 +61,6 @@ Severity levels: `critical` · `high` · `medium` · `low` · `info`
 
 | Rev | Date | Change |
 |-----|------|--------|
+| v1.0.0 | 2026-09-14 | General availability release. |
 | v1.0-rc3 | 2026-08-07 | Corrected the technique ID in the timeline example. |
 | v1.0-rc2 | 2026-08-04 | Public report guide aligned to the shipped inline engagement narrative |

@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc3 |
-| **Issued** | 2026-08-07 |
-| **Last reviewed** | 2026-08-07 |
+| **Version** | v1.0.0 |
+| **Issued** | 2026-09-14 |
+| **Last reviewed** | 2026-09-14 |
 | **Status** | Active |
 
 Complete reference for every command available in the `qm` interactive shell.
@@ -108,5 +108,6 @@ The report shows:
 
 | Rev | Date | Change |
 |-----|------|--------|
+| v1.0.0 | 2026-09-14 | General availability release. |
 | v1.0-rc3 | 2026-08-07 | Corrected the Azure service-principal tenant flag and updated release metadata. |
 | v1.0-rc2 | 2026-08-04 | Shell command reference aligned to the shipped public command set, including Entra acquire/export, playbooks, loot, activity, and CA bypass analysis |

@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc3 |
-| **Issued** | 2026-08-07 |
-| **Last reviewed** | 2026-08-07 |
+| **Version** | v1.0.0 |
+| **Issued** | 2026-09-14 |
+| **Last reviewed** | 2026-09-14 |
 | **Status** | Active |
 
 Quantum Mechanic supports AI agents in two distinct ways:
@@ -35,9 +35,9 @@ The agent:
 2. Reasons over what has been discovered so far
 3. Suggests techniques to run or attack paths to pursue
 
-### Limitations in v1.0-rc3
+### Limitations in v1.0.0
 - The agent answers based on what has already been discovered in the workspace. It does not autonomously run techniques.
-- Autonomous engagement orchestration is not part of the public `v1.0-rc3`
+- Autonomous engagement orchestration is not part of the public `v1.0.0`
   release.
 
 ---
@@ -70,5 +70,6 @@ When a technique runs (without `--raw`), the output is wrapped in a token-effici
 
 | Rev | Date | Change |
 |-----|------|--------|
+| v1.0.0 | 2026-09-14 | General availability release. |
 | v1.0-rc3 | 2026-08-07 | Updated release metadata for the rc3 package. |
 | v1.0-rc2 | 2026-08-04 | Public release candidate documentation aligned to the shipped optional `agent` extra and `qm --agent` interface |

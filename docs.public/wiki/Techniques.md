@@ -2,16 +2,16 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc3 |
-| **Issued** | 2026-08-07 |
-| **Last reviewed** | 2026-08-07 |
+| **Version** | v1.0.0 |
+| **Issued** | 2026-09-14 |
+| **Last reviewed** | 2026-09-14 |
 | **Status** | Active |
 
 ---
 
-## Browsing Techniques
+## Browsing
 
-List all techniques available for the active provider:
+`techniques` shows everything loaded for the active provider:
 
 ```
 qm[ws][aws:1]> techniques
@@ -22,11 +22,11 @@ qm[ws][aws:1]> techniques
   discovery/enum_iam        discovery       aws az gcp o  ✓     Enumerate IAM permissions
 ```
 
-The table is filtered by your active provider — techniques for other clouds are loaded but hidden until you switch credentials.
+Techniques for other clouds are loaded but hidden until you switch credentials.
 
 ---
 
-## Running Techniques
+## Running
 
 ### Basic run
 ```
@@ -53,20 +53,13 @@ qm[ws][aws:1]> run escalation/assume_role_chain --safe
 ```
 
 ### Execution Metrics
-Every time a technique runs, Quantum Mechanic records operational telemetry alongside the result data:
-- `api_calls` — The exact number of cloud API HTTP requests made during the run.
-- `duration_ms` — The total elapsed execution time in milliseconds.
-
-These metrics are visible in the JSON output when using the `qm --agent` API and are permanently logged into the workspace evidence pipeline.
+Every run records `api_calls` (the exact number of cloud API HTTP requests) and `duration_ms` (total elapsed time). Both are visible in `qm --agent` JSON output and permanently logged into the workspace evidence pipeline.
 
 ---
 
-## Reading Technique Documentation
+## Inline Docs
 
-Every technique ships with inline metadata and source-level header comments.
-In the public `v1.0-rc3` shell, `help <technique>` shows the concise
-operator-facing summary: technique ID, tactic, MITRE mapping, providers,
-safety, parameters, and examples.
+`help <technique>` shows the operator-facing summary: ID, tactic, MITRE mapping, providers, safety mode, parameters, and examples.
 
 ```
 qm[ws]> help discovery/enum_iam
@@ -97,5 +90,6 @@ qm[ws]> reload
 
 | Rev | Date | Change |
 |-----|------|--------|
+| v1.0.0 | 2026-09-14 | General availability release. |
 | v1.0-rc3 | 2026-08-07 | Corrected the safe-check example and updated release metadata. |
 | v1.0-rc2 | 2026-08-04 | Public technique guide aligned to the shipped shell output, including execution metrics and current command behavior |

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 from unittest.mock import MagicMock, patch
 
 from websocket._exceptions import WebSocketBadStatusException
@@ -33,7 +34,8 @@ def test_build_launch_plan_linux_chrome_uses_tmp_profile():
     """OUTCOME: Linux Chrome guidance uses a separate tmp profile dir."""
     plan = build_launch_plan(browser="chrome", os_name="linux")
     assert plan.command.startswith("google-chrome ")
-    assert "--user-data-dir=/tmp/qm-chrome-cdp" in plan.command
+    expected_profile = f"--user-data-dir={tempfile.gettempdir()}/qm-chrome-cdp"
+    assert expected_profile in plan.command
 
 
 def test_build_launch_plan_windows_edge_uses_powershell_style_command():

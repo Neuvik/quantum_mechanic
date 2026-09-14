@@ -2,10 +2,44 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc3 |
-| **Issued** | 2026-08-07 |
-| **Last reviewed** | 2026-08-07 |
+| **Version** | v1.0.0 |
+| **Issued** | 2026-09-14 |
+| **Last reviewed** | 2026-09-14 |
 | **Status** | Active |
+
+---
+
+## v1.0.0 — 2026-09-14
+
+General availability release. Quantum Mechanic ships a cross-cloud offensive
+security framework covering AWS, Azure, Entra ID, GCP, and OCI with 46
+techniques spanning discovery, escalation, lateral movement, collection,
+credential access, exfiltration, and persistence.
+
+### What ships in this release
+
+- Interactive `qm` shell
+- Headless `qm --agent` JSON mode
+- Workspace management
+- Credential import and activation across AWS, Azure, Entra, GCP, and OCI
+- 46 techniques within the public release boundary
+- Entra identity pipeline: FOCI expansion, scope bundles, CA-bypass detection,
+  browser CDP session import
+- Evidence capture and inline `report`
+- Optional local RAG support through the `agent` extra
+
+### Install
+
+```bash
+uv sync
+uv run qm
+```
+
+Optional local RAG support:
+
+```bash
+uv sync --extra agent
+```
 
 ---
 
@@ -78,5 +112,6 @@ uv sync --extra agent
 
 | Rev | Date | Change |
 |-----|------|--------|
+| v1.0.0 | 2026-09-14 | General availability release. |
 | v1.0-rc3 | 2026-08-07 | Documented rc3 release changes. |
 | v1.0-rc2 | 2026-08-04 | Public release-candidate documentation and packaging aligned to the shipped command set and optional agent extra |

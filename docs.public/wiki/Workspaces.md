@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Version** | v1.0-rc3 |
-| **Issued** | 2026-08-07 |
-| **Last reviewed** | 2026-08-07 |
+| **Version** | v1.0.0 |
+| **Issued** | 2026-09-14 |
+| **Last reviewed** | 2026-09-14 |
 | **Status** | Active |
 
 A **workspace** is a self-contained SQLite engagement database. Every credential, discovered resource, finding, and API call is stored in the workspace. You can have many workspaces — one per engagement.
@@ -58,5 +58,6 @@ qm> workspace list
 
 | Rev | Date | Change |
 |-----|------|--------|
+| v1.0.0 | 2026-09-14 | General availability release. |
 | v1.0-rc3 | 2026-08-07 | Documented configurable state and workspace locations. |
 | v1.0-rc2 | 2026-08-04 | Public workspace guide aligned to the shipped workspace-first operator flow |
