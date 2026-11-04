@@ -32,13 +32,15 @@ def format_banner() -> None:
     from quantum_mechanic import __version__
 
     banner = Text()
-    banner.append("  ██████  ███    ███\n", style="bold cyan")
-    banner.append("  ██   ██ ████  ████\n", style="bold cyan")
-    banner.append("  ██   ██ ██ ████ ██\n", style="bold cyan")
-    banner.append("  ██▄▄▄██ ██  ██  ██\n", style="bold cyan")
-    banner.append("  ███████ ██      ██\n", style="bold cyan")
+    banner.append("  ██████╗ ███╗   ███╗\n", style="bold cyan")
+    banner.append("  ██╔═══██╗████╗ ████║\n", style="bold cyan")
+    banner.append("  ██║   ██║██╔████╔██║\n", style="bold cyan")
+    banner.append("  ██║▄▄ ██║██║╚██╔╝██║\n", style="bold cyan")
+    banner.append("  ╚██████╔╝██║ ╚═╝ ██║\n", style="bold cyan")
+    banner.append("   ╚══▀▀═╝ ╚═╝     ╚═╝\n", style="bold cyan")
     banner.append(f"\n  Quantum Mechanic v{__version__}", style="bold white")
-    banner.append("\n  Cross-cloud offensive security framework\n", style="dim")
+    banner.append("\n  Cross-cloud offensive security framework", style="dim")
+    banner.append("\n  by Neuvik — https://neuvik.com\n", style="dim cyan")
     console.print(Panel(banner, border_style="cyan", expand=False))
 
 
